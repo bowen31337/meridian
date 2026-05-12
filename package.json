@@ -1,12 +1,29 @@
 {
   "name": "meridian",
   "version": "0.1.0",
-  "description": "A minimal project scaffold",
+  "description": "Extensible agent platform with persistent memory and tool integration",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "dev": "node index.js",
+    "lint": "eslint src tests examples",
+    "start": "node index.js"
   },
-  "keywords": [],
+  "keywords": [
+    "agent",
+    "memory",
+    "tools",
+    "scheduler",
+    "conversation"
+  ],
   "author": "bowen31337",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "jest": "^29.5.0",
+    "eslint": "^8.40.0",
+    "prettier": "^2.8.0"
+  },
+  "dependencies": {}
 }
