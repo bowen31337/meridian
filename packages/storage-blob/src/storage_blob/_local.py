@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import posixpath
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ._contract import BlobStore
@@ -9,7 +10,7 @@ from ._types import BlobFailure
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class LocalBlobStore(BlobStore):
@@ -53,7 +54,5 @@ class LocalBlobStore(BlobStore):
 
     async def delete(self, key: str) -> None:
         path = self._path(key)
-        try:
+        with contextlib.suppress(FileNotFoundError):
             path.unlink()
-        except FileNotFoundError:
-            pass

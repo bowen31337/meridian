@@ -3,6 +3,7 @@ Shared test fixtures for the storage-reposit conformance suite.
 
 OTel is mocked with a lightweight MockSpan / MockTracer pair.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -10,15 +11,14 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
-
 from storage_event_log import SessionEvent
 from storage_reposit._audit import AuditLog
-from storage_reposit._types import AuditLogEntry, IndexerFailure
-
+from storage_reposit._types import AuditLogEntry
 
 # ---------------------------------------------------------------------------
 # OTel mock
 # ---------------------------------------------------------------------------
+
 
 class MockSpan:
     def __init__(self) -> None:
@@ -38,7 +38,7 @@ class MockSpan:
     def record_exception(self, exc: BaseException, **_: Any) -> None:
         self.recorded_exceptions.append(exc)
 
-    def __enter__(self) -> "MockSpan":
+    def __enter__(self) -> MockSpan:
         return self
 
     def __exit__(self, *_: Any) -> bool:
@@ -87,6 +87,7 @@ def mock_reader_span(mock_reader_tracer: MockTracer) -> MockSpan:
 # Audit log capture
 # ---------------------------------------------------------------------------
 
+
 class CapturingAuditLog(AuditLog):
     def __init__(self) -> None:
         self.entries: list[AuditLogEntry] = []
@@ -103,6 +104,7 @@ def audit_log() -> CapturingAuditLog:
 # ---------------------------------------------------------------------------
 # Event handler stubs
 # ---------------------------------------------------------------------------
+
 
 class CapturingEventHandler:
     """Records every (session_id, event) pair passed to handle()."""
@@ -141,6 +143,7 @@ class FailingEventHandler:
 # ---------------------------------------------------------------------------
 # Reader stubs
 # ---------------------------------------------------------------------------
+
 
 class StubReader:
     """LocalEventLogReader substitute for ReaderRuntime tests."""

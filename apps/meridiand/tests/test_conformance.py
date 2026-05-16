@@ -10,6 +10,7 @@ Tests cover:
     successful boot calls uvicorn.run with correct kwargs;
     uvicorn failure writes audit entry and prints to stderr.
 """
+
 from __future__ import annotations
 
 import json
@@ -19,18 +20,17 @@ from unittest.mock import patch
 
 import pytest
 import yaml
-from fastapi.testclient import TestClient
-
 from core_errors import AuditLogEntry
+from fastapi.testclient import TestClient
+from meridiand.__main__ import main
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
-from meridiand._config import BindConfig, DaemonConfig, load_config
-from meridiand.__main__ import main
-
+from meridiand._config import load_config
 
 # ---------------------------------------------------------------------------
 # load_config
 # ---------------------------------------------------------------------------
+
 
 class TestLoadConfig:
     def test_parses_storage_root(self, tmp_path: Path) -> None:
@@ -55,28 +55,40 @@ class TestLoadConfig:
 
     def test_custom_bind_host_and_port(self, tmp_path: Path) -> None:
         cfg = tmp_path / "config.yaml"
-        cfg.write_text(yaml.dump({
-            "storage_root": str(tmp_path / "storage"),
-            "bind": {"host": "0.0.0.0", "port": 8080},
-        }))
+        cfg.write_text(
+            yaml.dump(
+                {
+                    "storage_root": str(tmp_path / "storage"),
+                    "bind": {"host": "0.0.0.0", "port": 8080},
+                }
+            )
+        )
         result = load_config(cfg)
         assert result.bind.host == "0.0.0.0"
         assert result.bind.port == 8080
 
     def test_unix_socket_bind(self, tmp_path: Path) -> None:
         cfg = tmp_path / "config.yaml"
-        cfg.write_text(yaml.dump({
-            "storage_root": str(tmp_path / "storage"),
-            "bind": {"socket": "/run/meridiand.sock"},
-        }))
+        cfg.write_text(
+            yaml.dump(
+                {
+                    "storage_root": str(tmp_path / "storage"),
+                    "bind": {"socket": "/run/meridiand.sock"},
+                }
+            )
+        )
         assert load_config(cfg).bind.socket == "/run/meridiand.sock"
 
     def test_custom_log_level(self, tmp_path: Path) -> None:
         cfg = tmp_path / "config.yaml"
-        cfg.write_text(yaml.dump({
-            "storage_root": str(tmp_path / "storage"),
-            "log_level": "debug",
-        }))
+        cfg.write_text(
+            yaml.dump(
+                {
+                    "storage_root": str(tmp_path / "storage"),
+                    "log_level": "debug",
+                }
+            )
+        )
         assert load_config(cfg).log_level == "debug"
 
     def test_missing_storage_root_raises(self, tmp_path: Path) -> None:
@@ -105,6 +117,7 @@ class TestLoadConfig:
 # ---------------------------------------------------------------------------
 # FileAuditLog
 # ---------------------------------------------------------------------------
+
 
 class TestFileAuditLog:
     def _entry(self, **overrides: object) -> AuditLogEntry:
@@ -179,6 +192,7 @@ class TestFileAuditLog:
 
     def test_file_mode_600(self, storage_root: Path) -> None:
         import stat
+
         log = FileAuditLog(storage_root)
         log.write(self._entry())
         mode = (storage_root / "audit.ndjson").stat().st_mode
@@ -189,19 +203,20 @@ class TestFileAuditLog:
 # create_app — lifespan
 # ---------------------------------------------------------------------------
 
+
 class TestCreateApp:
     def test_ready_logged_on_startup(
         self, storage_root: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         audit_log = FileAuditLog(storage_root)
         app = create_app(audit_log)
-        with caplog.at_level(logging.INFO, logger="meridiand"):
-            with TestClient(app):
-                pass
+        with caplog.at_level(logging.INFO, logger="meridiand"), TestClient(app):
+            pass
         assert any("meridiand ready" in r.message for r in caplog.records)
 
     def test_error_handler_installed(self, storage_root: Path) -> None:
         from core_errors import CapabilityDeniedError
+
         audit_log = FileAuditLog(storage_root)
         app = create_app(audit_log)
 
@@ -216,6 +231,7 @@ class TestCreateApp:
 # ---------------------------------------------------------------------------
 # main()
 # ---------------------------------------------------------------------------
+
 
 class TestMain:
     def _write_cfg(self, tmp_path: Path, **extra: object) -> Path:

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Callable
+from datetime import UTC, datetime
+from typing import Any
 
 from ._audit import AuditLog, NoopAuditLog
 from ._contract import EventLogWriter
@@ -19,7 +20,7 @@ class EventLogOptions:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class EventLogRuntime:
@@ -93,9 +94,7 @@ class EventLogRuntime:
             )
 
             try:
-                return await self._writer.append(
-                    session_id, event_type, data, thread_id=thread_id
-                )
+                return await self._writer.append(session_id, event_type, data, thread_id=thread_id)
             except EventLogFailure as failure:
                 self._fail(span, failure, opts, "event_log.append.failed")
                 raise

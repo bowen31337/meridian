@@ -11,14 +11,10 @@ Tests cover:
     written, correct HTTP status and JSON body returned.
   - Span lifecycle: span ended on every handler invocation.
 """
+
 from __future__ import annotations
 
-import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
 from core_errors import (
-    AuditLogEntry,
     BudgetExceededError,
     CapabilityDeniedError,
     DivergenceError,
@@ -28,6 +24,8 @@ from core_errors import (
     VaultUnauthorizedError,
     install_error_handler,
 )
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from opentelemetry.trace import StatusCode
 
 from .conftest import CapturingAuditLog, MockSpan
@@ -38,6 +36,7 @@ _TS = "2026-01-01T00:00:00+00:00"
 # ---------------------------------------------------------------------------
 # MeridianError base class
 # ---------------------------------------------------------------------------
+
 
 class TestMeridianError:
     def test_code_field(self) -> None:
@@ -73,6 +72,7 @@ class TestMeridianError:
 # ---------------------------------------------------------------------------
 # Subclasses
 # ---------------------------------------------------------------------------
+
 
 class TestCapabilityDeniedError:
     def test_code(self) -> None:
@@ -138,6 +138,7 @@ class TestDivergenceError:
 # Error envelope
 # ---------------------------------------------------------------------------
 
+
 class TestErrorEnvelope:
     def test_envelope_has_error_key(self) -> None:
         env = MeridianError(code="test_code", message="msg", timestamp=_TS).to_envelope()
@@ -163,6 +164,7 @@ class TestErrorEnvelope:
 # ---------------------------------------------------------------------------
 # Helpers for handler tests
 # ---------------------------------------------------------------------------
+
 
 def _make_app(audit: CapturingAuditLog) -> FastAPI:
     app = FastAPI()
@@ -195,24 +197,35 @@ def _make_app(audit: CapturingAuditLog) -> FastAPI:
 # Handler — HTTP status codes
 # ---------------------------------------------------------------------------
 
+
 class TestHandlerHttpStatus:
-    def test_capability_denied_returns_403(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_capability_denied_returns_403(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         client = TestClient(_make_app(audit_log), raise_server_exceptions=False)
         assert client.get("/capability-denied").status_code == 403
 
-    def test_schema_invalid_returns_422(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_schema_invalid_returns_422(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         client = TestClient(_make_app(audit_log), raise_server_exceptions=False)
         assert client.get("/schema-invalid").status_code == 422
 
-    def test_vault_unauthorized_returns_403(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_vault_unauthorized_returns_403(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         client = TestClient(_make_app(audit_log), raise_server_exceptions=False)
         assert client.get("/vault-unauthorized").status_code == 403
 
-    def test_budget_exceeded_returns_429(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_budget_exceeded_returns_429(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         client = TestClient(_make_app(audit_log), raise_server_exceptions=False)
         assert client.get("/budget-exceeded").status_code == 429
 
-    def test_divergence_returns_409(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_divergence_returns_409(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         client = TestClient(_make_app(audit_log), raise_server_exceptions=False)
         assert client.get("/divergence").status_code == 409
 
@@ -220,6 +233,7 @@ class TestHandlerHttpStatus:
 # ---------------------------------------------------------------------------
 # Handler — JSON error envelope
 # ---------------------------------------------------------------------------
+
 
 class TestHandlerEnvelope:
     def test_json_has_error_key(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
@@ -234,15 +248,21 @@ class TestHandlerEnvelope:
         client = TestClient(_make_app(audit_log), raise_server_exceptions=False)
         assert client.get("/capability-denied").json()["error"]["message"] == "denied"
 
-    def test_json_error_has_timestamp(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_json_error_has_timestamp(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         client = TestClient(_make_app(audit_log), raise_server_exceptions=False)
         assert "timestamp" in client.get("/capability-denied").json()["error"]
 
-    def test_budget_exceeded_envelope_code(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_budget_exceeded_envelope_code(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         client = TestClient(_make_app(audit_log), raise_server_exceptions=False)
         assert client.get("/budget-exceeded").json()["error"]["code"] == "budget_exceeded"
 
-    def test_divergence_envelope_code(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_divergence_envelope_code(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         client = TestClient(_make_app(audit_log), raise_server_exceptions=False)
         assert client.get("/divergence").json()["error"]["code"] == "divergence"
 
@@ -251,18 +271,23 @@ class TestHandlerEnvelope:
 # Handler — OTel telemetry
 # ---------------------------------------------------------------------------
 
+
 class TestHandlerTelemetry:
     def test_span_name(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
         client = TestClient(_make_app(audit_log), raise_server_exceptions=False)
         client.get("/capability-denied")
         assert mock_span.name == "meridian.error_handler"
 
-    def test_span_attributes_error_code(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_span_attributes_error_code(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         client = TestClient(_make_app(audit_log), raise_server_exceptions=False)
         client.get("/capability-denied")
         assert mock_span.attributes["error.code"] == "capability_denied"
 
-    def test_invocation_event_attached(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_invocation_event_attached(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         client = TestClient(_make_app(audit_log), raise_server_exceptions=False)
         client.get("/capability-denied")
         event_names = [e[0] for e in mock_span.events]
@@ -297,7 +322,9 @@ class TestHandlerTelemetry:
         client.get("/capability-denied")
         assert mock_span.ended
 
-    def test_cause_recorded_on_span(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_cause_recorded_on_span(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         orig = RuntimeError("root cause")
         app = FastAPI()
         install_error_handler(app, HandlerOptions(audit_log=audit_log))
@@ -310,7 +337,9 @@ class TestHandlerTelemetry:
         client.get("/with-cause")
         assert orig in mock_span.recorded_exceptions
 
-    def test_no_cause_no_recorded_exception(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_no_cause_no_recorded_exception(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         client = TestClient(_make_app(audit_log), raise_server_exceptions=False)
         client.get("/capability-denied")
         assert mock_span.recorded_exceptions == []
@@ -320,18 +349,23 @@ class TestHandlerTelemetry:
 # Handler — audit log
 # ---------------------------------------------------------------------------
 
+
 class TestHandlerAuditLog:
     def test_audit_entry_written(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
         client = TestClient(_make_app(audit_log), raise_server_exceptions=False)
         client.get("/capability-denied")
         assert len(audit_log.entries) == 1
 
-    def test_audit_entry_level_error(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_audit_entry_level_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         client = TestClient(_make_app(audit_log), raise_server_exceptions=False)
         client.get("/capability-denied")
         assert audit_log.entries[0].level == "error"
 
-    def test_audit_entry_event_name(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_audit_entry_event_name(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         client = TestClient(_make_app(audit_log), raise_server_exceptions=False)
         client.get("/capability-denied")
         assert audit_log.entries[0].event == "meridian.error.handled"
@@ -341,12 +375,16 @@ class TestHandlerAuditLog:
         client.get("/capability-denied")
         assert audit_log.entries[0].code == "capability_denied"
 
-    def test_audit_entry_detail_message(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_audit_entry_detail_message(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         client = TestClient(_make_app(audit_log), raise_server_exceptions=False)
         client.get("/capability-denied")
         assert audit_log.entries[0].detail == {"message": "denied"}
 
-    def test_audit_entry_per_error_type(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_audit_entry_per_error_type(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         client = TestClient(_make_app(audit_log), raise_server_exceptions=False)
         client.get("/budget-exceeded")
         assert audit_log.entries[0].code == "budget_exceeded"

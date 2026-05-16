@@ -4,6 +4,10 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 
+def _str_dict() -> dict[str, str]:
+    return {}
+
+
 @dataclass(frozen=True)
 class ChannelCapabilities:
     """Feature and resource limits declared by a channel driver."""
@@ -36,7 +40,7 @@ class SendRequest:
     content: str
     content_type: str = "text/plain"
     thread_id: str | None = None
-    metadata: dict[str, str] = field(default_factory=dict)
+    metadata: dict[str, str] = field(default_factory=_str_dict)
 
 
 @dataclass(frozen=True)

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import datetime
-from typing import Any, AsyncIterator, Literal
+from collections.abc import AsyncIterator
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -78,9 +79,7 @@ def _parse_model_ref(model_ref: str) -> tuple[str, str]:
     Raises ``RoutingError`` if the ref is not in the required two-part form.
     """
     if ":" not in model_ref:
-        raise RoutingError(
-            f"Model ref '{model_ref}' must be in 'provider_name:model_id' form."
-        )
+        raise RoutingError(f"Model ref '{model_ref}' must be in 'provider_name:model_id' form.")
     provider_name, _, model_id = model_ref.partition(":")
     return provider_name, model_id
 
@@ -110,9 +109,7 @@ def _condition_matches(cond: RoutingCondition, opts: ModelCallOpts) -> bool:
     return True
 
 
-def _find_rule(
-    policy: ModelRoutingPolicy, opts: ModelCallOpts
-) -> ModelRoutingRule | None:
+def _find_rule(policy: ModelRoutingPolicy, opts: ModelCallOpts) -> ModelRoutingRule | None:
     for rule in policy.rules:
         if rule.when is None or _condition_matches(rule.when, opts):
             return rule
@@ -144,9 +141,7 @@ def _strip_cache_control(messages: list[Message]) -> list[Message]:
     return result
 
 
-def _apply_cap_constraints(
-    opts: ModelCallOpts, caps: ProviderCapabilities
-) -> ModelCallOpts:
+def _apply_cap_constraints(opts: ModelCallOpts, caps: ProviderCapabilities) -> ModelCallOpts:
     """Return a copy of *opts* with unsupported capability flags cleared."""
     changes: dict[str, Any] = {}
 
@@ -160,10 +155,7 @@ def _apply_cap_constraints(
     if not caps.cache_control:
         needs_strip = any(
             isinstance(msg.content, list)
-            and any(
-                isinstance(b, TextBlock) and b.cache_control is not None
-                for b in msg.content
-            )
+            and any(isinstance(b, TextBlock) and b.cache_control is not None for b in msg.content)
             for msg in opts.messages
         )
         if needs_strip:
@@ -213,8 +205,7 @@ class ModelRouter:
         provider = self._providers.get(provider_name)
         if provider is None:
             raise NoProviderFoundError(
-                f"Provider '{provider_name}' not registered "
-                f"(known: {sorted(self._providers)})."
+                f"Provider '{provider_name}' not registered (known: {sorted(self._providers)})."
             )
         return provider, model_id
 
@@ -353,9 +344,7 @@ class ModelRouter:
                 async for event in gen:
                     yield event
             except Exception as exc:
-                record_provider_failure(
-                    span, exc, provider_name=provider.name, model=model_id
-                )
+                record_provider_failure(span, exc, provider_name=provider.name, model=model_id)
                 self._write_audit_failure(
                     exc, provider.name, provider.kind, model_id, opts, rule_label
                 )

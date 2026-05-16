@@ -24,10 +24,7 @@ def satisfies(required: Capability, granted: Capability) -> bool:
 
 def missing(required: CapabilitySet, granted: CapabilitySet) -> CapabilitySet:
     """Return the subset of `required` not satisfied by any element of `granted`."""
-    return frozenset(
-        req for req in required
-        if not any(satisfies(req, g) for g in granted)
-    )
+    return frozenset(req for req in required if not any(satisfies(req, g) for g in granted))
 
 
 def check_grant(required: CapabilitySet, granted: CapabilitySet) -> bool:

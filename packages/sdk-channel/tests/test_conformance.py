@@ -17,14 +17,14 @@ exercised through ChannelRuntime. The suite covers:
   - Span lifecycle: span ended on both success and failure paths.
   - Manifest loading and validation.
 """
+
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
 
 import pytest
-
+from opentelemetry.trace import StatusCode
 from sdk_channel import (
     AuditLogEntry,
     ChannelCapabilities,
@@ -40,14 +40,13 @@ from sdk_channel import (
     load_manifest,
     validate_manifest,
 )
-from opentelemetry.trace import StatusCode
 
 from .conftest import CapturingAuditLog, MockSpan
-
 
 # ---------------------------------------------------------------------------
 # Stub driver
 # ---------------------------------------------------------------------------
+
 
 class StubDriver(ChannelDriver):
     kind = "test.stub"
@@ -95,6 +94,7 @@ class StubDriver(ChannelDriver):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def make_start(kind: str = "test.stub") -> StartRequest:
     return StartRequest(channel_id="chan-1", channel_kind=kind, session_id="sess-1")
 
@@ -113,7 +113,9 @@ def make_stop(kind: str = "test.stub") -> StopRequest:
     return StopRequest(channel_id="chan-1", channel_kind=kind, session_id="sess-1")
 
 
-def make_options(audit: CapturingAuditLog, errors: list[ChannelFailure] | None = None) -> RuntimeOptions:
+def make_options(
+    audit: CapturingAuditLog, errors: list[ChannelFailure] | None = None
+) -> RuntimeOptions:
     return RuntimeOptions(
         audit_log=audit,
         on_error=(lambda e: errors.append(e)) if errors is not None else None,
@@ -130,8 +132,11 @@ def registered_runtime() -> ChannelRuntime:
 # start — success
 # ---------------------------------------------------------------------------
 
+
 class TestStartSuccess:
-    async def test_dispatches_to_driver(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_dispatches_to_driver(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         driver = StubDriver()
         rt = ChannelRuntime()
         rt.register(driver)
@@ -148,17 +153,23 @@ class TestStartSuccess:
         assert mock_span.attributes["channel.kind"] == "test.stub"
         assert mock_span.attributes["session.id"] == "sess-1"
 
-    async def test_invocation_event_attached(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_invocation_event_attached(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await registered_runtime().start(make_start(), make_options(audit_log))
         event_names = [e[0] for e in mock_span.events]
         assert "channel.invocation" in event_names
 
-    async def test_invocation_event_operation(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_invocation_event_operation(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await registered_runtime().start(make_start(), make_options(audit_log))
         inv = next(e for e in mock_span.events if e[0] == "channel.invocation")
         assert inv[1]["operation"] == "start"
 
-    async def test_no_audit_entries_on_success(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_no_audit_entries_on_success(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await registered_runtime().start(make_start(), make_options(audit_log))
         assert audit_log.entries == []
 
@@ -171,14 +182,19 @@ class TestStartSuccess:
 # start — CHAN_KIND_NOT_REGISTERED
 # ---------------------------------------------------------------------------
 
+
 class TestStartUnknownKind:
-    async def test_raises_channel_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_raises_channel_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = ChannelRuntime()
         with pytest.raises(ChannelFailure) as exc_info:
             await rt.start(make_start("acme.unknown"), make_options(audit_log))
         assert exc_info.value.code == "CHAN_KIND_NOT_REGISTERED"
 
-    async def test_audit_entry_written(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = ChannelRuntime()
         with pytest.raises(ChannelFailure):
             await rt.start(make_start("acme.unknown"), make_options(audit_log))
@@ -187,21 +203,27 @@ class TestStartUnknownKind:
         assert entry.level == "error"
         assert entry.event == "channel.start.failed"
 
-    async def test_span_marked_error(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_marked_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = ChannelRuntime()
         with pytest.raises(ChannelFailure):
             await rt.start(make_start("acme.unknown"), make_options(audit_log))
         assert mock_span.status is not None
         assert mock_span.status.status_code == StatusCode.ERROR
 
-    async def test_error_event_on_span(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_error_event_on_span(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = ChannelRuntime()
         with pytest.raises(ChannelFailure):
             await rt.start(make_start("acme.unknown"), make_options(audit_log))
         event_names = [e[0] for e in mock_span.events]
         assert "channel.error" in event_names
 
-    async def test_on_error_callback(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_on_error_callback(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         errors: list[ChannelFailure] = []
         rt = ChannelRuntime()
         with pytest.raises(ChannelFailure):
@@ -209,7 +231,9 @@ class TestStartUnknownKind:
         assert len(errors) == 1
         assert errors[0].code == "CHAN_KIND_NOT_REGISTERED"
 
-    async def test_span_ended_on_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_ended_on_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = ChannelRuntime()
         with pytest.raises(ChannelFailure):
             await rt.start(make_start("acme.unknown"), make_options(audit_log))
@@ -220,8 +244,11 @@ class TestStartUnknownKind:
 # start — driver raises
 # ---------------------------------------------------------------------------
 
+
 class TestStartDriverRaises:
-    async def test_wraps_as_start_failed(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_wraps_as_start_failed(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         driver = StubDriver(start_raises=RuntimeError("connection refused"))
         rt = ChannelRuntime()
         rt.register(driver)
@@ -238,7 +265,9 @@ class TestStartDriverRaises:
             await rt.start(make_start(), make_options(audit_log))
         assert exc_info.value.cause is orig
 
-    async def test_audit_entry_written(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         driver = StubDriver(start_raises=RuntimeError("boom"))
         rt = ChannelRuntime()
         rt.register(driver)
@@ -247,7 +276,9 @@ class TestStartDriverRaises:
         assert len(audit_log.entries) == 1
         assert audit_log.entries[0].level == "error"
 
-    async def test_span_marked_error(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_marked_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         driver = StubDriver(start_raises=RuntimeError("boom"))
         rt = ChannelRuntime()
         rt.register(driver)
@@ -255,7 +286,9 @@ class TestStartDriverRaises:
             await rt.start(make_start(), make_options(audit_log))
         assert mock_span.status.status_code == StatusCode.ERROR
 
-    async def test_exception_recorded_on_span(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_exception_recorded_on_span(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         orig = RuntimeError("boom")
         driver = StubDriver(start_raises=orig)
         rt = ChannelRuntime()
@@ -269,6 +302,7 @@ class TestStartDriverRaises:
 # send — success
 # ---------------------------------------------------------------------------
 
+
 class TestSendSuccess:
     async def test_returns_result(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
         result = await registered_runtime().send(make_send(), make_options(audit_log))
@@ -279,12 +313,16 @@ class TestSendSuccess:
         await registered_runtime().send(make_send(), make_options(audit_log))
         assert mock_span.name == "channel.send"
 
-    async def test_invocation_event_operation(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_invocation_event_operation(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await registered_runtime().send(make_send(), make_options(audit_log))
         inv = next(e for e in mock_span.events if e[0] == "channel.invocation")
         assert inv[1]["operation"] == "send"
 
-    async def test_no_audit_entries_on_success(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_no_audit_entries_on_success(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await registered_runtime().send(make_send(), make_options(audit_log))
         assert audit_log.entries == []
 
@@ -297,20 +335,27 @@ class TestSendSuccess:
 # send — CHAN_KIND_NOT_REGISTERED
 # ---------------------------------------------------------------------------
 
+
 class TestSendUnknownKind:
-    async def test_raises_channel_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_raises_channel_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = ChannelRuntime()
         with pytest.raises(ChannelFailure) as exc_info:
             await rt.send(make_send("acme.unknown"), make_options(audit_log))
         assert exc_info.value.code == "CHAN_KIND_NOT_REGISTERED"
 
-    async def test_audit_event_name(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_event_name(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = ChannelRuntime()
         with pytest.raises(ChannelFailure):
             await rt.send(make_send("acme.unknown"), make_options(audit_log))
         assert audit_log.entries[0].event == "channel.send.failed"
 
-    async def test_span_marked_error(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_marked_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = ChannelRuntime()
         with pytest.raises(ChannelFailure):
             await rt.send(make_send("acme.unknown"), make_options(audit_log))
@@ -321,8 +366,11 @@ class TestSendUnknownKind:
 # send — driver raises
 # ---------------------------------------------------------------------------
 
+
 class TestSendDriverRaises:
-    async def test_wraps_as_send_failed(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_wraps_as_send_failed(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         driver = StubDriver(send_raises=RuntimeError("rate limited"))
         rt = ChannelRuntime()
         rt.register(driver)
@@ -339,7 +387,9 @@ class TestSendDriverRaises:
             await rt.send(make_send(), make_options(audit_log))
         assert exc_info.value.cause is orig
 
-    async def test_audit_entry_written(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         driver = StubDriver(send_raises=RuntimeError("boom"))
         rt = ChannelRuntime()
         rt.register(driver)
@@ -352,8 +402,11 @@ class TestSendDriverRaises:
 # stop — success
 # ---------------------------------------------------------------------------
 
+
 class TestStopSuccess:
-    async def test_dispatches_to_driver(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_dispatches_to_driver(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         driver = StubDriver()
         rt = ChannelRuntime()
         rt.register(driver)
@@ -364,12 +417,16 @@ class TestStopSuccess:
         await registered_runtime().stop(make_stop(), make_options(audit_log))
         assert mock_span.name == "channel.stop"
 
-    async def test_invocation_event_operation(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_invocation_event_operation(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await registered_runtime().stop(make_stop(), make_options(audit_log))
         inv = next(e for e in mock_span.events if e[0] == "channel.invocation")
         assert inv[1]["operation"] == "stop"
 
-    async def test_no_audit_entries_on_success(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_no_audit_entries_on_success(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await registered_runtime().stop(make_stop(), make_options(audit_log))
         assert audit_log.entries == []
 
@@ -382,20 +439,27 @@ class TestStopSuccess:
 # stop — CHAN_KIND_NOT_REGISTERED
 # ---------------------------------------------------------------------------
 
+
 class TestStopUnknownKind:
-    async def test_raises_channel_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_raises_channel_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = ChannelRuntime()
         with pytest.raises(ChannelFailure) as exc_info:
             await rt.stop(make_stop("acme.unknown"), make_options(audit_log))
         assert exc_info.value.code == "CHAN_KIND_NOT_REGISTERED"
 
-    async def test_audit_event_name(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_event_name(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = ChannelRuntime()
         with pytest.raises(ChannelFailure):
             await rt.stop(make_stop("acme.unknown"), make_options(audit_log))
         assert audit_log.entries[0].event == "channel.stop.failed"
 
-    async def test_span_marked_error(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_marked_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = ChannelRuntime()
         with pytest.raises(ChannelFailure):
             await rt.stop(make_stop("acme.unknown"), make_options(audit_log))
@@ -406,8 +470,11 @@ class TestStopUnknownKind:
 # stop — driver raises
 # ---------------------------------------------------------------------------
 
+
 class TestStopDriverRaises:
-    async def test_wraps_as_stop_failed(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_wraps_as_stop_failed(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         driver = StubDriver(stop_raises=RuntimeError("still connected"))
         rt = ChannelRuntime()
         rt.register(driver)
@@ -415,7 +482,9 @@ class TestStopDriverRaises:
             await rt.stop(make_stop(), make_options(audit_log))
         assert exc_info.value.code == "CHAN_STOP_FAILED"
 
-    async def test_audit_entry_written(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         driver = StubDriver(stop_raises=RuntimeError("boom"))
         rt = ChannelRuntime()
         rt.register(driver)
@@ -427,6 +496,7 @@ class TestStopDriverRaises:
 # ---------------------------------------------------------------------------
 # capabilities()
 # ---------------------------------------------------------------------------
+
 
 class TestDriverCapabilities:
     def test_capabilities_registered(self) -> None:
@@ -448,6 +518,7 @@ class TestDriverCapabilities:
 # ---------------------------------------------------------------------------
 # Registry guard
 # ---------------------------------------------------------------------------
+
 
 class TestRegistry:
     def test_duplicate_registration_raises(self) -> None:
@@ -471,20 +542,24 @@ class TestRegistry:
 # Manifest — load_manifest
 # ---------------------------------------------------------------------------
 
+
 class TestLoadManifest:
     def _write_manifest(self, tmp_path: Path, data: dict) -> Path:
         (tmp_path / "channel.json").write_text(json.dumps(data))
         return tmp_path
 
     def test_loads_valid_manifest(self, tmp_path: Path) -> None:
-        self._write_manifest(tmp_path, {
-            "kind": "meridian.slack",
-            "version": "1.0.0",
-            "display_name": "Slack",
-            "platforms": ["linux", "darwin"],
-            "auth_schemes": ["oauth2"],
-            "capabilities": {"can_send_files": True, "can_thread": True},
-        })
+        self._write_manifest(
+            tmp_path,
+            {
+                "kind": "meridian.slack",
+                "version": "1.0.0",
+                "display_name": "Slack",
+                "platforms": ["linux", "darwin"],
+                "auth_schemes": ["oauth2"],
+                "capabilities": {"can_send_files": True, "can_thread": True},
+            },
+        )
         manifest = load_manifest(tmp_path)
         assert manifest.kind == "meridian.slack"
         assert manifest.version == "1.0.0"
@@ -512,24 +587,30 @@ class TestLoadManifest:
         assert exc_info.value.code == "CHAN_MANIFEST_INVALID"
 
     def test_capability_defaults(self, tmp_path: Path) -> None:
-        self._write_manifest(tmp_path, {
-            "kind": "meridian.sms",
-            "version": "0.1.0",
-            "display_name": "SMS",
-            "platforms": ["linux"],
-        })
+        self._write_manifest(
+            tmp_path,
+            {
+                "kind": "meridian.sms",
+                "version": "0.1.0",
+                "display_name": "SMS",
+                "platforms": ["linux"],
+            },
+        )
         manifest = load_manifest(tmp_path)
         assert manifest.capabilities.can_send_text is True
         assert manifest.capabilities.can_send_files is False
 
     def test_rate_limit_per_minute(self, tmp_path: Path) -> None:
-        self._write_manifest(tmp_path, {
-            "kind": "meridian.slack",
-            "version": "1.0.0",
-            "display_name": "Slack",
-            "platforms": ["linux"],
-            "rate_limit_per_minute": 30,
-        })
+        self._write_manifest(
+            tmp_path,
+            {
+                "kind": "meridian.slack",
+                "version": "1.0.0",
+                "display_name": "Slack",
+                "platforms": ["linux"],
+                "rate_limit_per_minute": 30,
+            },
+        )
         manifest = load_manifest(tmp_path)
         assert manifest.rate_limit_per_minute == 30
 
@@ -537,6 +618,7 @@ class TestLoadManifest:
 # ---------------------------------------------------------------------------
 # Manifest — validate_manifest
 # ---------------------------------------------------------------------------
+
 
 class TestValidateManifest:
     def _base(self) -> ChannelManifest:

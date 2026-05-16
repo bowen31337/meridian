@@ -1,7 +1,8 @@
 """Shared test fixtures and fake provider implementations."""
+
 from __future__ import annotations
 
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 import pytest
 
@@ -12,7 +13,6 @@ from meridian_sdk_provider import (
     ModelCallOpts,
     ModelCountReq,
     ModelEvent,
-    NoopAuditLog,
     ProviderCapabilities,
     TextDeltaEvent,
     TokenCount,

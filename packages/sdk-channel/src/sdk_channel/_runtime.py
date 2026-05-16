@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Callable
+from datetime import UTC, datetime
 
 from ._audit import AuditLog, NoopAuditLog
 from ._contract import ChannelDriver
@@ -28,7 +28,7 @@ class RuntimeOptions:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class ChannelRuntime:
@@ -120,7 +120,8 @@ class ChannelRuntime:
           1. Opens OTel span "channel.start" with channel/session attributes.
           2. Attaches a "channel.invocation" structured event to the span.
           3. Validates that the requested kind is registered.
-             On failure: records span error, writes audit log, calls on_error, raises ChannelFailure.
+             On failure: records span error, writes audit log, calls on_error,
+             raises ChannelFailure.
           4. Dispatches to the driver. Driver exceptions are wrapped in ChannelFailure
              (code CHAN_START_FAILED) and handled identically to step 3.
         """

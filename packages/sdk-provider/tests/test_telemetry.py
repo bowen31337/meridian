@@ -1,4 +1,5 @@
 """Tests for OTel span creation, invocation event, and failure recording."""
+
 from __future__ import annotations
 
 from unittest.mock import patch
@@ -28,8 +29,10 @@ def span_exporter():
     tracer = provider.get_tracer(TRACER_NAME, SDK_PROVIDER_VERSION)
     # Patch get_tracer so each test gets a fresh tracer backed by its own exporter
     # rather than fighting the OTel global singleton.
-    with patch("meridian_sdk_provider.telemetry.get_tracer", return_value=tracer), \
-         patch("meridian_sdk_provider.router.get_tracer", return_value=tracer):
+    with (
+        patch("meridian_sdk_provider.telemetry.get_tracer", return_value=tracer),
+        patch("meridian_sdk_provider.router.get_tracer", return_value=tracer),
+    ):
         yield exporter
     exporter.clear()
 
@@ -60,9 +63,7 @@ async def test_span_created_and_ended_on_success(span_exporter: InMemorySpanExpo
 
 
 async def test_span_ends_on_pre_stream_failure(span_exporter: InMemorySpanExporter) -> None:
-    provider = FakeProvider(
-        name="p", raise_on_call=ProviderRateLimitError("rate limited", "p")
-    )
+    provider = FakeProvider(name="p", raise_on_call=ProviderRateLimitError("rate limited", "p"))
     router = ModelRouter(
         policy=ModelRoutingPolicy(rules=[ModelRoutingRule(model="p:m")]),
         providers={"p": provider},
@@ -127,9 +128,7 @@ async def test_fallback_invocation_event_recorded(span_exporter: InMemorySpanExp
 
 
 async def test_error_event_recorded_on_failure(span_exporter: InMemorySpanExporter) -> None:
-    provider = FakeProvider(
-        name="p", raise_on_call=ProviderRateLimitError("rate limited", "p")
-    )
+    provider = FakeProvider(name="p", raise_on_call=ProviderRateLimitError("rate limited", "p"))
     router = ModelRouter(
         policy=ModelRoutingPolicy(rules=[ModelRoutingRule(model="p:m")]),
         providers={"p": provider},

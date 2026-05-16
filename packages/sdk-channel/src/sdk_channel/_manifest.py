@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ._types import ChannelCapabilities, ChannelFailure
@@ -29,7 +29,7 @@ class ChannelManifest:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def validate_manifest(manifest: ChannelManifest) -> None:
@@ -79,7 +79,7 @@ def load_manifest(directory: str | Path) -> ChannelManifest:
             channel_kind="",
             session_id="",
             timestamp=_now(),
-        )
+        ) from None
     except json.JSONDecodeError as exc:
         raise ChannelFailure(
             code="CHAN_MANIFEST_INVALID",

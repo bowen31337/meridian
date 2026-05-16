@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from ._types import AgentFilesystemPolicy, FilesystemPolicy, FilesystemViolation
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _glob_to_regex(pattern: str) -> str:
@@ -118,11 +118,7 @@ class FilesystemEnforcer:
             return False
 
         agent_globs = self._agent_globs(operation)
-        if agent_globs is not None and agent_globs:
-            if not any(_glob_matches(g, canonical) for g in agent_globs):
-                return False
-
-        return True
+        return not agent_globs or any(_glob_matches(g, canonical) for g in agent_globs)
 
     def assert_allowed(
         self,

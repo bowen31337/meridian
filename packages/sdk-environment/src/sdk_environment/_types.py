@@ -4,6 +4,10 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 
+def _str_dict() -> dict[str, str]:
+    return {}
+
+
 @dataclass(frozen=True)
 class NetworkPolicy:
     """Egress/ingress policy for an environment kind."""
@@ -25,7 +29,8 @@ class FilesystemPolicy:
 
 @dataclass(frozen=True)
 class AgentFilesystemPolicy:
-    """Per-agent filesystem glob allowlists; must be a strict subset of the environment FilesystemPolicy."""
+    """Per-agent filesystem glob allowlists; must be a strict subset of the
+    environment FilesystemPolicy."""
 
     agent_id: str
     read_globs: tuple[str, ...] = ()
@@ -65,7 +70,7 @@ class ExecuteRequest:
     session_id: str
     command: tuple[str, ...]
     stdin: str | None = None
-    env: dict[str, str] = field(default_factory=dict)
+    env: dict[str, str] = field(default_factory=_str_dict)
     timeout_seconds: int | None = None
 
 

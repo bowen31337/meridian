@@ -1,11 +1,6 @@
 # Types
-from ._types import (
-    AuditLogEntry,
-    EventLogFailure,
-    EventType,
-    SessionEvent,
-    StructuredEvent,
-)
+# Audit log
+from ._audit import AuditLog, NoopAuditLog
 
 # Contract
 from ._contract import EventLogWriter
@@ -13,14 +8,18 @@ from ._contract import EventLogWriter
 # Local implementation
 from ._local import LocalEventLogWriter
 
-# Audit log
-from ._audit import AuditLog, NoopAuditLog
+# Runtime
+from ._runtime import EventLogOptions, EventLogRuntime
 
 # Telemetry
 from ._telemetry import get_tracer, record_event_log_failure, record_invocation_event
-
-# Runtime
-from ._runtime import EventLogOptions, EventLogRuntime
+from ._types import (
+    AuditLogEntry,
+    EventLogFailure,
+    EventType,
+    SessionEvent,
+    StructuredEvent,
+)
 
 # Version
 from ._version import EVENT_LOG_SDK_VERSION

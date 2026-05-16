@@ -38,8 +38,7 @@ async def _call_http(
 ) -> Any:
     if not _HTTPX_AVAILABLE:
         raise RuntimeError(
-            "httpx is required for HTTP tools. "
-            "Install with: pip install 'meridian-sdk-tool[http]'"
+            "httpx is required for HTTP tools. Install with: pip install 'meridian-sdk-tool[http]'"
         )
 
     payload = {
@@ -90,7 +89,9 @@ class HttpTool:
         assert isinstance(handler_def, HttpHandler)
 
         async def _handler(a: Any, c: ToolContext) -> Any:
-            return await _call_http(handler_def.url, handler_def.auth, a, c, self.definition.timeout_ms)
+            return await _call_http(
+                handler_def.url, handler_def.auth, a, c, self.definition.timeout_ms
+            )
 
         return await execute_tool(
             self.definition,

@@ -1,8 +1,8 @@
 """Enforcement tests: satisfies, check_grant, assert_grant, missing, intersect, is_subset."""
+
 from __future__ import annotations
 
 import pytest
-
 from sdk_capabilities import (
     Capability,
     CapabilityDenied,
@@ -29,6 +29,7 @@ def caps(*texts: str) -> CapabilitySet:
 # ---------------------------------------------------------------------------
 # satisfies
 # ---------------------------------------------------------------------------
+
 
 class TestSatisfies:
     def test_exact_match_no_param(self) -> None:
@@ -65,6 +66,7 @@ class TestSatisfies:
 # ---------------------------------------------------------------------------
 # check_grant
 # ---------------------------------------------------------------------------
+
 
 class TestCheckGrant:
     def test_empty_required_always_satisfied(self) -> None:
@@ -105,6 +107,7 @@ class TestCheckGrant:
 # missing
 # ---------------------------------------------------------------------------
 
+
 class TestMissing:
     def test_nothing_missing_when_all_granted(self) -> None:
         assert missing(caps("exec.shell"), caps("exec.shell")) == frozenset()
@@ -134,6 +137,7 @@ class TestMissing:
 # ---------------------------------------------------------------------------
 # assert_grant
 # ---------------------------------------------------------------------------
+
 
 class TestAssertGrant:
     def test_no_exception_when_all_satisfied(self) -> None:
@@ -165,6 +169,7 @@ class TestAssertGrant:
 # ---------------------------------------------------------------------------
 # intersect
 # ---------------------------------------------------------------------------
+
 
 class TestIntersect:
     def test_empty_sets(self) -> None:
@@ -210,6 +215,7 @@ class TestIntersect:
 # is_subset (no-upward-escalation rule)
 # ---------------------------------------------------------------------------
 
+
 class TestIsSubset:
     def test_empty_child_is_always_subset(self) -> None:
         assert is_subset(frozenset(), caps("exec.shell"))
@@ -250,27 +256,33 @@ class TestIsSubset:
 # Registry integration: is_known + param_expected
 # ---------------------------------------------------------------------------
 
+
 class TestRegistry:
     def test_known_caps_are_recognized(self) -> None:
         from sdk_capabilities import is_known
+
         assert is_known("fs", "read")
         assert is_known("exec", "shell")
         assert is_known("acp", "outbound")
 
     def test_unknown_cap_not_recognized(self) -> None:
         from sdk_capabilities import is_known
+
         assert not is_known("custom", "action")
 
     def test_param_expected_true(self) -> None:
         from sdk_capabilities import param_expected
+
         assert param_expected("fs", "read") is True
         assert param_expected("net", "fetch") is True
 
     def test_param_expected_false(self) -> None:
         from sdk_capabilities import param_expected
+
         assert param_expected("exec", "shell") is False
         assert param_expected("net", "listen") is False
 
     def test_param_expected_unknown(self) -> None:
         from sdk_capabilities import param_expected
+
         assert param_expected("custom", "action") is None

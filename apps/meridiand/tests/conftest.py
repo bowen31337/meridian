@@ -1,4 +1,5 @@
 """Shared fixtures for the meridiand conformance suite."""
+
 from __future__ import annotations
 
 import pytest

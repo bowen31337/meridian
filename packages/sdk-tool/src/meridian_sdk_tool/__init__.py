@@ -46,7 +46,11 @@ Out-of-process HTTP tools::
         name="web_search",
         description="Search the web",
         url="http://localhost:8080/search",
-        input_schema={"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+        input_schema={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
         capabilities=["net.fetch[*]"],
     )
 

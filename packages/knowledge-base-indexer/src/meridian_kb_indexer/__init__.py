@@ -21,7 +21,7 @@ Quick start::
 from ._audit import write_audit_event
 from ._chunker import chunk_file, detect_language, should_index_path
 from ._telemetry import get_tracer, record_indexer_failure, record_invocation_event
-from ._types import Chunk, ChunkKind, IndexEvent, IndexEventKind, IndexerError
+from ._types import Chunk, ChunkKind, IndexerError, IndexEvent, IndexEventKind
 from ._version import KB_INDEXER_VERSION
 from ._watcher import WorkspaceWatcher
 from .indexer import WorkspaceIndexer

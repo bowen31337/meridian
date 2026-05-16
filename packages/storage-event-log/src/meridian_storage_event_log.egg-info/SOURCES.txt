@@ -12,4 +12,5 @@ src/storage_event_log/_runtime.py
 src/storage_event_log/_telemetry.py
 src/storage_event_log/_types.py
 src/storage_event_log/_version.py
+src/storage_event_log/py.typed
 tests/test_conformance.py

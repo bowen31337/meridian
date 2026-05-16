@@ -1,43 +1,56 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import cached_property
-from typing import Awaitable, Callable, TypeVar
+from typing import TypeVar
 
 from ._audit import AuditLog, NoopAuditLog
 from ._contract import (
     AgentRepository,
-    SessionRepository,
-    ThreadRepository,
-    MessageRepository,
-    ToolCallRepository,
-    SkillRepository,
+    ChannelRepository,
     EnvironmentRepository,
     MemoryRepository,
-    VaultRepository,
+    MessageRepository,
+    SessionRepository,
+    SkillRepository,
+    ThreadRepository,
+    ToolCallRepository,
     UserProfileRepository,
-    ChannelRepository,
+    VaultRepository,
     WebhookRepository,
 )
 from ._telemetry import get_tracer, record_invocation_event, record_repo_failure
 from ._types import (
-    Agent, AgentFilter,
+    Agent,
+    AgentFilter,
     AuditLogEntry,
-    Channel, ChannelFilter,
-    Environment, EnvironmentFilter,
-    MemoryEntry, MemoryFilter,
-    Message, MessageFilter,
+    Channel,
+    ChannelFilter,
+    Environment,
+    EnvironmentFilter,
+    MemoryEntry,
+    MemoryFilter,
+    Message,
+    MessageFilter,
     RepositoryFailure,
-    Session, SessionFilter,
-    Skill, SkillFilter,
+    Session,
+    SessionFilter,
+    Skill,
+    SkillFilter,
     StructuredEvent,
-    Thread, ThreadFilter,
-    ToolCall, ToolCallFilter,
-    UserProfile, UserProfileFilter,
-    VaultEntry, VaultFilter,
-    Webhook, WebhookFilter,
+    Thread,
+    ThreadFilter,
+    ToolCall,
+    ToolCallFilter,
+    UserProfile,
+    UserProfileFilter,
+    VaultEntry,
+    VaultFilter,
+    Webhook,
+    WebhookFilter,
 )
 
 T = TypeVar("T")
@@ -52,12 +65,13 @@ class RepositoryOptions:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 # ---------------------------------------------------------------------------
 # RepositoryDriver — bundles all 12 repository contracts
 # ---------------------------------------------------------------------------
+
 
 class RepositoryDriver(ABC):
     """
@@ -130,6 +144,7 @@ class RepositoryDriver(ABC):
 # Generic tracing helper
 # ---------------------------------------------------------------------------
 
+
 async def _trace_op(
     entity_type: str,
     entity_id: str,
@@ -143,7 +158,11 @@ async def _trace_op(
 
     with tracer.start_as_current_span(
         span_name,
-        attributes={"entity.type": entity_type, "entity.id": entity_id, "repo.operation": operation},
+        attributes={
+            "entity.type": entity_type,
+            "entity.id": entity_id,
+            "repo.operation": operation,
+        },
     ) as span:
         record_invocation_event(
             span,
@@ -204,19 +223,24 @@ async def _trace_op(
 # Traced repository wrappers
 # ---------------------------------------------------------------------------
 
+
 class _TracedAgentRepo:
     def __init__(self, repo: AgentRepository, opts: RepositoryOptions) -> None:
         self._repo = repo
         self._opts = opts
 
     async def get(self, agent_id: str) -> Agent | None:
-        return await _trace_op("agent", agent_id, "get", self._opts, lambda: self._repo.get(agent_id))
+        return await _trace_op(
+            "agent", agent_id, "get", self._opts, lambda: self._repo.get(agent_id)
+        )
 
     async def save(self, agent: Agent) -> None:
         await _trace_op("agent", agent.id, "save", self._opts, lambda: self._repo.save(agent))
 
     async def delete(self, agent_id: str) -> None:
-        await _trace_op("agent", agent_id, "delete", self._opts, lambda: self._repo.delete(agent_id))
+        await _trace_op(
+            "agent", agent_id, "delete", self._opts, lambda: self._repo.delete(agent_id)
+        )
 
     async def list(self, filter: AgentFilter) -> list[Agent]:
         return await _trace_op("agent", "*", "list", self._opts, lambda: self._repo.list(filter))
@@ -228,13 +252,17 @@ class _TracedSessionRepo:
         self._opts = opts
 
     async def get(self, session_id: str) -> Session | None:
-        return await _trace_op("session", session_id, "get", self._opts, lambda: self._repo.get(session_id))
+        return await _trace_op(
+            "session", session_id, "get", self._opts, lambda: self._repo.get(session_id)
+        )
 
     async def save(self, session: Session) -> None:
         await _trace_op("session", session.id, "save", self._opts, lambda: self._repo.save(session))
 
     async def delete(self, session_id: str) -> None:
-        await _trace_op("session", session_id, "delete", self._opts, lambda: self._repo.delete(session_id))
+        await _trace_op(
+            "session", session_id, "delete", self._opts, lambda: self._repo.delete(session_id)
+        )
 
     async def list(self, filter: SessionFilter) -> list[Session]:
         return await _trace_op("session", "*", "list", self._opts, lambda: self._repo.list(filter))
@@ -246,13 +274,17 @@ class _TracedThreadRepo:
         self._opts = opts
 
     async def get(self, thread_id: str) -> Thread | None:
-        return await _trace_op("thread", thread_id, "get", self._opts, lambda: self._repo.get(thread_id))
+        return await _trace_op(
+            "thread", thread_id, "get", self._opts, lambda: self._repo.get(thread_id)
+        )
 
     async def save(self, thread: Thread) -> None:
         await _trace_op("thread", thread.id, "save", self._opts, lambda: self._repo.save(thread))
 
     async def delete(self, thread_id: str) -> None:
-        await _trace_op("thread", thread_id, "delete", self._opts, lambda: self._repo.delete(thread_id))
+        await _trace_op(
+            "thread", thread_id, "delete", self._opts, lambda: self._repo.delete(thread_id)
+        )
 
     async def list(self, filter: ThreadFilter) -> list[Thread]:
         return await _trace_op("thread", "*", "list", self._opts, lambda: self._repo.list(filter))
@@ -264,13 +296,17 @@ class _TracedMessageRepo:
         self._opts = opts
 
     async def get(self, message_id: str) -> Message | None:
-        return await _trace_op("message", message_id, "get", self._opts, lambda: self._repo.get(message_id))
+        return await _trace_op(
+            "message", message_id, "get", self._opts, lambda: self._repo.get(message_id)
+        )
 
     async def save(self, message: Message) -> None:
         await _trace_op("message", message.id, "save", self._opts, lambda: self._repo.save(message))
 
     async def delete(self, message_id: str) -> None:
-        await _trace_op("message", message_id, "delete", self._opts, lambda: self._repo.delete(message_id))
+        await _trace_op(
+            "message", message_id, "delete", self._opts, lambda: self._repo.delete(message_id)
+        )
 
     async def list(self, filter: MessageFilter) -> list[Message]:
         return await _trace_op("message", "*", "list", self._opts, lambda: self._repo.list(filter))
@@ -282,16 +318,24 @@ class _TracedToolCallRepo:
         self._opts = opts
 
     async def get(self, tool_call_id: str) -> ToolCall | None:
-        return await _trace_op("tool_call", tool_call_id, "get", self._opts, lambda: self._repo.get(tool_call_id))
+        return await _trace_op(
+            "tool_call", tool_call_id, "get", self._opts, lambda: self._repo.get(tool_call_id)
+        )
 
     async def save(self, tool_call: ToolCall) -> None:
-        await _trace_op("tool_call", tool_call.id, "save", self._opts, lambda: self._repo.save(tool_call))
+        await _trace_op(
+            "tool_call", tool_call.id, "save", self._opts, lambda: self._repo.save(tool_call)
+        )
 
     async def delete(self, tool_call_id: str) -> None:
-        await _trace_op("tool_call", tool_call_id, "delete", self._opts, lambda: self._repo.delete(tool_call_id))
+        await _trace_op(
+            "tool_call", tool_call_id, "delete", self._opts, lambda: self._repo.delete(tool_call_id)
+        )
 
     async def list(self, filter: ToolCallFilter) -> list[ToolCall]:
-        return await _trace_op("tool_call", "*", "list", self._opts, lambda: self._repo.list(filter))
+        return await _trace_op(
+            "tool_call", "*", "list", self._opts, lambda: self._repo.list(filter)
+        )
 
 
 class _TracedSkillRepo:
@@ -300,13 +344,17 @@ class _TracedSkillRepo:
         self._opts = opts
 
     async def get(self, skill_id: str) -> Skill | None:
-        return await _trace_op("skill", skill_id, "get", self._opts, lambda: self._repo.get(skill_id))
+        return await _trace_op(
+            "skill", skill_id, "get", self._opts, lambda: self._repo.get(skill_id)
+        )
 
     async def save(self, skill: Skill) -> None:
         await _trace_op("skill", skill.id, "save", self._opts, lambda: self._repo.save(skill))
 
     async def delete(self, skill_id: str) -> None:
-        await _trace_op("skill", skill_id, "delete", self._opts, lambda: self._repo.delete(skill_id))
+        await _trace_op(
+            "skill", skill_id, "delete", self._opts, lambda: self._repo.delete(skill_id)
+        )
 
     async def list(self, filter: SkillFilter) -> list[Skill]:
         return await _trace_op("skill", "*", "list", self._opts, lambda: self._repo.list(filter))
@@ -318,16 +366,28 @@ class _TracedEnvironmentRepo:
         self._opts = opts
 
     async def get(self, environment_id: str) -> Environment | None:
-        return await _trace_op("environment", environment_id, "get", self._opts, lambda: self._repo.get(environment_id))
+        return await _trace_op(
+            "environment", environment_id, "get", self._opts, lambda: self._repo.get(environment_id)
+        )
 
     async def save(self, environment: Environment) -> None:
-        await _trace_op("environment", environment.id, "save", self._opts, lambda: self._repo.save(environment))
+        await _trace_op(
+            "environment", environment.id, "save", self._opts, lambda: self._repo.save(environment)
+        )
 
     async def delete(self, environment_id: str) -> None:
-        await _trace_op("environment", environment_id, "delete", self._opts, lambda: self._repo.delete(environment_id))
+        await _trace_op(
+            "environment",
+            environment_id,
+            "delete",
+            self._opts,
+            lambda: self._repo.delete(environment_id),
+        )
 
     async def list(self, filter: EnvironmentFilter) -> list[Environment]:
-        return await _trace_op("environment", "*", "list", self._opts, lambda: self._repo.list(filter))
+        return await _trace_op(
+            "environment", "*", "list", self._opts, lambda: self._repo.list(filter)
+        )
 
 
 class _TracedMemoryRepo:
@@ -336,13 +396,17 @@ class _TracedMemoryRepo:
         self._opts = opts
 
     async def get(self, entry_id: str) -> MemoryEntry | None:
-        return await _trace_op("memory", entry_id, "get", self._opts, lambda: self._repo.get(entry_id))
+        return await _trace_op(
+            "memory", entry_id, "get", self._opts, lambda: self._repo.get(entry_id)
+        )
 
     async def save(self, entry: MemoryEntry) -> None:
         await _trace_op("memory", entry.id, "save", self._opts, lambda: self._repo.save(entry))
 
     async def delete(self, entry_id: str) -> None:
-        await _trace_op("memory", entry_id, "delete", self._opts, lambda: self._repo.delete(entry_id))
+        await _trace_op(
+            "memory", entry_id, "delete", self._opts, lambda: self._repo.delete(entry_id)
+        )
 
     async def list(self, filter: MemoryFilter) -> list[MemoryEntry]:
         return await _trace_op("memory", "*", "list", self._opts, lambda: self._repo.list(filter))
@@ -354,13 +418,17 @@ class _TracedVaultRepo:
         self._opts = opts
 
     async def get(self, entry_id: str) -> VaultEntry | None:
-        return await _trace_op("vault", entry_id, "get", self._opts, lambda: self._repo.get(entry_id))
+        return await _trace_op(
+            "vault", entry_id, "get", self._opts, lambda: self._repo.get(entry_id)
+        )
 
     async def save(self, entry: VaultEntry) -> None:
         await _trace_op("vault", entry.id, "save", self._opts, lambda: self._repo.save(entry))
 
     async def delete(self, entry_id: str) -> None:
-        await _trace_op("vault", entry_id, "delete", self._opts, lambda: self._repo.delete(entry_id))
+        await _trace_op(
+            "vault", entry_id, "delete", self._opts, lambda: self._repo.delete(entry_id)
+        )
 
     async def list(self, filter: VaultFilter) -> list[VaultEntry]:
         return await _trace_op("vault", "*", "list", self._opts, lambda: self._repo.list(filter))
@@ -372,16 +440,24 @@ class _TracedUserProfileRepo:
         self._opts = opts
 
     async def get(self, user_id: str) -> UserProfile | None:
-        return await _trace_op("user_profile", user_id, "get", self._opts, lambda: self._repo.get(user_id))
+        return await _trace_op(
+            "user_profile", user_id, "get", self._opts, lambda: self._repo.get(user_id)
+        )
 
     async def save(self, profile: UserProfile) -> None:
-        await _trace_op("user_profile", profile.id, "save", self._opts, lambda: self._repo.save(profile))
+        await _trace_op(
+            "user_profile", profile.id, "save", self._opts, lambda: self._repo.save(profile)
+        )
 
     async def delete(self, user_id: str) -> None:
-        await _trace_op("user_profile", user_id, "delete", self._opts, lambda: self._repo.delete(user_id))
+        await _trace_op(
+            "user_profile", user_id, "delete", self._opts, lambda: self._repo.delete(user_id)
+        )
 
     async def list(self, filter: UserProfileFilter) -> list[UserProfile]:
-        return await _trace_op("user_profile", "*", "list", self._opts, lambda: self._repo.list(filter))
+        return await _trace_op(
+            "user_profile", "*", "list", self._opts, lambda: self._repo.list(filter)
+        )
 
 
 class _TracedChannelRepo:
@@ -390,13 +466,17 @@ class _TracedChannelRepo:
         self._opts = opts
 
     async def get(self, channel_id: str) -> Channel | None:
-        return await _trace_op("channel", channel_id, "get", self._opts, lambda: self._repo.get(channel_id))
+        return await _trace_op(
+            "channel", channel_id, "get", self._opts, lambda: self._repo.get(channel_id)
+        )
 
     async def save(self, channel: Channel) -> None:
         await _trace_op("channel", channel.id, "save", self._opts, lambda: self._repo.save(channel))
 
     async def delete(self, channel_id: str) -> None:
-        await _trace_op("channel", channel_id, "delete", self._opts, lambda: self._repo.delete(channel_id))
+        await _trace_op(
+            "channel", channel_id, "delete", self._opts, lambda: self._repo.delete(channel_id)
+        )
 
     async def list(self, filter: ChannelFilter) -> list[Channel]:
         return await _trace_op("channel", "*", "list", self._opts, lambda: self._repo.list(filter))
@@ -408,13 +488,17 @@ class _TracedWebhookRepo:
         self._opts = opts
 
     async def get(self, webhook_id: str) -> Webhook | None:
-        return await _trace_op("webhook", webhook_id, "get", self._opts, lambda: self._repo.get(webhook_id))
+        return await _trace_op(
+            "webhook", webhook_id, "get", self._opts, lambda: self._repo.get(webhook_id)
+        )
 
     async def save(self, webhook: Webhook) -> None:
         await _trace_op("webhook", webhook.id, "save", self._opts, lambda: self._repo.save(webhook))
 
     async def delete(self, webhook_id: str) -> None:
-        await _trace_op("webhook", webhook_id, "delete", self._opts, lambda: self._repo.delete(webhook_id))
+        await _trace_op(
+            "webhook", webhook_id, "delete", self._opts, lambda: self._repo.delete(webhook_id)
+        )
 
     async def list(self, filter: WebhookFilter) -> list[Webhook]:
         return await _trace_op("webhook", "*", "list", self._opts, lambda: self._repo.list(filter))
@@ -423,6 +507,7 @@ class _TracedWebhookRepo:
 # ---------------------------------------------------------------------------
 # RepositoryRuntime — public entry point
 # ---------------------------------------------------------------------------
+
 
 class RepositoryRuntime:
     """

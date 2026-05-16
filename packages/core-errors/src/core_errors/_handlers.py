@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -12,7 +12,7 @@ from ._types import AuditLogEntry, MeridianError, StructuredEvent
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 @dataclass
@@ -37,7 +37,7 @@ def install_error_handler(app: FastAPI, options: HandlerOptions | None = None) -
     opts = options or HandlerOptions()
 
     @app.exception_handler(MeridianError)
-    async def _handler(request: Request, exc: MeridianError) -> JSONResponse:
+    async def _handler(request: Request, exc: MeridianError) -> JSONResponse:  # pyright: ignore[reportUnusedFunction]
         now = _now()
         tracer = get_tracer()
 

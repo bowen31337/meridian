@@ -12,4 +12,5 @@ src/system_ulid/_runtime.py
 src/system_ulid/_telemetry.py
 src/system_ulid/_types.py
 src/system_ulid/_version.py
+src/system_ulid/py.typed
 tests/test_conformance.py

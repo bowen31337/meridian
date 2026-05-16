@@ -6,6 +6,7 @@ and TEXT for JSON columns.  Every statement is idempotent (IF NOT EXISTS).
 
 Run these in order before any repository operations.
 """
+
 from __future__ import annotations
 
 MIGRATIONS: list[str] = [
@@ -23,7 +24,6 @@ MIGRATIONS: list[str] = [
         updated_at   TEXT NOT NULL
     )
     """,
-
     # ------------------------------------------------------------------
     # sessions
     # ------------------------------------------------------------------
@@ -38,7 +38,6 @@ MIGRATIONS: list[str] = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS sessions_agent_id ON sessions (agent_id)",
-
     # ------------------------------------------------------------------
     # threads
     # ------------------------------------------------------------------
@@ -52,7 +51,6 @@ MIGRATIONS: list[str] = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS threads_session_id ON threads (session_id)",
-
     # ------------------------------------------------------------------
     # messages
     # ------------------------------------------------------------------
@@ -69,7 +67,6 @@ MIGRATIONS: list[str] = [
     """,
     "CREATE INDEX IF NOT EXISTS messages_thread_id  ON messages (thread_id)",
     "CREATE INDEX IF NOT EXISTS messages_session_id ON messages (session_id)",
-
     # ------------------------------------------------------------------
     # tool_calls
     # ------------------------------------------------------------------
@@ -88,7 +85,6 @@ MIGRATIONS: list[str] = [
     """,
     "CREATE INDEX IF NOT EXISTS tool_calls_message_id  ON tool_calls (message_id)",
     "CREATE INDEX IF NOT EXISTS tool_calls_session_id  ON tool_calls (session_id)",
-
     # ------------------------------------------------------------------
     # skills
     # ------------------------------------------------------------------
@@ -103,7 +99,6 @@ MIGRATIONS: list[str] = [
         updated_at   TEXT NOT NULL
     )
     """,
-
     # ------------------------------------------------------------------
     # environments
     # ------------------------------------------------------------------
@@ -117,7 +112,6 @@ MIGRATIONS: list[str] = [
         updated_at TEXT NOT NULL
     )
     """,
-
     # ------------------------------------------------------------------
     # memory_entries
     # ------------------------------------------------------------------
@@ -133,7 +127,6 @@ MIGRATIONS: list[str] = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS memory_entries_scope ON memory_entries (scope)",
-
     # ------------------------------------------------------------------
     # vault_entries  (metadata only — no secret values)
     # ------------------------------------------------------------------
@@ -146,7 +139,6 @@ MIGRATIONS: list[str] = [
         updated_at  TEXT NOT NULL
     )
     """,
-
     # ------------------------------------------------------------------
     # user_profiles
     # ------------------------------------------------------------------
@@ -161,7 +153,6 @@ MIGRATIONS: list[str] = [
         updated_at   TEXT NOT NULL
     )
     """,
-
     # ------------------------------------------------------------------
     # channels
     # ------------------------------------------------------------------
@@ -176,7 +167,6 @@ MIGRATIONS: list[str] = [
         updated_at TEXT NOT NULL
     )
     """,
-
     # ------------------------------------------------------------------
     # webhooks
     # ------------------------------------------------------------------

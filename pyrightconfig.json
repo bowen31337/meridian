@@ -1,12 +1,29 @@
 {
-  "include": ["packages/*/src"],
+  "pythonVersion": "3.11",
+  "typeCheckingMode": "strict",
+  "venvPath": ".",
+  "venv": ".venv",
+  "include": [
+    "packages/core-errors/src",
+    "packages/sdk-capabilities/src",
+    "packages/sdk-channel/src",
+    "packages/sdk-environment/src",
+    "packages/storage-blob/src",
+    "packages/storage-event-log/src",
+    "packages/system-ulid/src"
+  ],
   "exclude": [
     "packages/sdk-py/src",
     ".claw-forge",
     "**/__pycache__"
   ],
-  "pythonVersion": "3.11",
-  "typeCheckingMode": "basic",
-  "venvPath": ".",
-  "venv": ".venv"
+  "extraPaths": [
+    "packages/core-errors/src",
+    "packages/sdk-capabilities/src",
+    "packages/sdk-channel/src",
+    "packages/sdk-environment/src",
+    "packages/storage-blob/src",
+    "packages/storage-event-log/src",
+    "packages/system-ulid/src"
+  ]
 }

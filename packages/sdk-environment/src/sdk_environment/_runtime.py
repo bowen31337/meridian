@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Callable
+from datetime import UTC, datetime
 
 from ._audit import AuditLog, NoopAuditLog
 from ._contract import EnvironmentDriver
@@ -30,7 +30,7 @@ class RuntimeOptions:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class EnvironmentRuntime:
@@ -62,7 +62,6 @@ class EnvironmentRuntime:
         Return the network policy for a registered kind.
         Raises EnvironmentFailure(ENV_KIND_NOT_REGISTERED) if unknown.
         """
-        opts = options or RuntimeOptions()
         driver = self._drivers.get(kind)
         if driver is None:
             raise EnvironmentFailure(
@@ -75,7 +74,9 @@ class EnvironmentRuntime:
             )
         return driver.network_policy()
 
-    def filesystem_policy(self, kind: str, options: RuntimeOptions | None = None) -> FilesystemPolicy:
+    def filesystem_policy(
+        self, kind: str, options: RuntimeOptions | None = None
+    ) -> FilesystemPolicy:
         """
         Return the filesystem policy for a registered kind.
         Raises EnvironmentFailure(ENV_KIND_NOT_REGISTERED) if unknown.
@@ -92,7 +93,9 @@ class EnvironmentRuntime:
             )
         return driver.filesystem_policy()
 
-    def capability_envelope(self, kind: str, options: RuntimeOptions | None = None) -> CapabilityEnvelope:
+    def capability_envelope(
+        self, kind: str, options: RuntimeOptions | None = None
+    ) -> CapabilityEnvelope:
         """
         Return the capability envelope for a registered kind.
         Raises EnvironmentFailure(ENV_KIND_NOT_REGISTERED) if unknown.
@@ -139,7 +142,9 @@ class EnvironmentRuntime:
     # Public operations
     # ------------------------------------------------------------------
 
-    async def provision(self, request: ProvisionRequest, options: RuntimeOptions | None = None) -> None:
+    async def provision(
+        self, request: ProvisionRequest, options: RuntimeOptions | None = None
+    ) -> None:
         """
         Provision a new environment instance.
 
@@ -147,7 +152,8 @@ class EnvironmentRuntime:
           1. Opens OTel span "environment.provision" with environment/session attributes.
           2. Attaches an "environment.invocation" structured event to the span.
           3. Validates that the requested kind is registered.
-             On failure: records span error, writes audit log, calls on_error, raises EnvironmentFailure.
+             On failure: records span error, writes audit log, calls on_error,
+             raises EnvironmentFailure.
           4. Dispatches to the driver. Driver exceptions are wrapped in EnvironmentFailure
              (code ENV_PROVISION_FAILED) and handled identically to step 3.
         """
@@ -205,7 +211,9 @@ class EnvironmentRuntime:
                 self._fail(span, failure, opts, "environment.provision.failed")
                 raise failure from exc
 
-    async def execute(self, request: ExecuteRequest, options: RuntimeOptions | None = None) -> ExecuteResult:
+    async def execute(
+        self, request: ExecuteRequest, options: RuntimeOptions | None = None
+    ) -> ExecuteResult:
         """
         Execute a command in an active environment instance.
 

@@ -3,6 +3,7 @@
 
 Usage: uv run python scripts/make_runner.py --target <dev|ci|codegen|lint|test>
 """
+
 from __future__ import annotations
 
 import argparse
@@ -91,7 +92,7 @@ _STEPS: dict[str, list[_Step]] = {
 
 
 def _now() -> str:
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+    return datetime.datetime.now(datetime.UTC).isoformat()
 
 
 def _audit(level: str, event: str, detail: dict | None = None) -> None:
@@ -160,7 +161,8 @@ def _run_dev() -> int:
         msg = (
             f"make dev: app directories not yet created: {', '.join(missing)}\n"
             "  See docs/ARCHITECTURE.md §23 for the planned monorepo layout.\n"
-            "  Expected: apps/meridiand (Python FastAPI daemon) and apps/meridian-ui (TypeScript UI)."
+            "  Expected: apps/meridiand (Python FastAPI daemon)"
+            " and apps/meridian-ui (TypeScript UI)."
         )
         print(f"error: {msg}", file=sys.stderr)
         _audit("error", "make.dev.failed", {"target": "dev", "missing": missing, "message": msg})
@@ -182,7 +184,7 @@ def _run_dev() -> int:
         exit_code = 0
         try:
             while True:
-                for proc, name in zip(procs, names):
+                for proc, name in zip(procs, names, strict=True):
                     rc = proc.poll()
                     if rc is not None:
                         msg = f"make dev: {name} exited with code {rc}"

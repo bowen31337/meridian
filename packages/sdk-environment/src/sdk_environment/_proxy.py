@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from opentelemetry.trace import Status, StatusCode
@@ -12,7 +12,7 @@ from ._types import AuditLogEntry, NetworkViolation
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class OutboundProxyTransport:
@@ -87,7 +87,10 @@ class OutboundProxyTransport:
 
             if not allowed:
                 span.set_status(
-                    Status(StatusCode.ERROR, f"Outbound connection to '{host}' denied by network policy")
+                    Status(
+                        StatusCode.ERROR,
+                        f"Outbound connection to '{host}' denied by network policy",
+                    )
                 )
                 raise NetworkViolation(
                     host=host,

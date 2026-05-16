@@ -1,14 +1,14 @@
 """Grammar tests: parse() and parse_set() for dotted-name capability strings."""
+
 from __future__ import annotations
 
 import pytest
-
 from sdk_capabilities import Capability, CapabilityParseError, parse, parse_set
-
 
 # ---------------------------------------------------------------------------
 # Successful parses
 # ---------------------------------------------------------------------------
+
 
 class TestParseSuccess:
     def test_bare_namespace_name(self) -> None:
@@ -21,7 +21,9 @@ class TestParseSuccess:
         assert parse("net.fetch[api.example.com]") == Capability("net", "fetch", "api.example.com")
 
     def test_secret_read_with_slash_in_param(self) -> None:
-        assert parse("secret.read[vault/my-secret]") == Capability("secret", "read", "vault/my-secret")
+        assert parse("secret.read[vault/my-secret]") == Capability(
+            "secret", "read", "vault/my-secret"
+        )
 
     def test_underscore_in_namespace(self) -> None:
         c = parse("my_ns.my_name")
@@ -64,6 +66,7 @@ class TestCapabilityStr:
 # ---------------------------------------------------------------------------
 # Parse failures
 # ---------------------------------------------------------------------------
+
 
 class TestParseFailure:
     def test_empty_string(self) -> None:
@@ -142,17 +145,20 @@ class TestParseFailure:
 # parse_set
 # ---------------------------------------------------------------------------
 
+
 class TestParseSet:
     def test_empty_iterable(self) -> None:
         assert parse_set([]) == frozenset()
 
     def test_multiple_capabilities(self) -> None:
         result = parse_set(["exec.shell", "fs.read[/home/*]", "net.listen"])
-        assert result == frozenset([
-            Capability("exec", "shell"),
-            Capability("fs", "read", "/home/*"),
-            Capability("net", "listen"),
-        ])
+        assert result == frozenset(
+            [
+                Capability("exec", "shell"),
+                Capability("fs", "read", "/home/*"),
+                Capability("net", "listen"),
+            ]
+        )
 
     def test_deduplicates(self) -> None:
         result = parse_set(["exec.shell", "exec.shell"])
@@ -167,28 +173,32 @@ class TestParseSet:
 # All 20 canonical system capabilities from the spec
 # ---------------------------------------------------------------------------
 
+
 class TestAllKnownCapabilities:
-    @pytest.mark.parametrize("text,expected", [
-        ("fs.read[glob]",          Capability("fs",      "read",    "glob")),
-        ("fs.write[glob]",         Capability("fs",      "write",   "glob")),
-        ("fs.delete[glob]",        Capability("fs",      "delete",  "glob")),
-        ("net.fetch[host]",        Capability("net",     "fetch",   "host")),
-        ("net.listen",             Capability("net",     "listen",  None)),
-        ("exec.shell",             Capability("exec",    "shell",   None)),
-        ("exec.sudo",              Capability("exec",    "sudo",    None)),
-        ("exec.pty",               Capability("exec",    "pty",     None)),
-        ("kb.read[scope]",         Capability("kb",      "read",    "scope")),
-        ("kb.write[scope]",        Capability("kb",      "write",   "scope")),
-        ("memory.read[mem_id]",    Capability("memory",  "read",    "mem_id")),
-        ("memory.write[mem_id]",   Capability("memory",  "write",   "mem_id")),
-        ("agent.spawn[agent_id]",  Capability("agent",   "spawn",   "agent_id")),
-        ("agent.cancel",           Capability("agent",   "cancel",  None)),
-        ("secret.read[vault/name]",Capability("secret",  "read",    "vault/name")),
-        ("hook.invoke[name]",      Capability("hook",    "invoke",  "name")),
-        ("channel.send[chan_id]",  Capability("channel", "send",    "chan_id")),
-        ("channel.receive[chan_id]",Capability("channel","receive", "chan_id")),
-        ("acp.outbound[target]",   Capability("acp",     "outbound","target")),
-        ("acp.inbound[target]",    Capability("acp",     "inbound", "target")),
-    ])
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            ("fs.read[glob]", Capability("fs", "read", "glob")),
+            ("fs.write[glob]", Capability("fs", "write", "glob")),
+            ("fs.delete[glob]", Capability("fs", "delete", "glob")),
+            ("net.fetch[host]", Capability("net", "fetch", "host")),
+            ("net.listen", Capability("net", "listen", None)),
+            ("exec.shell", Capability("exec", "shell", None)),
+            ("exec.sudo", Capability("exec", "sudo", None)),
+            ("exec.pty", Capability("exec", "pty", None)),
+            ("kb.read[scope]", Capability("kb", "read", "scope")),
+            ("kb.write[scope]", Capability("kb", "write", "scope")),
+            ("memory.read[mem_id]", Capability("memory", "read", "mem_id")),
+            ("memory.write[mem_id]", Capability("memory", "write", "mem_id")),
+            ("agent.spawn[agent_id]", Capability("agent", "spawn", "agent_id")),
+            ("agent.cancel", Capability("agent", "cancel", None)),
+            ("secret.read[vault/name]", Capability("secret", "read", "vault/name")),
+            ("hook.invoke[name]", Capability("hook", "invoke", "name")),
+            ("channel.send[chan_id]", Capability("channel", "send", "chan_id")),
+            ("channel.receive[chan_id]", Capability("channel", "receive", "chan_id")),
+            ("acp.outbound[target]", Capability("acp", "outbound", "target")),
+            ("acp.inbound[target]", Capability("acp", "inbound", "target")),
+        ],
+    )
     def test_parses_correctly(self, text: str, expected: Capability) -> None:
         assert parse(text) == expected

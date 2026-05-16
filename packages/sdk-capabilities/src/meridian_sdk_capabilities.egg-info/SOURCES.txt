@@ -13,6 +13,7 @@ src/sdk_capabilities/_registry.py
 src/sdk_capabilities/_telemetry.py
 src/sdk_capabilities/_types.py
 src/sdk_capabilities/_version.py
+src/sdk_capabilities/py.typed
 tests/test_authorize.py
 tests/test_enforcement.py
 tests/test_grammar.py

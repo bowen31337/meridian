@@ -38,14 +38,13 @@ Covers MonotonicUlidGenerator, generate_ulid, IdPrefix, and UlidRuntime:
     - on_error callback invoked.
     - Span ended on failure.
 """
+
 from __future__ import annotations
 
 from unittest.mock import patch
 
 import pytest
-
 from opentelemetry.trace import StatusCode
-
 from system_ulid import (
     AuditLogEntry,
     IdPrefix,
@@ -58,7 +57,6 @@ from system_ulid import (
 from system_ulid._generator import _ENCODING
 
 from .conftest import CapturingAuditLog, MockSpan
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -84,6 +82,7 @@ def make_runtime(generator=None) -> UlidRuntime:
 # ---------------------------------------------------------------------------
 # MonotonicUlidGenerator
 # ---------------------------------------------------------------------------
+
 
 class TestMonotonicUlidGenerator:
     def test_returns_26_chars(self) -> None:
@@ -147,7 +146,7 @@ class TestGenerateUlidFunction:
 
     def test_successive_calls_are_non_decreasing(self) -> None:
         results = [generate_ulid() for _ in range(100)]
-        for a, b in zip(results, results[1:]):
+        for a, b in zip(results, results[1:], strict=False):
             assert a <= b
 
 
@@ -155,11 +154,24 @@ class TestGenerateUlidFunction:
 # IdPrefix
 # ---------------------------------------------------------------------------
 
+
 class TestIdPrefix:
     def test_all_14_prefixes_present(self) -> None:
         expected = {
-            "agent", "sess", "thr", "msg", "tc", "skill", "skillver",
-            "env", "mem", "vault", "usr", "chan", "file", "wh",
+            "agent",
+            "sess",
+            "thr",
+            "msg",
+            "tc",
+            "skill",
+            "skillver",
+            "env",
+            "mem",
+            "vault",
+            "usr",
+            "chan",
+            "file",
+            "wh",
         }
         actual = {p.value for p in IdPrefix}
         assert actual == expected
@@ -211,16 +223,19 @@ class TestIdPrefix:
 # UlidRuntime.generate — success
 # ---------------------------------------------------------------------------
 
+
 class TestGenerateSuccess:
     def test_returns_prefixed_ulid(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
         rt = make_runtime()
         result = rt.generate(IdPrefix.AGENT, options=make_options(audit_log))
         assert result.startswith("agent_")
-        suffix = result[len("agent_"):]
+        suffix = result[len("agent_") :]
         assert len(suffix) == 26
         assert all(c in _ULID_ALPHABET for c in suffix)
 
-    def test_all_prefixes_produce_correct_format(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_all_prefixes_produce_correct_format(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = make_runtime()
         for prefix in IdPrefix:
             result = rt.generate(prefix, options=make_options(audit_log))
@@ -235,22 +250,30 @@ class TestGenerateSuccess:
         make_runtime().generate(IdPrefix.MSG, options=make_options(audit_log))
         assert mock_span.attributes["ulid.prefix"] == "msg"
 
-    def test_invocation_event_attached(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_invocation_event_attached(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         make_runtime().generate(IdPrefix.AGENT, options=make_options(audit_log))
         event_names = [e[0] for e in mock_span.events]
         assert "ulid.invocation" in event_names
 
-    def test_invocation_event_operation(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_invocation_event_operation(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         make_runtime().generate(IdPrefix.AGENT, options=make_options(audit_log))
         inv = next(e for e in mock_span.events if e[0] == "ulid.invocation")
         assert inv[1]["operation"] == "generate"
 
-    def test_invocation_event_prefix(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_invocation_event_prefix(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         make_runtime().generate(IdPrefix.THR, options=make_options(audit_log))
         inv = next(e for e in mock_span.events if e[0] == "ulid.invocation")
         assert inv[1]["prefix"] == "thr"
 
-    def test_no_audit_entries_on_success(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_no_audit_entries_on_success(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         make_runtime().generate(IdPrefix.AGENT, options=make_options(audit_log))
         assert audit_log.entries == []
 
@@ -267,6 +290,7 @@ class TestGenerateSuccess:
 # UlidRuntime.generate — generator raises UlidFailure
 # ---------------------------------------------------------------------------
 
+
 class TestGenerateUlidFailure:
     def _make_failure(self) -> UlidFailure:
         return UlidFailure(
@@ -276,7 +300,9 @@ class TestGenerateUlidFailure:
             timestamp="2024-01-01T00:00:00+00:00",
         )
 
-    def test_re_raises_ulid_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_re_raises_ulid_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         failure = self._make_failure()
         rt = make_runtime(generator=lambda: (_ for _ in ()).throw(failure))
         with pytest.raises(UlidFailure) as exc_info:
@@ -309,8 +335,11 @@ class TestGenerateUlidFailure:
 # UlidRuntime.generate — generator raises unexpected exception
 # ---------------------------------------------------------------------------
 
+
 class TestGenerateStoreRaises:
-    def test_wraps_as_generate_failed(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_wraps_as_generate_failed(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         def boom() -> str:
             raise OSError("entropy device error")
 
@@ -362,7 +391,9 @@ class TestGenerateStoreRaises:
         event_names = [e[0] for e in mock_span.events]
         assert "ulid.error" in event_names
 
-    def test_exception_recorded_on_span(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_exception_recorded_on_span(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         orig = RuntimeError("boom")
 
         def boom() -> str:

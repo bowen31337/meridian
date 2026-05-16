@@ -1,4 +1,12 @@
 # Types
+# Audit
+from ._audit import AuditLog, NoopAuditLog
+
+# Handlers
+from ._handlers import HandlerOptions, install_error_handler
+
+# Telemetry
+from ._telemetry import get_tracer, record_error, record_invocation_event
 from ._types import (
     AuditLogEntry,
     BudgetExceededError,
@@ -9,15 +17,6 @@ from ._types import (
     StructuredEvent,
     VaultUnauthorizedError,
 )
-
-# Audit
-from ._audit import AuditLog, NoopAuditLog
-
-# Telemetry
-from ._telemetry import get_tracer, record_error, record_invocation_event
-
-# Handlers
-from ._handlers import HandlerOptions, install_error_handler
 
 # Version
 from ._version import CORE_ERRORS_VERSION

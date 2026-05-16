@@ -24,8 +24,10 @@ from __future__ import annotations
 import json
 import sys
 import traceback
-from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def run_subprocess_tool(

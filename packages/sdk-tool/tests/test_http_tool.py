@@ -125,7 +125,9 @@ async def test_http_tool_server_error_returned_as_is_error() -> None:
     )
 
     mock_response = MagicMock()
-    mock_response.json.return_value = {"error": {"code": "not_found", "message": "resource not found"}}
+    mock_response.json.return_value = {
+        "error": {"code": "not_found", "message": "resource not found"}
+    }
     mock_response.raise_for_status = MagicMock()
 
     mock_client = AsyncMock()

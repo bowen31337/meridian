@@ -19,6 +19,7 @@ Covers:
     - span ended on both success and failure paths.
     - audit detail contains path, operation, allowed, agent_id.
 """
+
 from __future__ import annotations
 
 import os
@@ -26,7 +27,6 @@ from pathlib import Path
 
 import pytest
 from opentelemetry.trace import StatusCode
-
 from sdk_environment import (
     AgentFilesystemPolicy,
     AuditLogEntry,
@@ -38,10 +38,10 @@ from sdk_environment import (
 
 from .conftest import CapturingAuditLog, MockSpan
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _enforcer(
     workspace: str | os.PathLike[str],
@@ -83,6 +83,7 @@ def _gate(
 # FilesystemEnforcer — workspace jail
 # ===========================================================================
 
+
 class TestEnforcerWorkspaceJail:
     def test_denies_path_outside_workspace(self, tmp_path: Path) -> None:
         ws = tmp_path / "workspace"
@@ -123,6 +124,7 @@ class TestEnforcerWorkspaceJail:
 # FilesystemEnforcer — symlink escape
 # ===========================================================================
 
+
 class TestEnforcerSymlinkEscape:
     def test_rejects_symlink_pointing_outside_workspace(self, tmp_path: Path) -> None:
         ws = tmp_path / "workspace"
@@ -159,6 +161,7 @@ class TestEnforcerSymlinkEscape:
 # ===========================================================================
 # FilesystemEnforcer — glob matching
 # ===========================================================================
+
 
 class TestEnforcerGlobMatching:
     def test_star_matches_within_single_directory(self, tmp_path: Path) -> None:
@@ -232,6 +235,7 @@ class TestEnforcerGlobMatching:
 # FilesystemEnforcer — agent allowlist (intersection, no escalation)
 # ===========================================================================
 
+
 class TestEnforcerAgentPolicy:
     def test_agent_further_constrains_read(self, tmp_path: Path) -> None:
         ws = tmp_path / "workspace"
@@ -287,13 +291,16 @@ class TestEnforcerAgentPolicy:
 # FilesystemEnforcer — assert_allowed
 # ===========================================================================
 
+
 class TestEnforcerAssertAllowed:
     def test_raises_filesystem_violation_when_denied(self, tmp_path: Path) -> None:
         ws = tmp_path / "workspace"
         ws.mkdir()
         e = _enforcer(ws, read_globs=())
         with pytest.raises(FilesystemViolation) as exc_info:
-            e.assert_allowed("read", str(ws / "secret.txt"), environment_id="env1", session_id="sess1")
+            e.assert_allowed(
+                "read", str(ws / "secret.txt"), environment_id="env1", session_id="sess1"
+            )
         v = exc_info.value
         assert v.operation == "read"
         assert "secret.txt" in v.path
@@ -341,6 +348,7 @@ class TestEnforcerAssertAllowed:
 # ===========================================================================
 # FilesystemGate — allowed request
 # ===========================================================================
+
 
 class TestGateAllowed:
     def test_check_passes_on_allowed_path(
@@ -427,6 +435,7 @@ class TestGateAllowed:
 # ===========================================================================
 # FilesystemGate — denied request
 # ===========================================================================
+
 
 class TestGateDenied:
     def test_raises_filesystem_violation(
@@ -525,6 +534,7 @@ class TestGateDenied:
 # ===========================================================================
 # Integration: default-deny per env, agent allowlist further constrains
 # ===========================================================================
+
 
 class TestIntegrationEnvAndAgentIntersection:
     def test_allowed_by_both_env_and_agent(

@@ -14,10 +14,11 @@ Every implementation of Sandbox must satisfy these tests. The suite covers:
   - on_error callback invocation.
   - Span lifecycle: span ended on both success and failure paths.
 """
+
 from __future__ import annotations
 
 import pytest
-
+from opentelemetry.trace import StatusCode
 from sdk_sandbox import (
     AuditLogEntry,
     ExecutionContext,
@@ -29,14 +30,13 @@ from sdk_sandbox import (
     ToolDefinition,
     ToolDispatcher,
 )
-from opentelemetry.trace import StatusCode
 
 from .conftest import CapturingAuditLog, MockSpan
-
 
 # ---------------------------------------------------------------------------
 # Stub dispatcher
 # ---------------------------------------------------------------------------
+
 
 class StubDispatcher(ToolDispatcher):
     kind = "in_process"
@@ -89,6 +89,7 @@ def registered_sandbox() -> Sandbox:
 # execute — success
 # ---------------------------------------------------------------------------
 
+
 class TestExecuteSuccess:
     async def test_returns_result(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
         result = await registered_sandbox().execute("test.echo", {}, CTX, make_options(audit_log))
@@ -103,17 +104,23 @@ class TestExecuteSuccess:
         assert mock_span.attributes["tool.name"] == "test.echo"
         assert mock_span.attributes["session.id"] == "sess1"
 
-    async def test_invocation_event_attached(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_invocation_event_attached(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await registered_sandbox().execute("test.echo", {}, CTX, make_options(audit_log))
         event_names = [e[0] for e in mock_span.events]
         assert "sandbox.invocation" in event_names
 
-    async def test_invocation_event_operation(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_invocation_event_operation(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await registered_sandbox().execute("test.echo", {}, CTX, make_options(audit_log))
         inv = next(e for e in mock_span.events if e[0] == "sandbox.invocation")
         assert inv[1]["operation"] == "execute"
 
-    async def test_no_audit_entries_on_success(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_no_audit_entries_on_success(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await registered_sandbox().execute("test.echo", {}, CTX, make_options(audit_log))
         assert audit_log.entries == []
 
@@ -121,7 +128,9 @@ class TestExecuteSuccess:
         await registered_sandbox().execute("test.echo", {}, CTX, make_options(audit_log))
         assert mock_span.ended
 
-    async def test_dispatches_input_and_context(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_dispatches_input_and_context(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         dispatcher = StubDispatcher()
         sb = Sandbox()
         sb.register_dispatcher(dispatcher)
@@ -138,15 +147,20 @@ class TestExecuteSuccess:
 # execute — TOOL_NOT_REGISTERED
 # ---------------------------------------------------------------------------
 
+
 class TestExecuteToolNotRegistered:
-    async def test_raises_sandbox_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_raises_sandbox_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         sb = Sandbox()
         sb.register_dispatcher(StubDispatcher())
         with pytest.raises(SandboxFailure) as exc_info:
             await sb.execute("acme.unknown", {}, CTX, make_options(audit_log))
         assert exc_info.value.code == "TOOL_NOT_REGISTERED"
 
-    async def test_audit_entry_written(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         sb = Sandbox()
         sb.register_dispatcher(StubDispatcher())
         with pytest.raises(SandboxFailure):
@@ -156,7 +170,9 @@ class TestExecuteToolNotRegistered:
         assert entry.level == "error"
         assert entry.event == "sandbox.execute.failed"
 
-    async def test_span_marked_error(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_marked_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         sb = Sandbox()
         sb.register_dispatcher(StubDispatcher())
         with pytest.raises(SandboxFailure):
@@ -164,7 +180,9 @@ class TestExecuteToolNotRegistered:
         assert mock_span.status is not None
         assert mock_span.status.status_code == StatusCode.ERROR
 
-    async def test_error_event_on_span(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_error_event_on_span(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         sb = Sandbox()
         sb.register_dispatcher(StubDispatcher())
         with pytest.raises(SandboxFailure):
@@ -172,7 +190,9 @@ class TestExecuteToolNotRegistered:
         event_names = [e[0] for e in mock_span.events]
         assert "sandbox.error" in event_names
 
-    async def test_on_error_callback(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_on_error_callback(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         errors: list[SandboxFailure] = []
         sb = Sandbox()
         sb.register_dispatcher(StubDispatcher())
@@ -181,7 +201,9 @@ class TestExecuteToolNotRegistered:
         assert len(errors) == 1
         assert errors[0].code == "TOOL_NOT_REGISTERED"
 
-    async def test_span_ended_on_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_ended_on_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         sb = Sandbox()
         sb.register_dispatcher(StubDispatcher())
         with pytest.raises(SandboxFailure):
@@ -193,15 +215,20 @@ class TestExecuteToolNotRegistered:
 # execute — DISPATCHER_KIND_NOT_REGISTERED
 # ---------------------------------------------------------------------------
 
+
 class TestExecuteDispatcherNotRegistered:
-    async def test_raises_sandbox_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_raises_sandbox_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         sb = Sandbox()
         sb.register_tool(TOOL_DEF)  # no dispatcher registered for "in_process"
         with pytest.raises(SandboxFailure) as exc_info:
             await sb.execute("test.echo", {}, CTX, make_options(audit_log))
         assert exc_info.value.code == "DISPATCHER_KIND_NOT_REGISTERED"
 
-    async def test_audit_entry_written(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         sb = Sandbox()
         sb.register_tool(TOOL_DEF)
         with pytest.raises(SandboxFailure):
@@ -209,14 +236,18 @@ class TestExecuteDispatcherNotRegistered:
         assert len(audit_log.entries) == 1
         assert audit_log.entries[0].event == "sandbox.execute.failed"
 
-    async def test_span_marked_error(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_marked_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         sb = Sandbox()
         sb.register_tool(TOOL_DEF)
         with pytest.raises(SandboxFailure):
             await sb.execute("test.echo", {}, CTX, make_options(audit_log))
         assert mock_span.status.status_code == StatusCode.ERROR
 
-    async def test_on_error_callback(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_on_error_callback(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         errors: list[SandboxFailure] = []
         sb = Sandbox()
         sb.register_tool(TOOL_DEF)
@@ -225,7 +256,9 @@ class TestExecuteDispatcherNotRegistered:
         assert len(errors) == 1
         assert errors[0].code == "DISPATCHER_KIND_NOT_REGISTERED"
 
-    async def test_span_ended_on_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_ended_on_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         sb = Sandbox()
         sb.register_tool(TOOL_DEF)
         with pytest.raises(SandboxFailure):
@@ -237,8 +270,11 @@ class TestExecuteDispatcherNotRegistered:
 # execute — dispatcher raises (TOOL_DISPATCH_FAILED)
 # ---------------------------------------------------------------------------
 
+
 class TestExecuteDispatcherRaises:
-    async def test_wraps_as_dispatch_failed(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_wraps_as_dispatch_failed(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         sb = Sandbox()
         sb.register_dispatcher(StubDispatcher(raises=RuntimeError("timeout")))
         sb.register_tool(TOOL_DEF)
@@ -255,7 +291,9 @@ class TestExecuteDispatcherRaises:
             await sb.execute("test.echo", {}, CTX, make_options(audit_log))
         assert exc_info.value.cause is orig
 
-    async def test_audit_entry_written(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         sb = Sandbox()
         sb.register_dispatcher(StubDispatcher(raises=RuntimeError("boom")))
         sb.register_tool(TOOL_DEF)
@@ -264,7 +302,9 @@ class TestExecuteDispatcherRaises:
         assert len(audit_log.entries) == 1
         assert audit_log.entries[0].level == "error"
 
-    async def test_span_marked_error(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_marked_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         sb = Sandbox()
         sb.register_dispatcher(StubDispatcher(raises=RuntimeError("boom")))
         sb.register_tool(TOOL_DEF)
@@ -272,7 +312,9 @@ class TestExecuteDispatcherRaises:
             await sb.execute("test.echo", {}, CTX, make_options(audit_log))
         assert mock_span.status.status_code == StatusCode.ERROR
 
-    async def test_exception_recorded_on_span(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_exception_recorded_on_span(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         orig = RuntimeError("boom")
         sb = Sandbox()
         sb.register_dispatcher(StubDispatcher(raises=orig))
@@ -281,7 +323,9 @@ class TestExecuteDispatcherRaises:
             await sb.execute("test.echo", {}, CTX, make_options(audit_log))
         assert orig in mock_span.recorded_exceptions
 
-    async def test_on_error_callback(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_on_error_callback(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         errors: list[SandboxFailure] = []
         sb = Sandbox()
         sb.register_dispatcher(StubDispatcher(raises=RuntimeError("bang")))
@@ -291,7 +335,9 @@ class TestExecuteDispatcherRaises:
         assert len(errors) == 1
         assert errors[0].code == "TOOL_DISPATCH_FAILED"
 
-    async def test_span_ended_on_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_ended_on_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         sb = Sandbox()
         sb.register_dispatcher(StubDispatcher(raises=RuntimeError("crash")))
         sb.register_tool(TOOL_DEF)
@@ -303,6 +349,7 @@ class TestExecuteDispatcherRaises:
 # ---------------------------------------------------------------------------
 # Registry guards
 # ---------------------------------------------------------------------------
+
 
 class TestRegistry:
     def test_duplicate_tool_raises(self) -> None:
@@ -340,6 +387,7 @@ class TestRegistry:
 # ---------------------------------------------------------------------------
 # SandboxResult helpers
 # ---------------------------------------------------------------------------
+
 
 class TestSandboxResult:
     def test_to_mcp_content_blocks_string(self) -> None:

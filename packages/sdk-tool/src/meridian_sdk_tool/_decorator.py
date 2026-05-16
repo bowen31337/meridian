@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Awaitable, Callable
-from typing import Any, overload
+from typing import TYPE_CHECKING, Any, overload
+
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 
 from pydantic import BaseModel
 
@@ -20,8 +22,16 @@ class MeridianTool:
 
         @meridian_tool(
             description="Count words in a string",
-            input_schema={"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]},
-            output_schema={"type": "object", "properties": {"count": {"type": "integer"}}, "required": ["count"]},
+            input_schema={
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+            },
+            output_schema={
+                "type": "object",
+                "properties": {"count": {"type": "integer"}},
+                "required": ["count"],
+            },
             capabilities=["fs.read[/workspace/**]"],
         )
         async def word_count(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
@@ -123,7 +133,11 @@ def meridian_tool(  # type: ignore[misc]
         # Wrap the user function to coerce a raw-dict args payload into the
         # Pydantic model declared as the first parameter, if any.
         async def _wrapped(args: Any, ctx: ToolContext) -> Any:
-            coerced = pydantic_type.model_validate(args) if (pydantic_type and isinstance(args, dict)) else args
+            coerced = (
+                pydantic_type.model_validate(args)
+                if (pydantic_type and isinstance(args, dict))
+                else args
+            )
             return await f(coerced, ctx)
 
         definition = ToolDefinition(
@@ -163,6 +177,7 @@ def _get_pydantic_arg_type(fn: Callable[..., Any]) -> type[BaseModel] | None:
         return None
     if isinstance(annotation, str):
         import sys
+
         ns = getattr(sys.modules.get(fn.__module__), "__dict__", {})
         try:
             annotation = eval(annotation, ns)  # noqa: S307

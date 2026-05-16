@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -11,11 +11,7 @@ from ._types import EventLogFailure, EventType, SessionEvent
 
 
 def _now_dt() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _now() -> str:
-    return _now_dt().isoformat()
+    return datetime.now(UTC)
 
 
 class LocalEventLogWriter(EventLogWriter):

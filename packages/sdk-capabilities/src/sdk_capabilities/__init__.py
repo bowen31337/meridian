@@ -1,15 +1,7 @@
 # Types
-from ._types import Capability, CapabilityDenied, CapabilityParseError, CapabilitySet
-
-# Grammar
-from ._grammar import parse, parse_set
-
-# Registry
-from ._registry import (
-    KNOWN_CAPABILITIES,
-    is_known,
-    param_expected,
-)
+# Authorize
+from ._audit import AuditLog, AuditLogEntry, NoopAuditLog
+from ._authorize import authorize
 
 # Enforcement
 from ._enforcement import (
@@ -21,9 +13,16 @@ from ._enforcement import (
     satisfies,
 )
 
-# Authorize
-from ._audit import AuditLog, AuditLogEntry, NoopAuditLog
-from ._authorize import authorize
+# Grammar
+from ._grammar import parse, parse_set
+
+# Registry
+from ._registry import (
+    KNOWN_CAPABILITIES,
+    is_known,
+    param_expected,
+)
+from ._types import Capability, CapabilityDenied, CapabilityParseError, CapabilitySet
 
 # Version
 from ._version import CAPABILITIES_SDK_VERSION

@@ -5,18 +5,18 @@ OTel is mocked with a lightweight MockSpan / MockTracer pair that captures
 span names, attributes, events, status, and recorded exceptions without
 requiring any SDK configuration.
 """
+
 from __future__ import annotations
 
 from typing import Any
 
 import pytest
-
 from sdk_capabilities._audit import AuditLog, AuditLogEntry
-
 
 # ---------------------------------------------------------------------------
 # OTel mock
 # ---------------------------------------------------------------------------
+
 
 class MockSpan:
     def __init__(self) -> None:
@@ -36,7 +36,7 @@ class MockSpan:
     def record_exception(self, exc: BaseException, **_: Any) -> None:
         self.recorded_exceptions.append(exc)
 
-    def __enter__(self) -> "MockSpan":
+    def __enter__(self) -> MockSpan:
         return self
 
     def __exit__(self, *_: Any) -> bool:
@@ -72,6 +72,7 @@ def mock_authorize_span(mock_authorize_tracer: MockTracer) -> MockSpan:
 # ---------------------------------------------------------------------------
 # Audit log capture
 # ---------------------------------------------------------------------------
+
 
 class CapturingAuditLog(AuditLog):
     def __init__(self) -> None:

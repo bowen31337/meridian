@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
-from typing import Callable, Coroutine
+from collections.abc import Callable, Coroutine
+from datetime import UTC, datetime
 
 from watchdog.events import (  # type: ignore[import-untyped]
     FileCreatedEvent,
@@ -17,7 +17,7 @@ from ._types import IndexEvent
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class _BridgeHandler(FileSystemEventHandler):  # type: ignore[misc]

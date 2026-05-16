@@ -1,9 +1,6 @@
 # Types
-from ._types import (
-    AuditLogEntry,
-    BlobFailure,
-    StructuredEvent,
-)
+# Audit log
+from ._audit import AuditLog, NoopAuditLog
 
 # Contract
 from ._contract import BlobStore
@@ -11,14 +8,16 @@ from ._contract import BlobStore
 # Local implementation
 from ._local import LocalBlobStore
 
-# Audit log
-from ._audit import AuditLog, NoopAuditLog
+# Runtime
+from ._runtime import BlobOptions, BlobRuntime
 
 # Telemetry
 from ._telemetry import get_tracer, record_blob_failure, record_invocation_event
-
-# Runtime
-from ._runtime import BlobOptions, BlobRuntime
+from ._types import (
+    AuditLogEntry,
+    BlobFailure,
+    StructuredEvent,
+)
 
 # Version
 from ._version import BLOB_SDK_VERSION

@@ -13,6 +13,7 @@ Usage:
 Upsert syntax uses the ANSI-standard ON CONFLICT DO UPDATE clause, available in
 SQLite >= 3.24 (Python 3.11 ships with SQLite >= 3.39).  Placeholders are `?`.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -37,18 +38,30 @@ from ._contract import (
 from ._migrations import MIGRATIONS
 from ._runtime import RepositoryDriver
 from ._types import (
-    Agent, AgentFilter,
-    Channel, ChannelFilter,
-    Environment, EnvironmentFilter,
-    MemoryEntry, MemoryFilter,
-    Message, MessageFilter,
-    Session, SessionFilter,
-    Skill, SkillFilter,
-    Thread, ThreadFilter,
-    ToolCall, ToolCallFilter,
-    UserProfile, UserProfileFilter,
-    VaultEntry, VaultFilter,
-    Webhook, WebhookFilter,
+    Agent,
+    AgentFilter,
+    Channel,
+    ChannelFilter,
+    Environment,
+    EnvironmentFilter,
+    MemoryEntry,
+    MemoryFilter,
+    Message,
+    MessageFilter,
+    Session,
+    SessionFilter,
+    Skill,
+    SkillFilter,
+    Thread,
+    ThreadFilter,
+    ToolCall,
+    ToolCallFilter,
+    UserProfile,
+    UserProfileFilter,
+    VaultEntry,
+    VaultFilter,
+    Webhook,
+    WebhookFilter,
 )
 
 Row = tuple[Any, ...]
@@ -58,71 +71,130 @@ Row = tuple[Any, ...]
 # Row converters
 # ---------------------------------------------------------------------------
 
+
 def _agent(row: Row) -> Agent:
-    return Agent(id=row[0], kind=row[1], name=row[2], config=row[3],
-                 capabilities=row[4], created_at=row[5], updated_at=row[6])
+    return Agent(
+        id=row[0],
+        kind=row[1],
+        name=row[2],
+        config=row[3],
+        capabilities=row[4],
+        created_at=row[5],
+        updated_at=row[6],
+    )
 
 
 def _session(row: Row) -> Session:
-    return Session(id=row[0], agent_id=row[1], status=row[2],
-                   metadata=row[3], created_at=row[4], updated_at=row[5])
+    return Session(
+        id=row[0],
+        agent_id=row[1],
+        status=row[2],
+        metadata=row[3],
+        created_at=row[4],
+        updated_at=row[5],
+    )
 
 
 def _thread(row: Row) -> Thread:
-    return Thread(id=row[0], session_id=row[1], title=row[2],
-                  created_at=row[3], updated_at=row[4])
+    return Thread(id=row[0], session_id=row[1], title=row[2], created_at=row[3], updated_at=row[4])
 
 
 def _message(row: Row) -> Message:
-    return Message(id=row[0], thread_id=row[1], session_id=row[2], role=row[3],
-                   content=row[4], sequence=row[5], created_at=row[6])
+    return Message(
+        id=row[0],
+        thread_id=row[1],
+        session_id=row[2],
+        role=row[3],
+        content=row[4],
+        sequence=row[5],
+        created_at=row[6],
+    )
 
 
 def _tool_call(row: Row) -> ToolCall:
-    return ToolCall(id=row[0], message_id=row[1], session_id=row[2], tool_name=row[3],
-                    input=row[4], output=row[5], status=row[6],
-                    created_at=row[7], updated_at=row[8])
+    return ToolCall(
+        id=row[0],
+        message_id=row[1],
+        session_id=row[2],
+        tool_name=row[3],
+        input=row[4],
+        output=row[5],
+        status=row[6],
+        created_at=row[7],
+        updated_at=row[8],
+    )
 
 
 def _skill(row: Row) -> Skill:
-    return Skill(id=row[0], name=row[1], description=row[2], capabilities=row[3],
-                 config=row[4], created_at=row[5], updated_at=row[6])
+    return Skill(
+        id=row[0],
+        name=row[1],
+        description=row[2],
+        capabilities=row[3],
+        config=row[4],
+        created_at=row[5],
+        updated_at=row[6],
+    )
 
 
 def _environment(row: Row) -> Environment:
-    return Environment(id=row[0], kind=row[1], status=row[2], config=row[3],
-                       created_at=row[4], updated_at=row[5])
+    return Environment(
+        id=row[0], kind=row[1], status=row[2], config=row[3], created_at=row[4], updated_at=row[5]
+    )
 
 
 def _memory_entry(row: Row) -> MemoryEntry:
-    return MemoryEntry(id=row[0], scope=row[1], key=row[2], value=row[3],
-                       created_at=row[4], updated_at=row[5])
+    return MemoryEntry(
+        id=row[0], scope=row[1], key=row[2], value=row[3], created_at=row[4], updated_at=row[5]
+    )
 
 
 def _vault_entry(row: Row) -> VaultEntry:
-    return VaultEntry(id=row[0], name=row[1], description=row[2],
-                      created_at=row[3], updated_at=row[4])
+    return VaultEntry(
+        id=row[0], name=row[1], description=row[2], created_at=row[3], updated_at=row[4]
+    )
 
 
 def _user_profile(row: Row) -> UserProfile:
-    return UserProfile(id=row[0], username=row[1], display_name=row[2],
-                       email=row[3], metadata=row[4],
-                       created_at=row[5], updated_at=row[6])
+    return UserProfile(
+        id=row[0],
+        username=row[1],
+        display_name=row[2],
+        email=row[3],
+        metadata=row[4],
+        created_at=row[5],
+        updated_at=row[6],
+    )
 
 
 def _channel(row: Row) -> Channel:
-    return Channel(id=row[0], kind=row[1], name=row[2], config=row[3],
-                   status=row[4], created_at=row[5], updated_at=row[6])
+    return Channel(
+        id=row[0],
+        kind=row[1],
+        name=row[2],
+        config=row[3],
+        status=row[4],
+        created_at=row[5],
+        updated_at=row[6],
+    )
 
 
 def _webhook(row: Row) -> Webhook:
-    return Webhook(id=row[0], url=row[1], events=row[2], secret_ref=row[3],
-                   status=row[4], created_at=row[5], updated_at=row[6])
+    return Webhook(
+        id=row[0],
+        url=row[1],
+        events=row[2],
+        secret_ref=row[3],
+        status=row[4],
+        created_at=row[5],
+        updated_at=row[6],
+    )
 
 
 # ---------------------------------------------------------------------------
 # Repository implementations
 # ---------------------------------------------------------------------------
+
 
 class _SqliteAgentRepo(AgentRepository):
     def __init__(self, conn: aiosqlite.Connection) -> None:
@@ -149,8 +221,15 @@ class _SqliteAgentRepo(AgentRepository):
                 capabilities = excluded.capabilities,
                 updated_at   = excluded.updated_at
             """,
-            (agent.id, agent.kind, agent.name, agent.config,
-             agent.capabilities, agent.created_at, agent.updated_at),
+            (
+                agent.id,
+                agent.kind,
+                agent.name,
+                agent.config,
+                agent.capabilities,
+                agent.created_at,
+                agent.updated_at,
+            ),
         )
         await self._conn.commit()
 
@@ -198,8 +277,14 @@ class _SqliteSessionRepo(SessionRepository):
                 metadata   = excluded.metadata,
                 updated_at = excluded.updated_at
             """,
-            (session.id, session.agent_id, session.status,
-             session.metadata, session.created_at, session.updated_at),
+            (
+                session.id,
+                session.agent_id,
+                session.status,
+                session.metadata,
+                session.created_at,
+                session.updated_at,
+            ),
         )
         await self._conn.commit()
 
@@ -232,8 +317,7 @@ class _SqliteThreadRepo(ThreadRepository):
 
     async def get(self, thread_id: str) -> Thread | None:
         async with self._conn.execute(
-            "SELECT id, session_id, title, created_at, updated_at"
-            " FROM threads WHERE id = ?",
+            "SELECT id, session_id, title, created_at, updated_at FROM threads WHERE id = ?",
             (thread_id,),
         ) as cur:
             row = await cur.fetchone()
@@ -249,8 +333,7 @@ class _SqliteThreadRepo(ThreadRepository):
                 title      = excluded.title,
                 updated_at = excluded.updated_at
             """,
-            (thread.id, thread.session_id, thread.title,
-             thread.created_at, thread.updated_at),
+            (thread.id, thread.session_id, thread.title, thread.created_at, thread.updated_at),
         )
         await self._conn.commit()
 
@@ -299,8 +382,15 @@ class _SqliteMessageRepo(MessageRepository):
                 content    = excluded.content,
                 sequence   = excluded.sequence
             """,
-            (message.id, message.thread_id, message.session_id, message.role,
-             message.content, message.sequence, message.created_at),
+            (
+                message.id,
+                message.thread_id,
+                message.session_id,
+                message.role,
+                message.content,
+                message.sequence,
+                message.created_at,
+            ),
         )
         await self._conn.commit()
 
@@ -336,7 +426,8 @@ class _SqliteToolCallRepo(ToolCallRepository):
 
     async def get(self, tool_call_id: str) -> ToolCall | None:
         async with self._conn.execute(
-            "SELECT id, message_id, session_id, tool_name, input, output, status, created_at, updated_at"
+            "SELECT id, message_id, session_id, tool_name, input, output,"
+            " status, created_at, updated_at"
             " FROM tool_calls WHERE id = ?",
             (tool_call_id,),
         ) as cur:
@@ -347,7 +438,8 @@ class _SqliteToolCallRepo(ToolCallRepository):
         await self._conn.execute(
             """
             INSERT INTO tool_calls
-                (id, message_id, session_id, tool_name, input, output, status, created_at, updated_at)
+                (id, message_id, session_id, tool_name, input, output,
+                 status, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
                 message_id = excluded.message_id,
@@ -358,9 +450,17 @@ class _SqliteToolCallRepo(ToolCallRepository):
                 status     = excluded.status,
                 updated_at = excluded.updated_at
             """,
-            (tool_call.id, tool_call.message_id, tool_call.session_id, tool_call.tool_name,
-             tool_call.input, tool_call.output, tool_call.status,
-             tool_call.created_at, tool_call.updated_at),
+            (
+                tool_call.id,
+                tool_call.message_id,
+                tool_call.session_id,
+                tool_call.tool_name,
+                tool_call.input,
+                tool_call.output,
+                tool_call.status,
+                tool_call.created_at,
+                tool_call.updated_at,
+            ),
         )
         await self._conn.commit()
 
@@ -383,7 +483,8 @@ class _SqliteToolCallRepo(ToolCallRepository):
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         params.extend([filter.limit, filter.offset])
         async with self._conn.execute(
-            f"SELECT id, message_id, session_id, tool_name, input, output, status, created_at, updated_at"
+            f"SELECT id, message_id, session_id, tool_name, input, output,"
+            f" status, created_at, updated_at"
             f" FROM tool_calls {where} ORDER BY created_at ASC LIMIT ? OFFSET ?",
             params,
         ) as cur:
@@ -415,8 +516,15 @@ class _SqliteSkillRepo(SkillRepository):
                 config       = excluded.config,
                 updated_at   = excluded.updated_at
             """,
-            (skill.id, skill.name, skill.description, skill.capabilities,
-             skill.config, skill.created_at, skill.updated_at),
+            (
+                skill.id,
+                skill.name,
+                skill.description,
+                skill.capabilities,
+                skill.config,
+                skill.created_at,
+                skill.updated_at,
+            ),
         )
         await self._conn.commit()
 
@@ -457,8 +565,14 @@ class _SqliteEnvironmentRepo(EnvironmentRepository):
                 config     = excluded.config,
                 updated_at = excluded.updated_at
             """,
-            (environment.id, environment.kind, environment.status,
-             environment.config, environment.created_at, environment.updated_at),
+            (
+                environment.id,
+                environment.kind,
+                environment.status,
+                environment.config,
+                environment.created_at,
+                environment.updated_at,
+            ),
         )
         await self._conn.commit()
 
@@ -491,8 +605,7 @@ class _SqliteMemoryRepo(MemoryRepository):
 
     async def get(self, entry_id: str) -> MemoryEntry | None:
         async with self._conn.execute(
-            "SELECT id, scope, key, value, created_at, updated_at"
-            " FROM memory_entries WHERE id = ?",
+            "SELECT id, scope, key, value, created_at, updated_at FROM memory_entries WHERE id = ?",
             (entry_id,),
         ) as cur:
             row = await cur.fetchone()
@@ -509,8 +622,7 @@ class _SqliteMemoryRepo(MemoryRepository):
                 value      = excluded.value,
                 updated_at = excluded.updated_at
             """,
-            (entry.id, entry.scope, entry.key, entry.value,
-             entry.created_at, entry.updated_at),
+            (entry.id, entry.scope, entry.key, entry.value, entry.created_at, entry.updated_at),
         )
         await self._conn.commit()
 
@@ -540,8 +652,7 @@ class _SqliteVaultRepo(VaultRepository):
 
     async def get(self, entry_id: str) -> VaultEntry | None:
         async with self._conn.execute(
-            "SELECT id, name, description, created_at, updated_at"
-            " FROM vault_entries WHERE id = ?",
+            "SELECT id, name, description, created_at, updated_at FROM vault_entries WHERE id = ?",
             (entry_id,),
         ) as cur:
             row = await cur.fetchone()
@@ -557,8 +668,7 @@ class _SqliteVaultRepo(VaultRepository):
                 description = excluded.description,
                 updated_at  = excluded.updated_at
             """,
-            (entry.id, entry.name, entry.description,
-             entry.created_at, entry.updated_at),
+            (entry.id, entry.name, entry.description, entry.created_at, entry.updated_at),
         )
         await self._conn.commit()
 
@@ -601,8 +711,15 @@ class _SqliteUserProfileRepo(UserProfileRepository):
                 metadata     = excluded.metadata,
                 updated_at   = excluded.updated_at
             """,
-            (profile.id, profile.username, profile.display_name,
-             profile.email, profile.metadata, profile.created_at, profile.updated_at),
+            (
+                profile.id,
+                profile.username,
+                profile.display_name,
+                profile.email,
+                profile.metadata,
+                profile.created_at,
+                profile.updated_at,
+            ),
         )
         await self._conn.commit()
 
@@ -644,8 +761,15 @@ class _SqliteChannelRepo(ChannelRepository):
                 status     = excluded.status,
                 updated_at = excluded.updated_at
             """,
-            (channel.id, channel.kind, channel.name, channel.config,
-             channel.status, channel.created_at, channel.updated_at),
+            (
+                channel.id,
+                channel.kind,
+                channel.name,
+                channel.config,
+                channel.status,
+                channel.created_at,
+                channel.updated_at,
+            ),
         )
         await self._conn.commit()
 
@@ -697,8 +821,15 @@ class _SqliteWebhookRepo(WebhookRepository):
                 status     = excluded.status,
                 updated_at = excluded.updated_at
             """,
-            (webhook.id, webhook.url, webhook.events, webhook.secret_ref,
-             webhook.status, webhook.created_at, webhook.updated_at),
+            (
+                webhook.id,
+                webhook.url,
+                webhook.events,
+                webhook.secret_ref,
+                webhook.status,
+                webhook.created_at,
+                webhook.updated_at,
+            ),
         )
         await self._conn.commit()
 
@@ -725,6 +856,7 @@ class _SqliteWebhookRepo(WebhookRepository):
 # ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
+
 
 class SqliteRepositoryDriver(RepositoryDriver):
     """
@@ -754,7 +886,7 @@ class SqliteRepositoryDriver(RepositoryDriver):
         self._webhooks = _SqliteWebhookRepo(conn)
 
     @classmethod
-    async def open(cls, db_path: str | Path = ":memory:") -> "SqliteRepositoryDriver":
+    async def open(cls, db_path: str | Path = ":memory:") -> SqliteRepositoryDriver:
         """Open (or create) an SQLite database and return a driver instance."""
         conn = await aiosqlite.connect(str(db_path))
         conn.row_factory = aiosqlite.Row

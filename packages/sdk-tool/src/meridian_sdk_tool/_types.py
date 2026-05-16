@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -91,13 +91,7 @@ class ContainerHandler(BaseModel):
 
 
 ToolHandler = Annotated[
-    Union[
-        InProcessHandler,
-        SubprocessHandler,
-        McpHandler,
-        HttpHandler,
-        ContainerHandler,
-    ],
+    InProcessHandler | SubprocessHandler | McpHandler | HttpHandler | ContainerHandler,
     Field(discriminator="kind"),
 ]
 
@@ -116,10 +110,10 @@ class ToolDefinition(BaseModel):
 
     name: str
     description: str
-    input_schema: dict[str, Any]   # JSON Schema — validated pre-dispatch
+    input_schema: dict[str, Any]  # JSON Schema — validated pre-dispatch
     output_schema: dict[str, Any] | None = None  # JSON Schema — validated post-dispatch
     capabilities: list[Capability] = Field(default_factory=list)
-    required_environment: str | None = None   # e.g. "docker"; None = any
+    required_environment: str | None = None  # e.g. "docker"; None = any
     timeout_ms: int = 30_000
     memory_cap_mb: int | None = None
     handler: ToolHandler

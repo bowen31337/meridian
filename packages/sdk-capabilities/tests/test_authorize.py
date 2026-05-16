@@ -38,11 +38,11 @@ Covers:
     - CapabilityDenied.missing is the frozenset of unsatisfied caps.
     - CapabilityDenied message includes the missing cap name.
 """
+
 from __future__ import annotations
 
 import pytest
 from opentelemetry.trace import StatusCode
-
 from sdk_capabilities import (
     Capability,
     CapabilityDenied,
@@ -51,14 +51,13 @@ from sdk_capabilities import (
     parse,
     parse_set,
 )
-from sdk_capabilities._audit import AuditLogEntry
 
 from .conftest import CapturingAuditLog, MockSpan
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def cap(text: str) -> Capability:
     return parse(text)
@@ -71,6 +70,7 @@ def caps(*texts: str) -> CapabilitySet:
 # ===========================================================================
 # Glob satisfaction — grant param treated as glob
 # ===========================================================================
+
 
 class TestGlobSatisfaction:
     def test_unrestricted_grant_covers_concrete_param(
@@ -178,6 +178,7 @@ class TestGlobSatisfaction:
 # Intersection check
 # ===========================================================================
 
+
 class TestIntersectionCheck:
     def test_all_required_satisfied_passes(
         self, mock_authorize_span: MockSpan, audit_log: CapturingAuditLog
@@ -242,6 +243,7 @@ class TestIntersectionCheck:
 # OTel span
 # ===========================================================================
 
+
 class TestOTelSpan:
     def test_span_name_on_success(
         self, mock_authorize_span: MockSpan, audit_log: CapturingAuditLog
@@ -260,8 +262,11 @@ class TestOTelSpan:
         self, mock_authorize_span: MockSpan, audit_log: CapturingAuditLog
     ) -> None:
         authorize(
-            caps("exec.shell"), caps("exec.shell"), {},
-            agent_id="agent-42", audit_log=audit_log,
+            caps("exec.shell"),
+            caps("exec.shell"),
+            {},
+            agent_id="agent-42",
+            audit_log=audit_log,
         )
         assert mock_authorize_span.attributes["agent.id"] == "agent-42"
 
@@ -269,17 +274,18 @@ class TestOTelSpan:
         self, mock_authorize_span: MockSpan, audit_log: CapturingAuditLog
     ) -> None:
         authorize(
-            caps("exec.shell"), caps("exec.shell"), {},
-            session_id="sess-7", audit_log=audit_log,
+            caps("exec.shell"),
+            caps("exec.shell"),
+            {},
+            session_id="sess-7",
+            audit_log=audit_log,
         )
         assert mock_authorize_span.attributes["session.id"] == "sess-7"
 
     def test_span_attributes_capability_required(
         self, mock_authorize_span: MockSpan, audit_log: CapturingAuditLog
     ) -> None:
-        authorize(
-            caps("exec.shell"), caps("exec.shell"), {}, audit_log=audit_log
-        )
+        authorize(caps("exec.shell"), caps("exec.shell"), {}, audit_log=audit_log)
         assert "exec.shell" in mock_authorize_span.attributes["capability.required"]
 
     def test_span_emits_invocation_event(
@@ -341,6 +347,7 @@ class TestOTelSpan:
 # Audit log
 # ===========================================================================
 
+
 class TestAuditLog:
     def test_exactly_one_entry_written_on_success(
         self, mock_authorize_span: MockSpan, audit_log: CapturingAuditLog
@@ -368,9 +375,7 @@ class TestAuditLog:
             authorize(frozenset(), caps("exec.shell"), {}, audit_log=audit_log)
         assert audit_log.entries[0].level == "error"
 
-    def test_event_name(
-        self, mock_authorize_span: MockSpan, audit_log: CapturingAuditLog
-    ) -> None:
+    def test_event_name(self, mock_authorize_span: MockSpan, audit_log: CapturingAuditLog) -> None:
         authorize(caps("exec.shell"), caps("exec.shell"), {}, audit_log=audit_log)
         assert audit_log.entries[0].event == "capability.authorize"
 
@@ -432,8 +437,11 @@ class TestAuditLog:
         self, mock_authorize_span: MockSpan, audit_log: CapturingAuditLog
     ) -> None:
         authorize(
-            caps("exec.shell"), caps("exec.shell"), {},
-            agent_id="my-agent", audit_log=audit_log,
+            caps("exec.shell"),
+            caps("exec.shell"),
+            {},
+            agent_id="my-agent",
+            audit_log=audit_log,
         )
         assert audit_log.entries[0].agent_id == "my-agent"
 
@@ -441,8 +449,11 @@ class TestAuditLog:
         self, mock_authorize_span: MockSpan, audit_log: CapturingAuditLog
     ) -> None:
         authorize(
-            caps("exec.shell"), caps("exec.shell"), {},
-            session_id="sess-99", audit_log=audit_log,
+            caps("exec.shell"),
+            caps("exec.shell"),
+            {},
+            session_id="sess-99",
+            audit_log=audit_log,
         )
         assert audit_log.entries[0].session_id == "sess-99"
 
@@ -452,15 +463,14 @@ class TestAuditLog:
         authorize(caps("exec.shell"), caps("exec.shell"), {}, audit_log=audit_log)
         assert audit_log.entries[0].timestamp != ""
 
-    def test_no_audit_log_does_not_raise(
-        self, mock_authorize_span: MockSpan
-    ) -> None:
+    def test_no_audit_log_does_not_raise(self, mock_authorize_span: MockSpan) -> None:
         authorize(caps("exec.shell"), caps("exec.shell"), {})  # no audit_log — NoopAuditLog used
 
 
 # ===========================================================================
 # Error surface — CapabilityDenied
 # ===========================================================================
+
 
 class TestCapabilityDeniedError:
     def test_raises_capability_denied_type(

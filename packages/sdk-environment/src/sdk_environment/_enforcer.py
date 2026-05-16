@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from ._types import AgentNetworkPolicy, NetworkPolicy, NetworkViolation
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class NetworkEnforcer:
@@ -39,18 +39,14 @@ class NetworkEnforcer:
         if host in env.blocked_hosts:
             return False
 
-        if not env.egress_allowed:
-            if host not in env.allowed_hosts:
-                return False
-        elif env.allowed_hosts:
-            if host not in env.allowed_hosts:
-                return False
+        if (not env.egress_allowed or env.allowed_hosts) and host not in env.allowed_hosts:
+            return False
 
-        if self._agent is not None and self._agent.allowed_hosts:
-            if host not in self._agent.allowed_hosts:
-                return False
-
-        return True
+        return not (
+            self._agent is not None
+            and self._agent.allowed_hosts
+            and host not in self._agent.allowed_hosts
+        )
 
     def assert_allowed(
         self,

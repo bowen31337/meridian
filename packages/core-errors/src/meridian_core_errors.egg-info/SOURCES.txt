@@ -5,6 +5,7 @@ src/core_errors/_handlers.py
 src/core_errors/_telemetry.py
 src/core_errors/_types.py
 src/core_errors/_version.py
+src/core_errors/py.typed
 src/meridian_core_errors.egg-info/PKG-INFO
 src/meridian_core_errors.egg-info/SOURCES.txt
 src/meridian_core_errors.egg-info/dependency_links.txt

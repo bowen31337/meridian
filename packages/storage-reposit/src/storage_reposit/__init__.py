@@ -1,23 +1,27 @@
 # Types
-from ._types import AuditLogEntry, EventSeq, IndexerFailure, StructuredEvent
-
-# Contract
-from ._contract import EventHandler
-
-# Core components
-from ._reader import LocalEventLogReader
-from ._store import SQLiteProjectionStore
-from ._indexer import BackgroundIndexer
-
 # Audit log
 from ._audit import AuditLog, NoopAuditLog
 
-# Telemetry
-from ._telemetry import get_tracer, record_indexer_failure, record_invocation_event, record_reader_failure
+# Contract
+from ._contract import EventHandler
+from ._indexer import BackgroundIndexer
+
+# Core components
+from ._reader import LocalEventLogReader
+from ._reader_runtime import ReaderOptions, ReaderRuntime
 
 # Runtime
 from ._runtime import IndexerOptions, IndexerRuntime
-from ._reader_runtime import ReaderOptions, ReaderRuntime
+from ._store import SQLiteProjectionStore
+
+# Telemetry
+from ._telemetry import (
+    get_tracer,
+    record_indexer_failure,
+    record_invocation_event,
+    record_reader_failure,
+)
+from ._types import AuditLogEntry, EventSeq, IndexerFailure, StructuredEvent
 
 # Version
 from ._version import INDEXER_SDK_VERSION

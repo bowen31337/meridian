@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from opentelemetry.trace import Status, StatusCode
 
@@ -11,7 +11,7 @@ from ._types import AuditLogEntry, FilesystemViolation
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class FilesystemGate:

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import AsyncIterator, Protocol, runtime_checkable
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
 
 from .types import ModelCallOpts, ModelCountReq, ModelEvent, TokenCount
 

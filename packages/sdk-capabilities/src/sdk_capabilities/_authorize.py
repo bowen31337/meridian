@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from opentelemetry.trace import Status, StatusCode
@@ -13,7 +13,7 @@ from ._types import Capability, CapabilityDenied, CapabilitySet
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _glob_to_regex(pattern: str) -> str:
@@ -69,10 +69,7 @@ def _satisfies_glob(required: Capability, granted: Capability) -> bool:
 
 def _missing_glob(required: CapabilitySet, granted: CapabilitySet) -> CapabilitySet:
     """Return the subset of `required` not covered by any element of `granted` (glob matching)."""
-    return frozenset(
-        req for req in required
-        if not any(_satisfies_glob(req, g) for g in granted)
-    )
+    return frozenset(req for req in required if not any(_satisfies_glob(req, g) for g in granted))
 
 
 def authorize(
@@ -144,7 +141,5 @@ def authorize(
 
         if not allowed:
             missing_str = ", ".join(sorted(str(c) for c in gap))
-            span.set_status(
-                Status(StatusCode.ERROR, f"Capability denied; missing: {missing_str}")
-            )
+            span.set_status(Status(StatusCode.ERROR, f"Capability denied; missing: {missing_str}"))
             raise CapabilityDenied(gap)

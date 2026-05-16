@@ -16,10 +16,11 @@ exercised through EnvironmentRuntime. The suite covers:
   - on_error callback invocation.
   - Span lifecycle: span ended on both success and failure paths.
 """
+
 from __future__ import annotations
 
 import pytest
-
+from opentelemetry.trace import StatusCode
 from sdk_environment import (
     AuditLogEntry,
     CapabilityEnvelope,
@@ -34,14 +35,13 @@ from sdk_environment import (
     ReclaimRequest,
     RuntimeOptions,
 )
-from opentelemetry.trace import StatusCode
 
 from .conftest import CapturingAuditLog, MockSpan
-
 
 # ---------------------------------------------------------------------------
 # Stub driver
 # ---------------------------------------------------------------------------
+
 
 class StubDriver(EnvironmentDriver):
     kind = "test.stub"
@@ -90,6 +90,7 @@ class StubDriver(EnvironmentDriver):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def make_provision(kind: str = "test.stub") -> ProvisionRequest:
     return ProvisionRequest(environment_id="env1", environment_kind=kind, session_id="sess1")
 
@@ -107,7 +108,9 @@ def make_reclaim(kind: str = "test.stub") -> ReclaimRequest:
     return ReclaimRequest(environment_id="env1", environment_kind=kind, session_id="sess1")
 
 
-def make_options(audit: CapturingAuditLog, errors: list[EnvironmentFailure] | None = None) -> RuntimeOptions:
+def make_options(
+    audit: CapturingAuditLog, errors: list[EnvironmentFailure] | None = None
+) -> RuntimeOptions:
     return RuntimeOptions(
         audit_log=audit,
         on_error=(lambda e: errors.append(e)) if errors is not None else None,
@@ -124,8 +127,11 @@ def registered_runtime() -> EnvironmentRuntime:
 # provision — success
 # ---------------------------------------------------------------------------
 
+
 class TestProvisionSuccess:
-    async def test_dispatches_to_driver(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_dispatches_to_driver(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         driver = StubDriver()
         rt = EnvironmentRuntime()
         rt.register(driver)
@@ -142,17 +148,23 @@ class TestProvisionSuccess:
         assert mock_span.attributes["environment.kind"] == "test.stub"
         assert mock_span.attributes["session.id"] == "sess1"
 
-    async def test_invocation_event_attached(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_invocation_event_attached(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await registered_runtime().provision(make_provision(), make_options(audit_log))
         event_names = [e[0] for e in mock_span.events]
         assert "environment.invocation" in event_names
 
-    async def test_invocation_event_operation(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_invocation_event_operation(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await registered_runtime().provision(make_provision(), make_options(audit_log))
         inv = next(e for e in mock_span.events if e[0] == "environment.invocation")
         assert inv[1]["operation"] == "provision"
 
-    async def test_no_audit_entries_on_success(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_no_audit_entries_on_success(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await registered_runtime().provision(make_provision(), make_options(audit_log))
         assert audit_log.entries == []
 
@@ -165,14 +177,19 @@ class TestProvisionSuccess:
 # provision — ENV_KIND_NOT_REGISTERED
 # ---------------------------------------------------------------------------
 
+
 class TestProvisionUnknownKind:
-    async def test_raises_environment_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_raises_environment_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = EnvironmentRuntime()
         with pytest.raises(EnvironmentFailure) as exc_info:
             await rt.provision(make_provision("acme.unknown"), make_options(audit_log))
         assert exc_info.value.code == "ENV_KIND_NOT_REGISTERED"
 
-    async def test_audit_entry_written(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = EnvironmentRuntime()
         with pytest.raises(EnvironmentFailure):
             await rt.provision(make_provision("acme.unknown"), make_options(audit_log))
@@ -181,21 +198,27 @@ class TestProvisionUnknownKind:
         assert entry.level == "error"
         assert entry.event == "environment.provision.failed"
 
-    async def test_span_marked_error(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_marked_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = EnvironmentRuntime()
         with pytest.raises(EnvironmentFailure):
             await rt.provision(make_provision("acme.unknown"), make_options(audit_log))
         assert mock_span.status is not None
         assert mock_span.status.status_code == StatusCode.ERROR
 
-    async def test_error_event_on_span(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_error_event_on_span(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = EnvironmentRuntime()
         with pytest.raises(EnvironmentFailure):
             await rt.provision(make_provision("acme.unknown"), make_options(audit_log))
         event_names = [e[0] for e in mock_span.events]
         assert "environment.error" in event_names
 
-    async def test_on_error_callback(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_on_error_callback(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         errors: list[EnvironmentFailure] = []
         rt = EnvironmentRuntime()
         with pytest.raises(EnvironmentFailure):
@@ -203,7 +226,9 @@ class TestProvisionUnknownKind:
         assert len(errors) == 1
         assert errors[0].code == "ENV_KIND_NOT_REGISTERED"
 
-    async def test_span_ended_on_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_ended_on_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = EnvironmentRuntime()
         with pytest.raises(EnvironmentFailure):
             await rt.provision(make_provision("acme.unknown"), make_options(audit_log))
@@ -214,8 +239,11 @@ class TestProvisionUnknownKind:
 # provision — driver raises
 # ---------------------------------------------------------------------------
 
+
 class TestProvisionDriverRaises:
-    async def test_wraps_as_provision_failed(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_wraps_as_provision_failed(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         driver = StubDriver(provision_raises=RuntimeError("disk full"))
         rt = EnvironmentRuntime()
         rt.register(driver)
@@ -232,7 +260,9 @@ class TestProvisionDriverRaises:
             await rt.provision(make_provision(), make_options(audit_log))
         assert exc_info.value.cause is orig
 
-    async def test_audit_entry_written(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         driver = StubDriver(provision_raises=RuntimeError("boom"))
         rt = EnvironmentRuntime()
         rt.register(driver)
@@ -241,7 +271,9 @@ class TestProvisionDriverRaises:
         assert len(audit_log.entries) == 1
         assert audit_log.entries[0].level == "error"
 
-    async def test_span_marked_error(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_marked_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         driver = StubDriver(provision_raises=RuntimeError("boom"))
         rt = EnvironmentRuntime()
         rt.register(driver)
@@ -249,7 +281,9 @@ class TestProvisionDriverRaises:
             await rt.provision(make_provision(), make_options(audit_log))
         assert mock_span.status.status_code == StatusCode.ERROR
 
-    async def test_exception_recorded_on_span(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_exception_recorded_on_span(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         orig = RuntimeError("boom")
         driver = StubDriver(provision_raises=orig)
         rt = EnvironmentRuntime()
@@ -263,6 +297,7 @@ class TestProvisionDriverRaises:
 # execute — success
 # ---------------------------------------------------------------------------
 
+
 class TestExecuteSuccess:
     async def test_returns_result(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
         result = await registered_runtime().execute(make_execute(), make_options(audit_log))
@@ -273,12 +308,16 @@ class TestExecuteSuccess:
         await registered_runtime().execute(make_execute(), make_options(audit_log))
         assert mock_span.name == "environment.execute"
 
-    async def test_invocation_event_operation(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_invocation_event_operation(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await registered_runtime().execute(make_execute(), make_options(audit_log))
         inv = next(e for e in mock_span.events if e[0] == "environment.invocation")
         assert inv[1]["operation"] == "execute"
 
-    async def test_no_audit_entries_on_success(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_no_audit_entries_on_success(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await registered_runtime().execute(make_execute(), make_options(audit_log))
         assert audit_log.entries == []
 
@@ -291,20 +330,27 @@ class TestExecuteSuccess:
 # execute — ENV_KIND_NOT_REGISTERED
 # ---------------------------------------------------------------------------
 
+
 class TestExecuteUnknownKind:
-    async def test_raises_environment_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_raises_environment_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = EnvironmentRuntime()
         with pytest.raises(EnvironmentFailure) as exc_info:
             await rt.execute(make_execute("acme.unknown"), make_options(audit_log))
         assert exc_info.value.code == "ENV_KIND_NOT_REGISTERED"
 
-    async def test_audit_event_name(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_event_name(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = EnvironmentRuntime()
         with pytest.raises(EnvironmentFailure):
             await rt.execute(make_execute("acme.unknown"), make_options(audit_log))
         assert audit_log.entries[0].event == "environment.execute.failed"
 
-    async def test_span_marked_error(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_marked_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = EnvironmentRuntime()
         with pytest.raises(EnvironmentFailure):
             await rt.execute(make_execute("acme.unknown"), make_options(audit_log))
@@ -315,8 +361,11 @@ class TestExecuteUnknownKind:
 # execute — driver raises
 # ---------------------------------------------------------------------------
 
+
 class TestExecuteDriverRaises:
-    async def test_wraps_as_execute_failed(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_wraps_as_execute_failed(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         driver = StubDriver(execute_raises=RuntimeError("timeout"))
         rt = EnvironmentRuntime()
         rt.register(driver)
@@ -333,7 +382,9 @@ class TestExecuteDriverRaises:
             await rt.execute(make_execute(), make_options(audit_log))
         assert exc_info.value.cause is orig
 
-    async def test_audit_entry_written(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         driver = StubDriver(execute_raises=RuntimeError("boom"))
         rt = EnvironmentRuntime()
         rt.register(driver)
@@ -346,8 +397,11 @@ class TestExecuteDriverRaises:
 # reclaim — success
 # ---------------------------------------------------------------------------
 
+
 class TestReclaimSuccess:
-    async def test_dispatches_to_driver(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_dispatches_to_driver(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         driver = StubDriver()
         rt = EnvironmentRuntime()
         rt.register(driver)
@@ -358,12 +412,16 @@ class TestReclaimSuccess:
         await registered_runtime().reclaim(make_reclaim(), make_options(audit_log))
         assert mock_span.name == "environment.reclaim"
 
-    async def test_invocation_event_operation(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_invocation_event_operation(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await registered_runtime().reclaim(make_reclaim(), make_options(audit_log))
         inv = next(e for e in mock_span.events if e[0] == "environment.invocation")
         assert inv[1]["operation"] == "reclaim"
 
-    async def test_no_audit_entries_on_success(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_no_audit_entries_on_success(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await registered_runtime().reclaim(make_reclaim(), make_options(audit_log))
         assert audit_log.entries == []
 
@@ -376,14 +434,19 @@ class TestReclaimSuccess:
 # reclaim — ENV_KIND_NOT_REGISTERED
 # ---------------------------------------------------------------------------
 
+
 class TestReclaimUnknownKind:
-    async def test_raises_environment_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_raises_environment_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = EnvironmentRuntime()
         with pytest.raises(EnvironmentFailure) as exc_info:
             await rt.reclaim(make_reclaim("acme.unknown"), make_options(audit_log))
         assert exc_info.value.code == "ENV_KIND_NOT_REGISTERED"
 
-    async def test_audit_event_name(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_event_name(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = EnvironmentRuntime()
         with pytest.raises(EnvironmentFailure):
             await rt.reclaim(make_reclaim("acme.unknown"), make_options(audit_log))
@@ -394,8 +457,11 @@ class TestReclaimUnknownKind:
 # reclaim — driver raises
 # ---------------------------------------------------------------------------
 
+
 class TestReclaimDriverRaises:
-    async def test_wraps_as_reclaim_failed(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_wraps_as_reclaim_failed(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         driver = StubDriver(reclaim_raises=RuntimeError("still running"))
         rt = EnvironmentRuntime()
         rt.register(driver)
@@ -403,7 +469,9 @@ class TestReclaimDriverRaises:
             await rt.reclaim(make_reclaim(), make_options(audit_log))
         assert exc_info.value.code == "ENV_RECLAIM_FAILED"
 
-    async def test_audit_entry_written(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         driver = StubDriver(reclaim_raises=RuntimeError("boom"))
         rt = EnvironmentRuntime()
         rt.register(driver)
@@ -415,6 +483,7 @@ class TestReclaimDriverRaises:
 # ---------------------------------------------------------------------------
 # network_policy / capability_envelope
 # ---------------------------------------------------------------------------
+
 
 class TestDriverProperties:
     def test_network_policy_registered(self) -> None:
@@ -447,6 +516,7 @@ class TestDriverProperties:
 # ---------------------------------------------------------------------------
 # Registry guard
 # ---------------------------------------------------------------------------
+
 
 class TestRegistry:
     def test_duplicate_registration_raises(self) -> None:

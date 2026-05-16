@@ -2,21 +2,21 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime, timezone
+from collections.abc import Callable, Coroutine
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable, Coroutine
 
 from ._audit import write_audit_event
 from ._chunker import chunk_file, should_index_path
 from ._telemetry import get_tracer, record_indexer_failure, record_invocation_event
-from ._types import Chunk, IndexEvent, IndexerError
+from ._types import Chunk, IndexerError, IndexEvent
 from ._watcher import WorkspaceWatcher
 
 _WORKSPACE_ENV = "WORKSPACE"
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class WorkspaceIndexer:
@@ -124,9 +124,7 @@ class WorkspaceIndexer:
                     error={"type": type(exc).__name__, "message": str(exc)},
                     audit_log_path=self._audit_log_path,
                 )
-                raise IndexerError(
-                    "INDEXER_FILE_FAILED", str(exc), file_path=file_path
-                ) from exc
+                raise IndexerError("INDEXER_FILE_FAILED", str(exc), file_path=file_path) from exc
 
     # ------------------------------------------------------------------
     # Internal

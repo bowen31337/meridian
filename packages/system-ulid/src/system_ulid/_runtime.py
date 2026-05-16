@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Callable
+from datetime import UTC, datetime
 
 from ._audit import AuditLog, NoopAuditLog
-from ._generator import MonotonicUlidGenerator, generate_ulid
+from ._generator import generate_ulid
 from ._prefixes import IdPrefix
 from ._telemetry import get_tracer, record_invocation_event, record_ulid_failure
 from ._types import AuditLogEntry, StructuredEvent, UlidFailure
@@ -20,7 +20,7 @@ class UlidOptions:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class UlidRuntime:

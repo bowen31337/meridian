@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 # opentelemetry-api is an optional dependency.  We degrade gracefully when it
 # is absent so the SDK works in minimal environments (e.g. a bare subprocess
@@ -30,7 +33,9 @@ async def tool_span(
         yield None
         return
 
-    tracer = trace.get_tracer("meridian.sdk_tool", schema_url="https://opentelemetry.io/schemas/1.24.0")
+    tracer = trace.get_tracer(
+        "meridian.sdk_tool", schema_url="https://opentelemetry.io/schemas/1.24.0"
+    )
     with tracer.start_as_current_span("tool.call") as span:
         span.set_attribute("tool.name", tool_name)
         if session_id:

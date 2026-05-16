@@ -1,4 +1,5 @@
 """Tests for ModelProvider Protocol conformance and ProviderCapabilities defaults."""
+
 from __future__ import annotations
 
 from meridian_sdk_provider import ModelProvider, ProviderCapabilities
@@ -19,7 +20,9 @@ def test_provider_capabilities_defaults() -> None:
 
 
 def test_provider_capabilities_custom() -> None:
-    caps = ProviderCapabilities(streaming=False, thinking=True, cache_control=True, count_tokens=True)
+    caps = ProviderCapabilities(
+        streaming=False, thinking=True, cache_control=True, count_tokens=True
+    )
     assert caps.streaming is False
     assert caps.thinking is True
     assert caps.cache_control is True

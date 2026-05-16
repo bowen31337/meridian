@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -37,7 +37,7 @@ class ThinkingBlock(BaseModel):
 
 
 ContentBlock = Annotated[
-    Union[TextBlock, ToolUseBlock, ToolResultBlock, ThinkingBlock],
+    TextBlock | ToolUseBlock | ToolResultBlock | ThinkingBlock,
     Field(discriminator="type"),
 ]
 
@@ -121,15 +121,13 @@ class MessageStopEvent(BaseModel):
 
 
 ModelEvent = Annotated[
-    Union[
-        MessageStartEvent,
-        TextDeltaEvent,
-        ThinkingDeltaEvent,
-        ToolUseStartEvent,
-        ToolInputDeltaEvent,
-        MessageDeltaEvent,
-        MessageStopEvent,
-    ],
+    MessageStartEvent
+    | TextDeltaEvent
+    | ThinkingDeltaEvent
+    | ToolUseStartEvent
+    | ToolInputDeltaEvent
+    | MessageDeltaEvent
+    | MessageStopEvent,
     Field(discriminator="type"),
 ]
 

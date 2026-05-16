@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class IdPrefix(str, Enum):
+class IdPrefix(StrEnum):
     AGENT = "agent"
     SESS = "sess"
     THR = "thr"

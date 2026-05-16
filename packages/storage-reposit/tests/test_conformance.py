@@ -83,6 +83,7 @@ Covers:
     - on_error callback invoked for every failure.
     - Span is ended on unexpected exception.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -92,7 +93,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
+from opentelemetry.trace import StatusCode
 from storage_event_log import SessionEvent
 from storage_reposit import (
     AuditLogEntry,
@@ -105,14 +106,19 @@ from storage_reposit import (
     ReaderRuntime,
     SQLiteProjectionStore,
 )
-from opentelemetry.trace import StatusCode
 
-from .conftest import CapturingAuditLog, CapturingEventHandler, FailingEventHandler, MockSpan, StubReader
-
+from .conftest import (
+    CapturingAuditLog,
+    CapturingEventHandler,
+    FailingEventHandler,
+    MockSpan,
+    StubReader,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def write_ndjson(path: Path, records: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -122,7 +128,12 @@ def write_ndjson(path: Path, records: list[dict[str, Any]]) -> None:
 
 
 def make_record(seq: int, event_type: str = "message.added", **extra: Any) -> dict[str, Any]:
-    r: dict[str, Any] = {"seq": seq, "ts": f"2024-01-01T00:00:0{seq}.000+00:00", "type": event_type, "data": {}}
+    r: dict[str, Any] = {
+        "seq": seq,
+        "ts": f"2024-01-01T00:00:0{seq}.000+00:00",
+        "type": event_type,
+        "data": {},
+    }
     r.update(extra)
     return r
 
@@ -163,7 +174,9 @@ def make_reader_options(
 
 
 def make_session_event(seq: int) -> SessionEvent:
-    return SessionEvent(seq=seq, ts=f"2024-01-01T00:00:0{seq}.000+00:00", type="message.added", data={})
+    return SessionEvent(
+        seq=seq, ts=f"2024-01-01T00:00:0{seq}.000+00:00", type="message.added", data={}
+    )
 
 
 class StubIndexer:
@@ -186,6 +199,7 @@ def make_runtime(stub: StubIndexer | None = None) -> IndexerRuntime:
 # ===========================================================================
 # LocalEventLogReader
 # ===========================================================================
+
 
 class TestLocalEventLogReader:
     def test_empty_when_no_files(self, tmp_path: Path) -> None:
@@ -292,6 +306,7 @@ class TestLocalEventLogReader:
 # SQLiteProjectionStore
 # ===========================================================================
 
+
 class TestSQLiteProjectionStore:
     def test_watermark_minus_one_for_unknown_session(self, tmp_path: Path) -> None:
         store = SQLiteProjectionStore(tmp_path / "p.db")
@@ -314,9 +329,7 @@ class TestSQLiteProjectionStore:
     def test_transaction_commits_on_success(self, tmp_path: Path) -> None:
         store = SQLiteProjectionStore(tmp_path / "p.db")
         with store.transaction() as conn:
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS foo (id INTEGER PRIMARY KEY)"
-            )
+            conn.execute("CREATE TABLE IF NOT EXISTS foo (id INTEGER PRIMARY KEY)")
             conn.execute("INSERT INTO foo VALUES (1)")
         with sqlite3.connect(tmp_path / "p.db") as c:
             assert c.execute("SELECT COUNT(*) FROM foo").fetchone()[0] == 1
@@ -324,9 +337,7 @@ class TestSQLiteProjectionStore:
     def test_transaction_rolls_back_on_exception(self, tmp_path: Path) -> None:
         store = SQLiteProjectionStore(tmp_path / "p.db")
         with store.transaction() as conn:
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS bar (id INTEGER PRIMARY KEY)"
-            )
+            conn.execute("CREATE TABLE IF NOT EXISTS bar (id INTEGER PRIMARY KEY)")
         try:
             with store.transaction() as conn:
                 conn.execute("INSERT INTO bar VALUES (1)")
@@ -338,9 +349,8 @@ class TestSQLiteProjectionStore:
 
     def test_transaction_reraises_exception(self, tmp_path: Path) -> None:
         store = SQLiteProjectionStore(tmp_path / "p.db")
-        with pytest.raises(ValueError, match="oops"):
-            with store.transaction() as _conn:
-                raise ValueError("oops")
+        with pytest.raises(ValueError, match="oops"), store.transaction() as _conn:
+            raise ValueError("oops")
 
     def test_watermarks_table_created_on_init(self, tmp_path: Path) -> None:
         store = SQLiteProjectionStore(tmp_path / "p.db")
@@ -358,6 +368,7 @@ class TestSQLiteProjectionStore:
 # ===========================================================================
 # BackgroundIndexer
 # ===========================================================================
+
 
 class TestBackgroundIndexerNoEvents:
     async def test_returns_zero_no_files(self, tmp_path: Path) -> None:
@@ -478,6 +489,7 @@ class TestBackgroundIndexerFailure:
 # IndexerRuntime
 # ===========================================================================
 
+
 class TestIndexerRuntimeSuccess:
     async def test_returns_count(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
         rt = make_runtime(StubIndexer(returns=3))
@@ -488,21 +500,29 @@ class TestIndexerRuntimeSuccess:
         await make_runtime().index_session("s1", options=make_options(audit_log))
         assert mock_span.name == "indexer.index_session"
 
-    async def test_span_session_id_attribute(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_session_id_attribute(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await make_runtime().index_session("s1", options=make_options(audit_log))
         assert mock_span.attributes["indexer.session_id"] == "s1"
 
-    async def test_invocation_event_attached(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_invocation_event_attached(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await make_runtime().index_session("s1", options=make_options(audit_log))
         event_names = [e[0] for e in mock_span.events]
         assert "indexer.invocation" in event_names
 
-    async def test_invocation_event_operation(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_invocation_event_operation(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await make_runtime().index_session("s1", options=make_options(audit_log))
         inv = next(e for e in mock_span.events if e[0] == "indexer.invocation")
         assert inv[1]["operation"] == "index_session"
 
-    async def test_no_audit_entries_on_success(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_no_audit_entries_on_success(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await make_runtime().index_session("s1", options=make_options(audit_log))
         assert audit_log.entries == []
 
@@ -520,13 +540,17 @@ class TestIndexerRuntimeIndexerFailure:
             timestamp="2024-01-01T00:00:00+00:00",
         )
 
-    async def test_re_raises_indexer_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_re_raises_indexer_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = make_runtime(StubIndexer(raises=self._make_failure()))
         with pytest.raises(IndexerFailure) as exc_info:
             await rt.index_session("s1", options=make_options(audit_log))
         assert exc_info.value.code == "INDEXER_READ_FAILED"
 
-    async def test_audit_entry_written(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = make_runtime(StubIndexer(raises=self._make_failure()))
         with pytest.raises(IndexerFailure):
             await rt.index_session("s1", options=make_options(audit_log))
@@ -535,13 +559,17 @@ class TestIndexerRuntimeIndexerFailure:
         assert entry.level == "error"
         assert entry.event == "indexer.index_session.failed"
 
-    async def test_span_marked_error(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_marked_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = make_runtime(StubIndexer(raises=self._make_failure()))
         with pytest.raises(IndexerFailure):
             await rt.index_session("s1", options=make_options(audit_log))
         assert mock_span.status.status_code == StatusCode.ERROR
 
-    async def test_span_ended_on_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_ended_on_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = make_runtime(StubIndexer(raises=self._make_failure()))
         with pytest.raises(IndexerFailure):
             await rt.index_session("s1", options=make_options(audit_log))
@@ -549,7 +577,9 @@ class TestIndexerRuntimeIndexerFailure:
 
 
 class TestIndexerRuntimeUnexpectedException:
-    async def test_wraps_as_index_session_failed(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_wraps_as_index_session_failed(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = make_runtime(StubIndexer(raises=OSError("disk full")))
         with pytest.raises(IndexerFailure) as exc_info:
             await rt.index_session("s1", options=make_options(audit_log))
@@ -562,7 +592,9 @@ class TestIndexerRuntimeUnexpectedException:
             await rt.index_session("s1", options=make_options(audit_log))
         assert exc_info.value.cause is orig
 
-    async def test_audit_entry_written(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = make_runtime(StubIndexer(raises=OSError("boom")))
         with pytest.raises(IndexerFailure):
             await rt.index_session("s1", options=make_options(audit_log))
@@ -572,21 +604,27 @@ class TestIndexerRuntimeUnexpectedException:
         assert entry.event == "indexer.index_session.failed"
         assert entry.session_id == "s1"
 
-    async def test_indexer_error_event_on_span(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_indexer_error_event_on_span(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = make_runtime(StubIndexer(raises=OSError("boom")))
         with pytest.raises(IndexerFailure):
             await rt.index_session("s1", options=make_options(audit_log))
         event_names = [e[0] for e in mock_span.events]
         assert "indexer.error" in event_names
 
-    async def test_exception_recorded_on_span(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_exception_recorded_on_span(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         orig = OSError("boom")
         rt = make_runtime(StubIndexer(raises=orig))
         with pytest.raises(IndexerFailure):
             await rt.index_session("s1", options=make_options(audit_log))
         assert orig in mock_span.recorded_exceptions
 
-    async def test_on_error_callback(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_on_error_callback(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         errors: list[IndexerFailure] = []
         rt = make_runtime(StubIndexer(raises=OSError("boom")))
         with pytest.raises(IndexerFailure):
@@ -594,13 +632,17 @@ class TestIndexerRuntimeUnexpectedException:
         assert len(errors) == 1
         assert errors[0].code == "INDEXER_INDEX_SESSION_FAILED"
 
-    async def test_span_marked_error(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_marked_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = make_runtime(StubIndexer(raises=OSError("boom")))
         with pytest.raises(IndexerFailure):
             await rt.index_session("s1", options=make_options(audit_log))
         assert mock_span.status.status_code == StatusCode.ERROR
 
-    async def test_span_ended_on_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_ended_on_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = make_runtime(StubIndexer(raises=OSError("boom")))
         with pytest.raises(IndexerFailure):
             await rt.index_session("s1", options=make_options(audit_log))
@@ -610,6 +652,7 @@ class TestIndexerRuntimeUnexpectedException:
 # ===========================================================================
 # LocalEventLogReader.read_events
 # ===========================================================================
+
 
 class TestLocalEventLogReaderReadEvents:
     async def test_empty_when_no_files(self, tmp_path: Path) -> None:
@@ -704,46 +747,73 @@ class TestLocalEventLogReaderReadEvents:
 # ReaderRuntime
 # ===========================================================================
 
+
 def make_reader_runtime(stub: StubReader | None = None) -> ReaderRuntime:
     return ReaderRuntime(stub or StubReader())  # type: ignore[arg-type]
 
 
 class TestReaderRuntimeSuccess:
-    async def test_yields_events(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_yields_events(
+        self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         events_in = [make_session_event(0), make_session_event(1)]
         rt = make_reader_runtime(StubReader(events=events_in))
         out = [e async for e in rt.read_events("s1", options=make_reader_options(audit_log))]
         assert [e.seq for e in out] == [0, 1]
 
-    async def test_span_name(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
-        async for _ in make_reader_runtime().read_events("s1", options=make_reader_options(audit_log)):
+    async def test_span_name(
+        self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        async for _ in make_reader_runtime().read_events(
+            "s1", options=make_reader_options(audit_log)
+        ):
             pass
         assert mock_reader_span.name == "reader.read_events"
 
-    async def test_span_session_id_attribute(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
-        async for _ in make_reader_runtime().read_events("s1", options=make_reader_options(audit_log)):
+    async def test_span_session_id_attribute(
+        self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        async for _ in make_reader_runtime().read_events(
+            "s1", options=make_reader_options(audit_log)
+        ):
             pass
         assert mock_reader_span.attributes["reader.session_id"] == "s1"
 
-    async def test_invocation_event_attached(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
-        async for _ in make_reader_runtime().read_events("s1", options=make_reader_options(audit_log)):
+    async def test_invocation_event_attached(
+        self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        async for _ in make_reader_runtime().read_events(
+            "s1", options=make_reader_options(audit_log)
+        ):
             pass
         event_names = [e[0] for e in mock_reader_span.events]
         assert "reader.invocation" in event_names
 
-    async def test_invocation_event_operation(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
-        async for _ in make_reader_runtime().read_events("s1", options=make_reader_options(audit_log)):
+    async def test_invocation_event_operation(
+        self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        async for _ in make_reader_runtime().read_events(
+            "s1", options=make_reader_options(audit_log)
+        ):
             pass
         inv = next(e for e in mock_reader_span.events if e[0] == "reader.invocation")
         assert inv[1]["operation"] == "read_events"
 
-    async def test_no_audit_entries_on_success(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
-        async for _ in make_reader_runtime().read_events("s1", options=make_reader_options(audit_log)):
+    async def test_no_audit_entries_on_success(
+        self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        async for _ in make_reader_runtime().read_events(
+            "s1", options=make_reader_options(audit_log)
+        ):
             pass
         assert audit_log.entries == []
 
-    async def test_span_ended(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
-        async for _ in make_reader_runtime().read_events("s1", options=make_reader_options(audit_log)):
+    async def test_span_ended(
+        self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        async for _ in make_reader_runtime().read_events(
+            "s1", options=make_reader_options(audit_log)
+        ):
             pass
         assert mock_reader_span.ended
 
@@ -757,14 +827,18 @@ class TestReaderRuntimeIndexerFailure:
             timestamp="2024-01-01T00:00:00+00:00",
         )
 
-    async def test_re_raises_indexer_failure(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_re_raises_indexer_failure(
+        self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = make_reader_runtime(StubReader(raises=self._make_failure()))
         with pytest.raises(IndexerFailure) as exc_info:
             async for _ in rt.read_events("s1", options=make_reader_options(audit_log)):
                 pass
         assert exc_info.value.code == "INDEXER_READ_FAILED"
 
-    async def test_audit_entry_written(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_entry_written(
+        self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = make_reader_runtime(StubReader(raises=self._make_failure()))
         with pytest.raises(IndexerFailure):
             async for _ in rt.read_events("s1", options=make_reader_options(audit_log)):
@@ -774,14 +848,18 @@ class TestReaderRuntimeIndexerFailure:
         assert entry.level == "error"
         assert entry.event == "reader.read_events.failed"
 
-    async def test_span_marked_error(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_marked_error(
+        self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = make_reader_runtime(StubReader(raises=self._make_failure()))
         with pytest.raises(IndexerFailure):
             async for _ in rt.read_events("s1", options=make_reader_options(audit_log)):
                 pass
         assert mock_reader_span.status.status_code == StatusCode.ERROR
 
-    async def test_span_ended_on_failure(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_ended_on_failure(
+        self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = make_reader_runtime(StubReader(raises=self._make_failure()))
         with pytest.raises(IndexerFailure):
             async for _ in rt.read_events("s1", options=make_reader_options(audit_log)):
@@ -790,14 +868,18 @@ class TestReaderRuntimeIndexerFailure:
 
 
 class TestReaderRuntimeUnexpectedException:
-    async def test_wraps_as_reader_read_events_failed(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_wraps_as_reader_read_events_failed(
+        self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = make_reader_runtime(StubReader(raises=OSError("disk full")))
         with pytest.raises(IndexerFailure) as exc_info:
             async for _ in rt.read_events("s1", options=make_reader_options(audit_log)):
                 pass
         assert exc_info.value.code == "READER_READ_EVENTS_FAILED"
 
-    async def test_cause_preserved(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_cause_preserved(
+        self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         orig = OSError("disk full")
         rt = make_reader_runtime(StubReader(raises=orig))
         with pytest.raises(IndexerFailure) as exc_info:
@@ -805,7 +887,9 @@ class TestReaderRuntimeUnexpectedException:
                 pass
         assert exc_info.value.cause is orig
 
-    async def test_audit_entry_written(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_entry_written(
+        self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = make_reader_runtime(StubReader(raises=OSError("boom")))
         with pytest.raises(IndexerFailure):
             async for _ in rt.read_events("s1", options=make_reader_options(audit_log)):
@@ -816,7 +900,9 @@ class TestReaderRuntimeUnexpectedException:
         assert entry.event == "reader.read_events.failed"
         assert entry.session_id == "s1"
 
-    async def test_reader_error_event_on_span(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_reader_error_event_on_span(
+        self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = make_reader_runtime(StubReader(raises=OSError("boom")))
         with pytest.raises(IndexerFailure):
             async for _ in rt.read_events("s1", options=make_reader_options(audit_log)):
@@ -824,7 +910,9 @@ class TestReaderRuntimeUnexpectedException:
         event_names = [e[0] for e in mock_reader_span.events]
         assert "reader.error" in event_names
 
-    async def test_exception_recorded_on_span(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_exception_recorded_on_span(
+        self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         orig = OSError("boom")
         rt = make_reader_runtime(StubReader(raises=orig))
         with pytest.raises(IndexerFailure):
@@ -832,7 +920,9 @@ class TestReaderRuntimeUnexpectedException:
                 pass
         assert orig in mock_reader_span.recorded_exceptions
 
-    async def test_on_error_callback(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_on_error_callback(
+        self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         errors: list[IndexerFailure] = []
         rt = make_reader_runtime(StubReader(raises=OSError("boom")))
         with pytest.raises(IndexerFailure):
@@ -841,14 +931,18 @@ class TestReaderRuntimeUnexpectedException:
         assert len(errors) == 1
         assert errors[0].code == "READER_READ_EVENTS_FAILED"
 
-    async def test_span_marked_error(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_marked_error(
+        self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = make_reader_runtime(StubReader(raises=OSError("boom")))
         with pytest.raises(IndexerFailure):
             async for _ in rt.read_events("s1", options=make_reader_options(audit_log)):
                 pass
         assert mock_reader_span.status.status_code == StatusCode.ERROR
 
-    async def test_span_ended_on_failure(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_ended_on_failure(
+        self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = make_reader_runtime(StubReader(raises=OSError("boom")))
         with pytest.raises(IndexerFailure):
             async for _ in rt.read_events("s1", options=make_reader_options(audit_log)):

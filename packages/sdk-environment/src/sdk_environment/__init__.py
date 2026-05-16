@@ -1,4 +1,23 @@
 # Types
+# Audit log
+from ._audit import AuditLog, NoopAuditLog
+
+# Contract
+from ._contract import EnvironmentDriver
+
+# Network policy enforcement
+from ._enforcer import NetworkEnforcer
+
+# Filesystem policy enforcement
+from ._fs_enforcer import FilesystemEnforcer
+from ._fs_gate import FilesystemGate
+from ._proxy import OutboundProxyTransport
+
+# Runtime
+from ._runtime import EnvironmentRuntime, RuntimeOptions, default_runtime
+
+# Telemetry
+from ._telemetry import get_tracer, record_environment_failure, record_invocation_event
 from ._types import (
     AgentFilesystemPolicy,
     AgentNetworkPolicy,
@@ -15,26 +34,6 @@ from ._types import (
     ReclaimRequest,
     StructuredEvent,
 )
-
-# Contract
-from ._contract import EnvironmentDriver
-
-# Audit log
-from ._audit import AuditLog, NoopAuditLog
-
-# Telemetry
-from ._telemetry import get_tracer, record_environment_failure, record_invocation_event
-
-# Network policy enforcement
-from ._enforcer import NetworkEnforcer
-from ._proxy import OutboundProxyTransport
-
-# Filesystem policy enforcement
-from ._fs_enforcer import FilesystemEnforcer
-from ._fs_gate import FilesystemGate
-
-# Runtime
-from ._runtime import EnvironmentRuntime, RuntimeOptions, default_runtime
 
 # Version
 from ._version import ENVIRONMENT_SDK_VERSION

@@ -19,6 +19,7 @@ Covers:
     - span attributes include net.host, environment.id, session.id, agent.id.
     - span ended on both success and failure paths.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -26,7 +27,6 @@ from typing import Any
 
 import pytest
 from opentelemetry.trace import StatusCode
-
 from sdk_environment import (
     AgentNetworkPolicy,
     AuditLogEntry,
@@ -36,12 +36,12 @@ from sdk_environment import (
     OutboundProxyTransport,
 )
 
-from .conftest import CapturingAuditLog, MockSpan, MockTracer
-
+from .conftest import CapturingAuditLog, MockSpan
 
 # ---------------------------------------------------------------------------
 # Minimal httpx request stub — avoids importing httpx in the test suite.
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class _URL:
@@ -61,6 +61,7 @@ def _req(host: str) -> _Request:
 # Inner transport stub
 # ---------------------------------------------------------------------------
 
+
 class _OkTransport:
     """Records forwarded requests and returns a sentinel."""
 
@@ -75,6 +76,7 @@ class _OkTransport:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _enforcer(
     *,
@@ -116,6 +118,7 @@ def _proxy(
 # NetworkEnforcer — default-deny (egress_allowed=False)
 # ===========================================================================
 
+
 class TestEnforcerDefaultDeny:
     def test_denies_unlisted_host(self) -> None:
         e = _enforcer(egress_allowed=False)
@@ -138,6 +141,7 @@ class TestEnforcerDefaultDeny:
 # NetworkEnforcer — default-allow (egress_allowed=True)
 # ===========================================================================
 
+
 class TestEnforcerDefaultAllow:
     def test_allows_any_host_when_no_allowlist(self) -> None:
         e = _enforcer(egress_allowed=True)
@@ -155,6 +159,7 @@ class TestEnforcerDefaultAllow:
 # ===========================================================================
 # NetworkEnforcer — blocked_hosts always denied
 # ===========================================================================
+
 
 class TestEnforcerBlockedHosts:
     def test_blocked_host_denied_even_if_in_allowlist(self) -> None:
@@ -177,6 +182,7 @@ class TestEnforcerBlockedHosts:
 # ===========================================================================
 # NetworkEnforcer — agent allowlist (intersection, no escalation)
 # ===========================================================================
+
 
 class TestEnforcerAgentPolicy:
     def test_agent_allowlist_further_constrains(self) -> None:
@@ -213,6 +219,7 @@ class TestEnforcerAgentPolicy:
 # NetworkEnforcer — assert_allowed
 # ===========================================================================
 
+
 class TestEnforcerAssertAllowed:
     def test_raises_network_violation_when_denied(self) -> None:
         e = _enforcer(egress_allowed=False)
@@ -247,6 +254,7 @@ class TestEnforcerAssertAllowed:
 # ===========================================================================
 # OutboundProxyTransport — allowed request
 # ===========================================================================
+
 
 class TestProxyAllowed:
     def test_forwards_to_inner_transport(
@@ -290,21 +298,19 @@ class TestProxyAllowed:
         assert entry.detail["allowed"] is True
         assert entry.detail["host"] == "api.example.com"
 
-    def test_span_name(
-        self, mock_proxy_span: MockSpan, audit_log: CapturingAuditLog
-    ) -> None:
+    def test_span_name(self, mock_proxy_span: MockSpan, audit_log: CapturingAuditLog) -> None:
         inner = _OkTransport()
         e = _enforcer(egress_allowed=False, allowed_hosts=("api.example.com",))
         p = _proxy(e, audit_log, inner)
         p.handle_request(_req("api.example.com"))
         assert mock_proxy_span.name == "net.outbound"
 
-    def test_span_attributes(
-        self, mock_proxy_span: MockSpan, audit_log: CapturingAuditLog
-    ) -> None:
+    def test_span_attributes(self, mock_proxy_span: MockSpan, audit_log: CapturingAuditLog) -> None:
         inner = _OkTransport()
         e = _enforcer(egress_allowed=False, allowed_hosts=("api.example.com",))
-        p = _proxy(e, audit_log, inner, environment_id="env1", session_id="sess1", agent_id="agent1")
+        p = _proxy(
+            e, audit_log, inner, environment_id="env1", session_id="sess1", agent_id="agent1"
+        )
         p.handle_request(_req("api.example.com"))
         assert mock_proxy_span.attributes["net.host"] == "api.example.com"
         assert mock_proxy_span.attributes["environment.id"] == "env1"
@@ -324,6 +330,7 @@ class TestProxyAllowed:
 # ===========================================================================
 # OutboundProxyTransport — denied request
 # ===========================================================================
+
 
 class TestProxyDenied:
     def test_raises_network_violation(
@@ -403,6 +410,7 @@ class TestProxyDenied:
 # OutboundProxyTransport — misconfiguration guard
 # ===========================================================================
 
+
 class TestProxyNoInner:
     def test_raises_runtime_error_when_no_inner(
         self, mock_proxy_span: MockSpan, audit_log: CapturingAuditLog
@@ -416,6 +424,7 @@ class TestProxyNoInner:
 # ===========================================================================
 # Integration: default-deny per env, agent allowlist further constrains
 # ===========================================================================
+
 
 class TestIntegrationDefaultDenyWithAgentAllowlist:
     def test_allowed_by_both_env_and_agent(

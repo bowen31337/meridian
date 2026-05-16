@@ -23,15 +23,17 @@ Covers EventLogRuntime (via a StubEventLogWriter) and LocalEventLogWriter
     - Invalid session IDs raise EventLogFailure(EVENT_LOG_SESSION_ID_INVALID).
     - Nested date directories are created automatically.
 """
+
 from __future__ import annotations
 
 import json
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 import pytest
-
+from opentelemetry.trace import StatusCode
 from storage_event_log import (
     AuditLogEntry,
     EventLogFailure,
@@ -40,14 +42,13 @@ from storage_event_log import (
     EventLogWriter,
     LocalEventLogWriter,
 )
-from opentelemetry.trace import StatusCode
 
 from .conftest import CapturingAuditLog, MockSpan
-
 
 # ---------------------------------------------------------------------------
 # Stub writer
 # ---------------------------------------------------------------------------
+
 
 class StubEventLogWriter(EventLogWriter):
     """In-memory writer with configurable failure injection."""
@@ -69,7 +70,13 @@ class StubEventLogWriter(EventLogWriter):
             raise self._append_raises
         seq = self._seq.get(session_id, 0)
         self._calls.append(
-            {"session_id": session_id, "type": event_type, "data": data, "thread_id": thread_id, "seq": seq}
+            {
+                "session_id": session_id,
+                "type": event_type,
+                "data": data,
+                "thread_id": thread_id,
+                "seq": seq,
+            }
         )
         self._seq[session_id] = seq + 1
         return seq
@@ -79,7 +86,10 @@ class StubEventLogWriter(EventLogWriter):
 # Helpers
 # ---------------------------------------------------------------------------
 
-def make_options(audit: CapturingAuditLog, errors: list[EventLogFailure] | None = None) -> EventLogOptions:
+
+def make_options(
+    audit: CapturingAuditLog, errors: list[EventLogFailure] | None = None
+) -> EventLogOptions:
     return EventLogOptions(
         audit_log=audit,
         on_error=(lambda e: errors.append(e)) if errors is not None else None,
@@ -93,6 +103,7 @@ def make_runtime(writer: EventLogWriter | None = None) -> EventLogRuntime:
 # ---------------------------------------------------------------------------
 # append — success
 # ---------------------------------------------------------------------------
+
 
 class TestAppendSuccess:
     async def test_seq_returned(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
@@ -113,21 +124,29 @@ class TestAppendSuccess:
         await make_runtime().append("s1", "session.created", {}, options=make_options(audit_log))
         assert mock_span.name == "event_log.append"
 
-    async def test_span_session_id_attribute(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_session_id_attribute(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await make_runtime().append("s1", "session.created", {}, options=make_options(audit_log))
         assert mock_span.attributes["event_log.session_id"] == "s1"
 
-    async def test_invocation_event_attached(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_invocation_event_attached(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await make_runtime().append("s1", "session.created", {}, options=make_options(audit_log))
         event_names = [e[0] for e in mock_span.events]
         assert "event_log.invocation" in event_names
 
-    async def test_invocation_event_operation(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_invocation_event_operation(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await make_runtime().append("s1", "session.created", {}, options=make_options(audit_log))
         inv = next(e for e in mock_span.events if e[0] == "event_log.invocation")
         assert inv[1]["operation"] == "append"
 
-    async def test_no_audit_entries_on_success(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_no_audit_entries_on_success(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await make_runtime().append("s1", "session.created", {}, options=make_options(audit_log))
         assert audit_log.entries == []
 
@@ -140,6 +159,7 @@ class TestAppendSuccess:
 # append — writer raises EventLogFailure (e.g. invalid session ID)
 # ---------------------------------------------------------------------------
 
+
 class TestAppendEventLogFailure:
     def _make_failure(self) -> EventLogFailure:
         return EventLogFailure(
@@ -149,13 +169,17 @@ class TestAppendEventLogFailure:
             timestamp="2024-01-01T00:00:00+00:00",
         )
 
-    async def test_re_raises_event_log_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_re_raises_event_log_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = EventLogRuntime(StubEventLogWriter(append_raises=self._make_failure()))
         with pytest.raises(EventLogFailure) as exc_info:
             await rt.append("bad/id", "session.created", {}, options=make_options(audit_log))
         assert exc_info.value.code == "EVENT_LOG_SESSION_ID_INVALID"
 
-    async def test_audit_entry_written(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = EventLogRuntime(StubEventLogWriter(append_raises=self._make_failure()))
         with pytest.raises(EventLogFailure):
             await rt.append("bad/id", "session.created", {}, options=make_options(audit_log))
@@ -164,13 +188,17 @@ class TestAppendEventLogFailure:
         assert entry.level == "error"
         assert entry.event == "event_log.append.failed"
 
-    async def test_span_marked_error(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_marked_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = EventLogRuntime(StubEventLogWriter(append_raises=self._make_failure()))
         with pytest.raises(EventLogFailure):
             await rt.append("bad/id", "session.created", {}, options=make_options(audit_log))
         assert mock_span.status.status_code == StatusCode.ERROR
 
-    async def test_span_ended_on_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_ended_on_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = EventLogRuntime(StubEventLogWriter(append_raises=self._make_failure()))
         with pytest.raises(EventLogFailure):
             await rt.append("bad/id", "session.created", {}, options=make_options(audit_log))
@@ -181,8 +209,11 @@ class TestAppendEventLogFailure:
 # append — writer raises unexpected exception
 # ---------------------------------------------------------------------------
 
+
 class TestAppendStoreRaises:
-    async def test_wraps_as_append_failed(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_wraps_as_append_failed(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = EventLogRuntime(StubEventLogWriter(append_raises=OSError("disk full")))
         with pytest.raises(EventLogFailure) as exc_info:
             await rt.append("s1", "session.created", {}, options=make_options(audit_log))
@@ -195,7 +226,9 @@ class TestAppendStoreRaises:
             await rt.append("s1", "session.created", {}, options=make_options(audit_log))
         assert exc_info.value.cause is orig
 
-    async def test_audit_entry_written(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = EventLogRuntime(StubEventLogWriter(append_raises=OSError("boom")))
         with pytest.raises(EventLogFailure):
             await rt.append("s1", "session.created", {}, options=make_options(audit_log))
@@ -205,27 +238,35 @@ class TestAppendStoreRaises:
         assert entry.event == "event_log.append.failed"
         assert entry.session_id == "s1"
 
-    async def test_span_marked_error(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_marked_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = EventLogRuntime(StubEventLogWriter(append_raises=OSError("boom")))
         with pytest.raises(EventLogFailure):
             await rt.append("s1", "session.created", {}, options=make_options(audit_log))
         assert mock_span.status.status_code == StatusCode.ERROR
 
-    async def test_error_event_on_span(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_error_event_on_span(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = EventLogRuntime(StubEventLogWriter(append_raises=OSError("boom")))
         with pytest.raises(EventLogFailure):
             await rt.append("s1", "session.created", {}, options=make_options(audit_log))
         event_names = [e[0] for e in mock_span.events]
         assert "event_log.error" in event_names
 
-    async def test_exception_recorded_on_span(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_exception_recorded_on_span(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         orig = OSError("boom")
         rt = EventLogRuntime(StubEventLogWriter(append_raises=orig))
         with pytest.raises(EventLogFailure):
             await rt.append("s1", "session.created", {}, options=make_options(audit_log))
         assert orig in mock_span.recorded_exceptions
 
-    async def test_on_error_callback(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_on_error_callback(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         errors: list[EventLogFailure] = []
         rt = EventLogRuntime(StubEventLogWriter(append_raises=OSError("boom")))
         with pytest.raises(EventLogFailure):
@@ -233,7 +274,9 @@ class TestAppendStoreRaises:
         assert len(errors) == 1
         assert errors[0].code == "EVENT_LOG_APPEND_FAILED"
 
-    async def test_span_ended_on_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_ended_on_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = EventLogRuntime(StubEventLogWriter(append_raises=OSError("boom")))
         with pytest.raises(EventLogFailure):
             await rt.append("s1", "session.created", {}, options=make_options(audit_log))
@@ -243,6 +286,7 @@ class TestAppendStoreRaises:
 # ---------------------------------------------------------------------------
 # LocalEventLogWriter — filesystem integration
 # ---------------------------------------------------------------------------
+
 
 class TestLocalEventLogWriter:
     async def test_append_returns_seq_zero(self, tmp_path: Path) -> None:
@@ -264,10 +308,9 @@ class TestLocalEventLogWriter:
         assert await writer.append("sessA", "message.added", {}) == 1
 
     async def test_file_created_at_expected_path(self, tmp_path: Path) -> None:
-        from datetime import datetime, timezone
-        from unittest.mock import patch
+        from datetime import datetime
 
-        fixed_dt = datetime(2024, 3, 15, 12, 0, 0, tzinfo=timezone.utc)
+        fixed_dt = datetime(2024, 3, 15, 12, 0, 0, tzinfo=UTC)
         with patch("storage_event_log._local._now_dt", return_value=fixed_dt):
             writer = LocalEventLogWriter(tmp_path)
             await writer.append("my-session", "session.created", {})

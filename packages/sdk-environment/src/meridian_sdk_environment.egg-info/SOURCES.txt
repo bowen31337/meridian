@@ -15,6 +15,7 @@ src/sdk_environment/_runtime.py
 src/sdk_environment/_telemetry.py
 src/sdk_environment/_types.py
 src/sdk_environment/_version.py
+src/sdk_environment/py.typed
 tests/test_conformance.py
 tests/test_filesystem_jail.py
 tests/test_network_policy.py

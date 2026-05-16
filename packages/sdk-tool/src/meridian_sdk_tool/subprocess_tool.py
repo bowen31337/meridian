@@ -16,8 +16,6 @@ import asyncio
 import json
 from typing import Any
 
-import anyio
-
 from ._execution import execute_tool
 from ._types import Capability, SubprocessHandler, ToolContext, ToolDefinition, ToolResult
 
@@ -53,20 +51,18 @@ async def _call_subprocess(path: str, args: Any, ctx: ToolContext, timeout_ms: i
             proc.communicate(input=payload),
             timeout=timeout_s,
         )
-    except (asyncio.TimeoutError, TimeoutError):
+    except TimeoutError as exc:
         proc.terminate()
         try:
             await asyncio.wait_for(proc.wait(), timeout=_SIGKILL_GRACE_S)
-        except (asyncio.TimeoutError, TimeoutError):
+        except TimeoutError:
             proc.kill()
             await proc.wait()
-        raise TimeoutError(f"Subprocess tool {path!r} timed out after {timeout_ms} ms")
+        raise TimeoutError(f"Subprocess tool {path!r} timed out after {timeout_ms} ms") from exc
 
     if proc.returncode != 0:
         stderr_text = stderr[:_MAX_STDERR_BYTES].decode("utf-8", errors="replace")
-        raise RuntimeError(
-            f"Subprocess exited with code {proc.returncode}. stderr: {stderr_text}"
-        )
+        raise RuntimeError(f"Subprocess exited with code {proc.returncode}. stderr: {stderr_text}")
 
     try:
         response: dict[str, Any] = json.loads(stdout)

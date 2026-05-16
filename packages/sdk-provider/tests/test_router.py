@@ -1,4 +1,5 @@
 """Tests for ModelRouter: routing rules, capability constraints, fallback, audit log."""
+
 from __future__ import annotations
 
 import pytest
@@ -13,7 +14,6 @@ from meridian_sdk_provider import (
     ProviderCapabilities,
     ProviderRateLimitError,
     RoutingCondition,
-    TextDeltaEvent,
     TokenRange,
 )
 from tests.conftest import CollectingAuditLog, FakeProvider, make_opts
@@ -346,9 +346,7 @@ async def test_audit_log_not_written_on_success(audit_log: CollectingAuditLog) -
 
 
 async def test_audit_log_includes_session_id(audit_log: CollectingAuditLog) -> None:
-    provider = FakeProvider(
-        name="p", raise_on_call=ProviderRateLimitError("err", "p")
-    )
+    provider = FakeProvider(name="p", raise_on_call=ProviderRateLimitError("err", "p"))
     router = _router(
         rules=[ModelRoutingRule(model="p:m")],
         providers={"p": provider},
@@ -365,9 +363,7 @@ async def test_audit_log_includes_session_id(audit_log: CollectingAuditLog) -> N
 
 
 async def test_count_tokens_delegates_to_capable_provider() -> None:
-    provider = FakeProvider(
-        name="p", capabilities=ProviderCapabilities(count_tokens=True)
-    )
+    provider = FakeProvider(name="p", capabilities=ProviderCapabilities(count_tokens=True))
     router = _router(rules=[], providers={"p": provider})
     from meridian_sdk_provider import ModelCountReq
 

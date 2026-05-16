@@ -62,9 +62,7 @@ class SchemaInvalidError(MeridianError):
         timestamp: str,
         cause: BaseException | None = None,
     ) -> None:
-        super().__init__(
-            code="schema_invalid", message=message, timestamp=timestamp, cause=cause
-        )
+        super().__init__(code="schema_invalid", message=message, timestamp=timestamp, cause=cause)
 
     def http_status(self) -> int:
         return 422
@@ -98,9 +96,7 @@ class BudgetExceededError(MeridianError):
         timestamp: str,
         cause: BaseException | None = None,
     ) -> None:
-        super().__init__(
-            code="budget_exceeded", message=message, timestamp=timestamp, cause=cause
-        )
+        super().__init__(code="budget_exceeded", message=message, timestamp=timestamp, cause=cause)
 
     def http_status(self) -> int:
         return 429
@@ -116,9 +112,7 @@ class DivergenceError(MeridianError):
         timestamp: str,
         cause: BaseException | None = None,
     ) -> None:
-        super().__init__(
-            code="divergence", message=message, timestamp=timestamp, cause=cause
-        )
+        super().__init__(code="divergence", message=message, timestamp=timestamp, cause=cause)
 
     def http_status(self) -> int:
         return 409

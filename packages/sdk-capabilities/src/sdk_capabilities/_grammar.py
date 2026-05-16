@@ -12,9 +12,7 @@ from ._types import Capability, CapabilityParseError, CapabilitySet
 #   param      ::= [^\[\]]+
 _IDENT = r"[a-z][a-z0-9_]*"
 _PARAM = r"[^\[\]]+"
-_PATTERN = re.compile(
-    rf"^(?P<ns>{_IDENT})\.(?P<name>{_IDENT})(?:\[(?P<param>{_PARAM})\])?$"
-)
+_PATTERN = re.compile(rf"^(?P<ns>{_IDENT})\.(?P<name>{_IDENT})(?:\[(?P<param>{_PARAM})\])?$")
 
 
 def parse(text: str) -> Capability:

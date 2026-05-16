@@ -20,12 +20,13 @@ Covers BlobRuntime (via a StubBlobStore) and LocalBlobStore (via tmp_path):
     - Hierarchical keys (e.g. "a/b/c") create parent directories.
     - Path-traversal keys raise BlobFailure(BLOB_KEY_INVALID).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 
 import pytest
-
+from opentelemetry.trace import StatusCode
 from storage_blob import (
     AuditLogEntry,
     BlobFailure,
@@ -34,14 +35,13 @@ from storage_blob import (
     BlobStore,
     LocalBlobStore,
 )
-from opentelemetry.trace import StatusCode
 
 from .conftest import CapturingAuditLog, MockSpan
-
 
 # ---------------------------------------------------------------------------
 # Stub store
 # ---------------------------------------------------------------------------
+
 
 class StubBlobStore(BlobStore):
     """In-memory store with configurable failure injection."""
@@ -68,6 +68,7 @@ class StubBlobStore(BlobStore):
             raise self._get_raises
         if key not in self._data:
             from storage_blob._local import _now
+
             raise BlobFailure(
                 code="BLOB_KEY_NOT_FOUND",
                 message=f"Key not found: {key!r}",
@@ -86,6 +87,7 @@ class StubBlobStore(BlobStore):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def make_options(audit: CapturingAuditLog, errors: list[BlobFailure] | None = None) -> BlobOptions:
     return BlobOptions(
         audit_log=audit,
@@ -101,6 +103,7 @@ def make_runtime(store: BlobStore | None = None) -> BlobRuntime:
 # put — success
 # ---------------------------------------------------------------------------
 
+
 class TestPutSuccess:
     async def test_data_stored(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
         store = StubBlobStore()
@@ -112,21 +115,29 @@ class TestPutSuccess:
         await make_runtime().put("k1", b"x", make_options(audit_log))
         assert mock_span.name == "blob.put"
 
-    async def test_span_key_attribute(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_key_attribute(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await make_runtime().put("k1", b"x", make_options(audit_log))
         assert mock_span.attributes["blob.key"] == "k1"
 
-    async def test_invocation_event_attached(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_invocation_event_attached(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await make_runtime().put("k1", b"x", make_options(audit_log))
         event_names = [e[0] for e in mock_span.events]
         assert "blob.invocation" in event_names
 
-    async def test_invocation_event_operation(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_invocation_event_operation(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await make_runtime().put("k1", b"x", make_options(audit_log))
         inv = next(e for e in mock_span.events if e[0] == "blob.invocation")
         assert inv[1]["operation"] == "put"
 
-    async def test_no_audit_entries_on_success(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_no_audit_entries_on_success(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await make_runtime().put("k1", b"x", make_options(audit_log))
         assert audit_log.entries == []
 
@@ -139,8 +150,11 @@ class TestPutSuccess:
 # put — store raises
 # ---------------------------------------------------------------------------
 
+
 class TestPutStoreRaises:
-    async def test_wraps_as_put_failed(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_wraps_as_put_failed(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = BlobRuntime(StubBlobStore(put_raises=RuntimeError("disk full")))
         with pytest.raises(BlobFailure) as exc_info:
             await rt.put("k1", b"x", make_options(audit_log))
@@ -153,7 +167,9 @@ class TestPutStoreRaises:
             await rt.put("k1", b"x", make_options(audit_log))
         assert exc_info.value.cause is orig
 
-    async def test_audit_entry_written(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = BlobRuntime(StubBlobStore(put_raises=RuntimeError("boom")))
         with pytest.raises(BlobFailure):
             await rt.put("k1", b"x", make_options(audit_log))
@@ -163,27 +179,35 @@ class TestPutStoreRaises:
         assert entry.event == "blob.put.failed"
         assert entry.key == "k1"
 
-    async def test_span_marked_error(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_marked_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = BlobRuntime(StubBlobStore(put_raises=RuntimeError("boom")))
         with pytest.raises(BlobFailure):
             await rt.put("k1", b"x", make_options(audit_log))
         assert mock_span.status.status_code == StatusCode.ERROR
 
-    async def test_error_event_on_span(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_error_event_on_span(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = BlobRuntime(StubBlobStore(put_raises=RuntimeError("boom")))
         with pytest.raises(BlobFailure):
             await rt.put("k1", b"x", make_options(audit_log))
         event_names = [e[0] for e in mock_span.events]
         assert "blob.error" in event_names
 
-    async def test_exception_recorded_on_span(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_exception_recorded_on_span(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         orig = RuntimeError("boom")
         rt = BlobRuntime(StubBlobStore(put_raises=orig))
         with pytest.raises(BlobFailure):
             await rt.put("k1", b"x", make_options(audit_log))
         assert orig in mock_span.recorded_exceptions
 
-    async def test_on_error_callback(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_on_error_callback(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         errors: list[BlobFailure] = []
         rt = BlobRuntime(StubBlobStore(put_raises=RuntimeError("boom")))
         with pytest.raises(BlobFailure):
@@ -191,7 +215,9 @@ class TestPutStoreRaises:
         assert len(errors) == 1
         assert errors[0].code == "BLOB_PUT_FAILED"
 
-    async def test_span_ended_on_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_ended_on_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = BlobRuntime(StubBlobStore(put_raises=RuntimeError("boom")))
         with pytest.raises(BlobFailure):
             await rt.put("k1", b"x", make_options(audit_log))
@@ -201,6 +227,7 @@ class TestPutStoreRaises:
 # ---------------------------------------------------------------------------
 # get — success
 # ---------------------------------------------------------------------------
+
 
 class TestGetSuccess:
     async def test_returns_data(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
@@ -215,14 +242,18 @@ class TestGetSuccess:
         await BlobRuntime(store).get("k1", make_options(audit_log))
         assert mock_span.name == "blob.get"
 
-    async def test_invocation_event_operation(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_invocation_event_operation(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         store = StubBlobStore()
         store._data["k1"] = b"x"
         await BlobRuntime(store).get("k1", make_options(audit_log))
         inv = next(e for e in mock_span.events if e[0] == "blob.invocation")
         assert inv[1]["operation"] == "get"
 
-    async def test_no_audit_entries_on_success(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_no_audit_entries_on_success(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         store = StubBlobStore()
         store._data["k1"] = b"x"
         await BlobRuntime(store).get("k1", make_options(audit_log))
@@ -239,13 +270,18 @@ class TestGetSuccess:
 # get — key not found (BLOB_KEY_NOT_FOUND)
 # ---------------------------------------------------------------------------
 
+
 class TestGetKeyNotFound:
-    async def test_raises_blob_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_raises_blob_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         with pytest.raises(BlobFailure) as exc_info:
             await make_runtime().get("missing", make_options(audit_log))
         assert exc_info.value.code == "BLOB_KEY_NOT_FOUND"
 
-    async def test_audit_entry_written(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         with pytest.raises(BlobFailure):
             await make_runtime().get("missing", make_options(audit_log))
         assert len(audit_log.entries) == 1
@@ -254,19 +290,25 @@ class TestGetKeyNotFound:
         assert entry.event == "blob.get.failed"
         assert entry.key == "missing"
 
-    async def test_span_marked_error(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_marked_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         with pytest.raises(BlobFailure):
             await make_runtime().get("missing", make_options(audit_log))
         assert mock_span.status.status_code == StatusCode.ERROR
 
-    async def test_on_error_callback(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_on_error_callback(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         errors: list[BlobFailure] = []
         with pytest.raises(BlobFailure):
             await make_runtime().get("missing", make_options(audit_log, errors))
         assert len(errors) == 1
         assert errors[0].code == "BLOB_KEY_NOT_FOUND"
 
-    async def test_span_ended_on_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_span_ended_on_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         with pytest.raises(BlobFailure):
             await make_runtime().get("missing", make_options(audit_log))
         assert mock_span.ended
@@ -276,22 +318,27 @@ class TestGetKeyNotFound:
 # get — store raises unexpected exception
 # ---------------------------------------------------------------------------
 
+
 class TestGetStoreRaises:
-    async def test_wraps_as_get_failed(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
-        rt = BlobRuntime(StubBlobStore(get_raises=IOError("read error")))
+    async def test_wraps_as_get_failed(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        rt = BlobRuntime(StubBlobStore(get_raises=OSError("read error")))
         with pytest.raises(BlobFailure) as exc_info:
             await rt.get("k1", make_options(audit_log))
         assert exc_info.value.code == "BLOB_GET_FAILED"
 
     async def test_cause_preserved(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
-        orig = IOError("read error")
+        orig = OSError("read error")
         rt = BlobRuntime(StubBlobStore(get_raises=orig))
         with pytest.raises(BlobFailure) as exc_info:
             await rt.get("k1", make_options(audit_log))
         assert exc_info.value.cause is orig
 
-    async def test_audit_entry_written(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
-        rt = BlobRuntime(StubBlobStore(get_raises=IOError("boom")))
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        rt = BlobRuntime(StubBlobStore(get_raises=OSError("boom")))
         with pytest.raises(BlobFailure):
             await rt.get("k1", make_options(audit_log))
         assert len(audit_log.entries) == 1
@@ -302,6 +349,7 @@ class TestGetStoreRaises:
 # delete — success
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteSuccess:
     async def test_key_removed(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
         store = StubBlobStore()
@@ -309,7 +357,9 @@ class TestDeleteSuccess:
         await BlobRuntime(store).delete("k1", make_options(audit_log))
         assert "k1" not in store._data
 
-    async def test_missing_key_is_noop(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_missing_key_is_noop(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await make_runtime().delete("nonexistent", make_options(audit_log))
         assert audit_log.entries == []
 
@@ -317,12 +367,16 @@ class TestDeleteSuccess:
         await make_runtime().delete("k1", make_options(audit_log))
         assert mock_span.name == "blob.delete"
 
-    async def test_invocation_event_operation(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_invocation_event_operation(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await make_runtime().delete("k1", make_options(audit_log))
         inv = next(e for e in mock_span.events if e[0] == "blob.invocation")
         assert inv[1]["operation"] == "delete"
 
-    async def test_no_audit_entries_on_success(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_no_audit_entries_on_success(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         await make_runtime().delete("k1", make_options(audit_log))
         assert audit_log.entries == []
 
@@ -335,8 +389,11 @@ class TestDeleteSuccess:
 # delete — store raises
 # ---------------------------------------------------------------------------
 
+
 class TestDeleteStoreRaises:
-    async def test_wraps_as_delete_failed(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_wraps_as_delete_failed(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = BlobRuntime(StubBlobStore(delete_raises=OSError("locked")))
         with pytest.raises(BlobFailure) as exc_info:
             await rt.delete("k1", make_options(audit_log))
@@ -349,14 +406,18 @@ class TestDeleteStoreRaises:
             await rt.delete("k1", make_options(audit_log))
         assert exc_info.value.cause is orig
 
-    async def test_audit_entry_written(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         rt = BlobRuntime(StubBlobStore(delete_raises=OSError("boom")))
         with pytest.raises(BlobFailure):
             await rt.delete("k1", make_options(audit_log))
         assert len(audit_log.entries) == 1
         assert audit_log.entries[0].event == "blob.delete.failed"
 
-    async def test_on_error_callback(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    async def test_on_error_callback(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         errors: list[BlobFailure] = []
         rt = BlobRuntime(StubBlobStore(delete_raises=OSError("boom")))
         with pytest.raises(BlobFailure):
@@ -368,6 +429,7 @@ class TestDeleteStoreRaises:
 # ---------------------------------------------------------------------------
 # LocalBlobStore — filesystem integration
 # ---------------------------------------------------------------------------
+
 
 class TestLocalBlobStore:
     async def test_put_get_roundtrip(self, tmp_path: Path) -> None:

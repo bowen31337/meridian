@@ -19,7 +19,7 @@ def _time_ms() -> int:
 
 
 def _encode(value: int, length: int) -> str:
-    chars = []
+    chars: list[str] = []
     for _ in range(length):
         chars.append(_ENCODING[value & 0x1F])
         value >>= 5

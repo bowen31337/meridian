@@ -6,7 +6,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-
 # Default audit log location; overridable via MERIDIAN_AUDIT_LOG env var or
 # the audit_log_path kwarg on individual tool builders.
 _DEFAULT_AUDIT_LOG = os.environ.get(

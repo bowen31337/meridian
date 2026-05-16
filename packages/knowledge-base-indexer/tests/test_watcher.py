@@ -1,4 +1,5 @@
 """Tests for WorkspaceWatcher: file-system events delivered via asyncio."""
+
 from __future__ import annotations
 
 import asyncio
@@ -32,7 +33,7 @@ async def _collect_events(
         action()
         try:
             await asyncio.wait_for(ready.wait(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
     finally:
         watcher.stop()

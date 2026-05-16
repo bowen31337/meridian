@@ -56,9 +56,7 @@ class ContainerHandler:
     kind: Literal["container"] = field(default="container", init=False)
 
 
-ToolHandler = (
-    InProcessHandler | SubprocessHandler | McpHandler | HttpHandler | ContainerHandler
-)
+ToolHandler = InProcessHandler | SubprocessHandler | McpHandler | HttpHandler | ContainerHandler
 
 
 @dataclass(frozen=True)

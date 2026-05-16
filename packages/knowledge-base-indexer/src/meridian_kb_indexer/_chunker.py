@@ -24,7 +24,15 @@ _EXT_TO_LANG: dict[str, str] = {
 
 _CODE_LANGS = {"python", "javascript", "typescript", "tsx"}
 
-_IGNORE_DIRS = {".git", "__pycache__", "node_modules", ".venv", "venv", ".mypy_cache", ".ruff_cache"}
+_IGNORE_DIRS = {
+    ".git",
+    "__pycache__",
+    "node_modules",
+    ".venv",
+    "venv",
+    ".mypy_cache",
+    ".ruff_cache",
+}
 _IGNORE_EXTS = {".pyc", ".pyo", ".pyd", ".so", ".dylib", ".exe", ".bin", ".lock"}
 
 
@@ -115,15 +123,19 @@ def _get_ts_parser_and_lang(language: str) -> tuple[Any, Any]:
 
     if language == "python":
         import tree_sitter_python as _m  # type: ignore[import-untyped]
+
         ts_lang = Language(_m.language())
     elif language in ("javascript", "jsx"):
         import tree_sitter_javascript as _m  # type: ignore[import-untyped]
+
         ts_lang = Language(_m.language())
     elif language == "typescript":
         import tree_sitter_typescript as _m  # type: ignore[import-untyped]
+
         ts_lang = Language(_m.language_typescript())
     elif language == "tsx":
         import tree_sitter_typescript as _m  # type: ignore[import-untyped]
+
         ts_lang = Language(_m.language_tsx())
     else:
         raise ValueError(f"Unsupported language: {language}")

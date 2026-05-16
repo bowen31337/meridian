@@ -13,6 +13,7 @@ Usage:
 Upsert syntax uses the ANSI-standard ON CONFLICT DO UPDATE clause.
 Placeholders are $1, $2, … (asyncpg style).
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -36,18 +37,30 @@ from ._contract import (
 from ._migrations import MIGRATIONS
 from ._runtime import RepositoryDriver
 from ._types import (
-    Agent, AgentFilter,
-    Channel, ChannelFilter,
-    Environment, EnvironmentFilter,
-    MemoryEntry, MemoryFilter,
-    Message, MessageFilter,
-    Session, SessionFilter,
-    Skill, SkillFilter,
-    Thread, ThreadFilter,
-    ToolCall, ToolCallFilter,
-    UserProfile, UserProfileFilter,
-    VaultEntry, VaultFilter,
-    Webhook, WebhookFilter,
+    Agent,
+    AgentFilter,
+    Channel,
+    ChannelFilter,
+    Environment,
+    EnvironmentFilter,
+    MemoryEntry,
+    MemoryFilter,
+    Message,
+    MessageFilter,
+    Session,
+    SessionFilter,
+    Skill,
+    SkillFilter,
+    Thread,
+    ThreadFilter,
+    ToolCall,
+    ToolCallFilter,
+    UserProfile,
+    UserProfileFilter,
+    VaultEntry,
+    VaultFilter,
+    Webhook,
+    WebhookFilter,
 )
 
 Record = asyncpg.Record
@@ -57,71 +70,115 @@ Record = asyncpg.Record
 # Row converters  (asyncpg.Record supports index access like a tuple)
 # ---------------------------------------------------------------------------
 
+
 def _agent(r: Record) -> Agent:
-    return Agent(id=r[0], kind=r[1], name=r[2], config=r[3],
-                 capabilities=r[4], created_at=r[5], updated_at=r[6])
+    return Agent(
+        id=r[0],
+        kind=r[1],
+        name=r[2],
+        config=r[3],
+        capabilities=r[4],
+        created_at=r[5],
+        updated_at=r[6],
+    )
 
 
 def _session(r: Record) -> Session:
-    return Session(id=r[0], agent_id=r[1], status=r[2],
-                   metadata=r[3], created_at=r[4], updated_at=r[5])
+    return Session(
+        id=r[0], agent_id=r[1], status=r[2], metadata=r[3], created_at=r[4], updated_at=r[5]
+    )
 
 
 def _thread(r: Record) -> Thread:
-    return Thread(id=r[0], session_id=r[1], title=r[2],
-                  created_at=r[3], updated_at=r[4])
+    return Thread(id=r[0], session_id=r[1], title=r[2], created_at=r[3], updated_at=r[4])
 
 
 def _message(r: Record) -> Message:
-    return Message(id=r[0], thread_id=r[1], session_id=r[2], role=r[3],
-                   content=r[4], sequence=r[5], created_at=r[6])
+    return Message(
+        id=r[0],
+        thread_id=r[1],
+        session_id=r[2],
+        role=r[3],
+        content=r[4],
+        sequence=r[5],
+        created_at=r[6],
+    )
 
 
 def _tool_call(r: Record) -> ToolCall:
-    return ToolCall(id=r[0], message_id=r[1], session_id=r[2], tool_name=r[3],
-                    input=r[4], output=r[5], status=r[6],
-                    created_at=r[7], updated_at=r[8])
+    return ToolCall(
+        id=r[0],
+        message_id=r[1],
+        session_id=r[2],
+        tool_name=r[3],
+        input=r[4],
+        output=r[5],
+        status=r[6],
+        created_at=r[7],
+        updated_at=r[8],
+    )
 
 
 def _skill(r: Record) -> Skill:
-    return Skill(id=r[0], name=r[1], description=r[2], capabilities=r[3],
-                 config=r[4], created_at=r[5], updated_at=r[6])
+    return Skill(
+        id=r[0],
+        name=r[1],
+        description=r[2],
+        capabilities=r[3],
+        config=r[4],
+        created_at=r[5],
+        updated_at=r[6],
+    )
 
 
 def _environment(r: Record) -> Environment:
-    return Environment(id=r[0], kind=r[1], status=r[2], config=r[3],
-                       created_at=r[4], updated_at=r[5])
+    return Environment(
+        id=r[0], kind=r[1], status=r[2], config=r[3], created_at=r[4], updated_at=r[5]
+    )
 
 
 def _memory_entry(r: Record) -> MemoryEntry:
-    return MemoryEntry(id=r[0], scope=r[1], key=r[2], value=r[3],
-                       created_at=r[4], updated_at=r[5])
+    return MemoryEntry(id=r[0], scope=r[1], key=r[2], value=r[3], created_at=r[4], updated_at=r[5])
 
 
 def _vault_entry(r: Record) -> VaultEntry:
-    return VaultEntry(id=r[0], name=r[1], description=r[2],
-                      created_at=r[3], updated_at=r[4])
+    return VaultEntry(id=r[0], name=r[1], description=r[2], created_at=r[3], updated_at=r[4])
 
 
 def _user_profile(r: Record) -> UserProfile:
-    return UserProfile(id=r[0], username=r[1], display_name=r[2],
-                       email=r[3], metadata=r[4],
-                       created_at=r[5], updated_at=r[6])
+    return UserProfile(
+        id=r[0],
+        username=r[1],
+        display_name=r[2],
+        email=r[3],
+        metadata=r[4],
+        created_at=r[5],
+        updated_at=r[6],
+    )
 
 
 def _channel(r: Record) -> Channel:
-    return Channel(id=r[0], kind=r[1], name=r[2], config=r[3],
-                   status=r[4], created_at=r[5], updated_at=r[6])
+    return Channel(
+        id=r[0], kind=r[1], name=r[2], config=r[3], status=r[4], created_at=r[5], updated_at=r[6]
+    )
 
 
 def _webhook(r: Record) -> Webhook:
-    return Webhook(id=r[0], url=r[1], events=r[2], secret_ref=r[3],
-                   status=r[4], created_at=r[5], updated_at=r[6])
+    return Webhook(
+        id=r[0],
+        url=r[1],
+        events=r[2],
+        secret_ref=r[3],
+        status=r[4],
+        created_at=r[5],
+        updated_at=r[6],
+    )
 
 
 # ---------------------------------------------------------------------------
 # Repository implementations
 # ---------------------------------------------------------------------------
+
 
 class _PgAgentRepo(AgentRepository):
     def __init__(self, pool: asyncpg.Pool) -> None:
@@ -149,8 +206,13 @@ class _PgAgentRepo(AgentRepository):
                     capabilities = EXCLUDED.capabilities,
                     updated_at   = EXCLUDED.updated_at
                 """,
-                agent.id, agent.kind, agent.name, agent.config,
-                agent.capabilities, agent.created_at, agent.updated_at,
+                agent.id,
+                agent.kind,
+                agent.name,
+                agent.config,
+                agent.capabilities,
+                agent.created_at,
+                agent.updated_at,
             )
 
     async def delete(self, agent_id: str) -> None:
@@ -201,8 +263,12 @@ class _PgSessionRepo(SessionRepository):
                     metadata   = EXCLUDED.metadata,
                     updated_at = EXCLUDED.updated_at
                 """,
-                session.id, session.agent_id, session.status,
-                session.metadata, session.created_at, session.updated_at,
+                session.id,
+                session.agent_id,
+                session.status,
+                session.metadata,
+                session.created_at,
+                session.updated_at,
             )
 
     async def delete(self, session_id: str) -> None:
@@ -239,8 +305,7 @@ class _PgThreadRepo(ThreadRepository):
     async def get(self, thread_id: str) -> Thread | None:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT id, session_id, title, created_at, updated_at"
-                " FROM threads WHERE id = $1",
+                "SELECT id, session_id, title, created_at, updated_at FROM threads WHERE id = $1",
                 thread_id,
             )
             return _thread(row) if row else None
@@ -256,8 +321,11 @@ class _PgThreadRepo(ThreadRepository):
                     title      = EXCLUDED.title,
                     updated_at = EXCLUDED.updated_at
                 """,
-                thread.id, thread.session_id, thread.title,
-                thread.created_at, thread.updated_at,
+                thread.id,
+                thread.session_id,
+                thread.title,
+                thread.created_at,
+                thread.updated_at,
             )
 
     async def delete(self, thread_id: str) -> None:
@@ -300,7 +368,8 @@ class _PgMessageRepo(MessageRepository):
         async with self._pool.acquire() as conn:
             await conn.execute(
                 """
-                INSERT INTO messages (id, thread_id, session_id, role, content, sequence, created_at)
+                INSERT INTO messages
+                    (id, thread_id, session_id, role, content, sequence, created_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7)
                 ON CONFLICT (id) DO UPDATE SET
                     thread_id  = EXCLUDED.thread_id,
@@ -309,8 +378,13 @@ class _PgMessageRepo(MessageRepository):
                     content    = EXCLUDED.content,
                     sequence   = EXCLUDED.sequence
                 """,
-                message.id, message.thread_id, message.session_id, message.role,
-                message.content, message.sequence, message.created_at,
+                message.id,
+                message.thread_id,
+                message.session_id,
+                message.role,
+                message.content,
+                message.sequence,
+                message.created_at,
             )
 
     async def delete(self, message_id: str) -> None:
@@ -351,7 +425,8 @@ class _PgToolCallRepo(ToolCallRepository):
     async def get(self, tool_call_id: str) -> ToolCall | None:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT id, message_id, session_id, tool_name, input, output, status, created_at, updated_at"
+                "SELECT id, message_id, session_id, tool_name, input, output,"
+                " status, created_at, updated_at"
                 " FROM tool_calls WHERE id = $1",
                 tool_call_id,
             )
@@ -362,7 +437,8 @@ class _PgToolCallRepo(ToolCallRepository):
             await conn.execute(
                 """
                 INSERT INTO tool_calls
-                    (id, message_id, session_id, tool_name, input, output, status, created_at, updated_at)
+                    (id, message_id, session_id, tool_name, input, output,
+                     status, created_at, updated_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 ON CONFLICT (id) DO UPDATE SET
                     message_id = EXCLUDED.message_id,
@@ -373,9 +449,15 @@ class _PgToolCallRepo(ToolCallRepository):
                     status     = EXCLUDED.status,
                     updated_at = EXCLUDED.updated_at
                 """,
-                tool_call.id, tool_call.message_id, tool_call.session_id, tool_call.tool_name,
-                tool_call.input, tool_call.output, tool_call.status,
-                tool_call.created_at, tool_call.updated_at,
+                tool_call.id,
+                tool_call.message_id,
+                tool_call.session_id,
+                tool_call.tool_name,
+                tool_call.input,
+                tool_call.output,
+                tool_call.status,
+                tool_call.created_at,
+                tool_call.updated_at,
             )
 
     async def delete(self, tool_call_id: str) -> None:
@@ -402,7 +484,8 @@ class _PgToolCallRepo(ToolCallRepository):
         params.extend([filter.limit, filter.offset])
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
-                f"SELECT id, message_id, session_id, tool_name, input, output, status, created_at, updated_at"
+                f"SELECT id, message_id, session_id, tool_name, input, output,"
+                f" status, created_at, updated_at"
                 f" FROM tool_calls {where} ORDER BY created_at ASC LIMIT ${n} OFFSET ${n + 1}",
                 *params,
             )
@@ -426,7 +509,8 @@ class _PgSkillRepo(SkillRepository):
         async with self._pool.acquire() as conn:
             await conn.execute(
                 """
-                INSERT INTO skills (id, name, description, capabilities, config, created_at, updated_at)
+                INSERT INTO skills
+                    (id, name, description, capabilities, config, created_at, updated_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7)
                 ON CONFLICT (id) DO UPDATE SET
                     name         = EXCLUDED.name,
@@ -435,8 +519,13 @@ class _PgSkillRepo(SkillRepository):
                     config       = EXCLUDED.config,
                     updated_at   = EXCLUDED.updated_at
                 """,
-                skill.id, skill.name, skill.description, skill.capabilities,
-                skill.config, skill.created_at, skill.updated_at,
+                skill.id,
+                skill.name,
+                skill.description,
+                skill.capabilities,
+                skill.config,
+                skill.created_at,
+                skill.updated_at,
             )
 
     async def delete(self, skill_id: str) -> None:
@@ -448,7 +537,8 @@ class _PgSkillRepo(SkillRepository):
             rows = await conn.fetch(
                 "SELECT id, name, description, capabilities, config, created_at, updated_at"
                 " FROM skills ORDER BY name ASC LIMIT $1 OFFSET $2",
-                filter.limit, filter.offset,
+                filter.limit,
+                filter.offset,
             )
             return [_skill(r) for r in rows]
 
@@ -478,8 +568,12 @@ class _PgEnvironmentRepo(EnvironmentRepository):
                     config     = EXCLUDED.config,
                     updated_at = EXCLUDED.updated_at
                 """,
-                environment.id, environment.kind, environment.status,
-                environment.config, environment.created_at, environment.updated_at,
+                environment.id,
+                environment.kind,
+                environment.status,
+                environment.config,
+                environment.created_at,
+                environment.updated_at,
             )
 
     async def delete(self, environment_id: str) -> None:
@@ -534,8 +628,12 @@ class _PgMemoryRepo(MemoryRepository):
                     value      = EXCLUDED.value,
                     updated_at = EXCLUDED.updated_at
                 """,
-                entry.id, entry.scope, entry.key, entry.value,
-                entry.created_at, entry.updated_at,
+                entry.id,
+                entry.scope,
+                entry.key,
+                entry.value,
+                entry.created_at,
+                entry.updated_at,
             )
 
     async def delete(self, entry_id: str) -> None:
@@ -585,8 +683,11 @@ class _PgVaultRepo(VaultRepository):
                     description = EXCLUDED.description,
                     updated_at  = EXCLUDED.updated_at
                 """,
-                entry.id, entry.name, entry.description,
-                entry.created_at, entry.updated_at,
+                entry.id,
+                entry.name,
+                entry.description,
+                entry.created_at,
+                entry.updated_at,
             )
 
     async def delete(self, entry_id: str) -> None:
@@ -598,7 +699,8 @@ class _PgVaultRepo(VaultRepository):
             rows = await conn.fetch(
                 "SELECT id, name, description, created_at, updated_at"
                 " FROM vault_entries ORDER BY name ASC LIMIT $1 OFFSET $2",
-                filter.limit, filter.offset,
+                filter.limit,
+                filter.offset,
             )
             return [_vault_entry(r) for r in rows]
 
@@ -630,8 +732,13 @@ class _PgUserProfileRepo(UserProfileRepository):
                     metadata     = EXCLUDED.metadata,
                     updated_at   = EXCLUDED.updated_at
                 """,
-                profile.id, profile.username, profile.display_name,
-                profile.email, profile.metadata, profile.created_at, profile.updated_at,
+                profile.id,
+                profile.username,
+                profile.display_name,
+                profile.email,
+                profile.metadata,
+                profile.created_at,
+                profile.updated_at,
             )
 
     async def delete(self, user_id: str) -> None:
@@ -643,7 +750,8 @@ class _PgUserProfileRepo(UserProfileRepository):
             rows = await conn.fetch(
                 "SELECT id, username, display_name, email, metadata, created_at, updated_at"
                 " FROM user_profiles ORDER BY username ASC LIMIT $1 OFFSET $2",
-                filter.limit, filter.offset,
+                filter.limit,
+                filter.offset,
             )
             return [_user_profile(r) for r in rows]
 
@@ -674,8 +782,13 @@ class _PgChannelRepo(ChannelRepository):
                     status     = EXCLUDED.status,
                     updated_at = EXCLUDED.updated_at
                 """,
-                channel.id, channel.kind, channel.name, channel.config,
-                channel.status, channel.created_at, channel.updated_at,
+                channel.id,
+                channel.kind,
+                channel.name,
+                channel.config,
+                channel.status,
+                channel.created_at,
+                channel.updated_at,
             )
 
     async def delete(self, channel_id: str) -> None:
@@ -731,8 +844,13 @@ class _PgWebhookRepo(WebhookRepository):
                     status     = EXCLUDED.status,
                     updated_at = EXCLUDED.updated_at
                 """,
-                webhook.id, webhook.url, webhook.events, webhook.secret_ref,
-                webhook.status, webhook.created_at, webhook.updated_at,
+                webhook.id,
+                webhook.url,
+                webhook.events,
+                webhook.secret_ref,
+                webhook.status,
+                webhook.created_at,
+                webhook.updated_at,
             )
 
     async def delete(self, webhook_id: str) -> None:
@@ -762,6 +880,7 @@ class _PgWebhookRepo(WebhookRepository):
 # Driver
 # ---------------------------------------------------------------------------
 
+
 class PostgresRepositoryDriver(RepositoryDriver):
     """
     Postgres-backed RepositoryDriver backed by an asyncpg connection pool.
@@ -790,7 +909,7 @@ class PostgresRepositoryDriver(RepositoryDriver):
         self._webhooks = _PgWebhookRepo(pool)
 
     @classmethod
-    async def open(cls, dsn: str, **pool_kwargs: Any) -> "PostgresRepositoryDriver":
+    async def open(cls, dsn: str, **pool_kwargs: Any) -> PostgresRepositoryDriver:
         """Create an asyncpg connection pool and return a driver instance."""
         pool = await asyncpg.create_pool(dsn, **pool_kwargs)
         return cls(pool)

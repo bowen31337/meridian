@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import uvicorn
-
 from core_errors import AuditLogEntry
 
 from ._app import create_app
@@ -18,7 +18,7 @@ _LOG = logging.getLogger("meridiand")
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -67,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
         uvicorn.run(app, log_level=config.log_level.lower(), **server_kwargs)  # type: ignore[arg-type]
     except Exception as exc:
         msg = str(exc)
-        try:
+        with contextlib.suppress(Exception):
             services.audit_log.write(
                 AuditLogEntry(
                     level="error",
@@ -77,8 +77,6 @@ def main(argv: list[str] | None = None) -> int:
                     detail={"message": msg},
                 )
             )
-        except Exception:
-            pass
         print(f"meridiand: server error: {msg}", file=sys.stderr)
         return 1
 

@@ -1,19 +1,18 @@
 """Tests for WorkspaceIndexer: scan, OTel spans, audit log, and error handling."""
+
 from __future__ import annotations
 
-import asyncio
 import json
 from pathlib import Path
 
 import pytest
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from meridian_kb_indexer import IndexEvent, WorkspaceIndexer
 from meridian_kb_indexer._types import IndexerError
-
 
 # ---------------------------------------------------------------------------
 # OTel setup fixture — provider set once per session; exporter cleared per test

@@ -41,7 +41,11 @@ async def add_tool(args: AddArgs, ctx: ToolContext) -> dict[str, Any]:
     name="explicit_name",
     description="Explicit name tool",
     input_schema={"type": "object", "properties": {"v": {"type": "integer"}}, "required": ["v"]},
-    output_schema={"type": "object", "properties": {"doubled": {"type": "integer"}}, "required": ["doubled"]},
+    output_schema={
+        "type": "object",
+        "properties": {"doubled": {"type": "integer"}},
+        "required": ["doubled"],
+    },
 )
 async def some_fn(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     return {"doubled": args["v"] * 2}
@@ -124,7 +128,11 @@ async def test_missing_required_field_returns_is_error() -> None:
 async def test_output_schema_validation_triggers_is_error() -> None:
     @meridian_tool(
         input_schema={"type": "object"},
-        output_schema={"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]},
+        output_schema={
+            "type": "object",
+            "properties": {"ok": {"type": "boolean"}},
+            "required": ["ok"],
+        },
     )
     async def bad_output(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         return {"wrong_key": True}  # missing "ok"
@@ -144,7 +152,7 @@ async def test_handler_exception_returns_is_error() -> None:
     result = await boom.execute({}, _CTX)
     assert result.is_error
     assert result.error is not None
-    assert "execution_failed" == result.error.code
+    assert result.error.code == "execution_failed"
     assert "something went wrong" in result.error.message
 
 

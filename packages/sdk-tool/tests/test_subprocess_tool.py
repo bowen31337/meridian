@@ -37,7 +37,11 @@ class _IO:
 def test_server_success() -> None:
     request = json.dumps({"args": {"x": 21}, "context": {}})
     io_ = _IO(request)
-    run_subprocess_tool(lambda args, ctx: {"doubled": args["x"] * 2}, input_stream=io_.stdin, output_stream=io_.stdout)
+    run_subprocess_tool(
+        lambda args, ctx: {"doubled": args["x"] * 2},
+        input_stream=io_.stdin,
+        output_stream=io_.stdout,
+    )
     assert io_.result() == {"result": {"doubled": 42}}
 
 

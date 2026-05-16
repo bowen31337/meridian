@@ -1,0 +1,46 @@
+name: Type Check
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "packages/**/*.py"
+      - "pyrightconfig.json"
+      - ".github/workflows/typecheck.yml"
+      - "scripts/check-pyright.sh"
+  pull_request:
+    paths:
+      - "packages/**/*.py"
+      - "pyrightconfig.json"
+      - ".github/workflows/typecheck.yml"
+      - "scripts/check-pyright.sh"
+
+jobs:
+  pyright:
+    name: Pyright strict
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install \
+            pyright \
+            "opentelemetry-api>=1.24" \
+            "fastapi>=0.110"
+
+      - name: Run Pyright strict check
+        run: bash scripts/check-pyright.sh
+
+      - name: Upload audit log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pyright-audit-log
+          path: ci-audit.ndjson
+          if-no-files-found: ignore

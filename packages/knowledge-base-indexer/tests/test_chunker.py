@@ -1,10 +1,10 @@
 """Tests for _chunker: markdown, plain-text, code (if tree-sitter available), and path filter."""
+
 from __future__ import annotations
 
 import pytest
 
 from meridian_kb_indexer._chunker import chunk_file, detect_language, should_index_path
-
 
 # ---------------------------------------------------------------------------
 # Path filter
@@ -213,7 +213,7 @@ def test_python_chunks_ordered_by_line() -> None:
 def test_python_chunk_content_matches_source() -> None:
     chunks = chunk_file("module.py", _PYTHON_SRC)
     func_chunk = next(c for c in chunks if c.symbol_name == "hello")
-    assert 'def hello' in func_chunk.content
+    assert "def hello" in func_chunk.content
 
 
 def _js_tree_sitter_available() -> bool:
