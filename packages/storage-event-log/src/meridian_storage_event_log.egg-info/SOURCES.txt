@@ -1,0 +1,15 @@
+pyproject.toml
+src/meridian_storage_event_log.egg-info/PKG-INFO
+src/meridian_storage_event_log.egg-info/SOURCES.txt
+src/meridian_storage_event_log.egg-info/dependency_links.txt
+src/meridian_storage_event_log.egg-info/requires.txt
+src/meridian_storage_event_log.egg-info/top_level.txt
+src/storage_event_log/__init__.py
+src/storage_event_log/_audit.py
+src/storage_event_log/_contract.py
+src/storage_event_log/_local.py
+src/storage_event_log/_runtime.py
+src/storage_event_log/_telemetry.py
+src/storage_event_log/_types.py
+src/storage_event_log/_version.py
+tests/test_conformance.py
