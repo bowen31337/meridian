@@ -1,5 +1,5 @@
 (version 1)
 (allow default)
 (deny file-write* (subpath "/Users/bowenli/development/meridian"))
-(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/storage-reposit-system-repository-abstract-base-classes"))
+(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/foundation-repo-system-daemon-entrypoint-at-python-m-me"))
 (allow file-write* (subpath "/Users/bowenli/development/meridian/.git"))
