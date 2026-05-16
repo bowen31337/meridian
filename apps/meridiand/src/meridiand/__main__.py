@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
 
-    app = create_app(services.audit_log)
+    app = create_app(services.audit_log, plugin_loader=services.plugin_loader)
 
     bind = config.bind
     if bind.socket:

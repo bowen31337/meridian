@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/reliability-cra-system-tool-hook-skill-forge-crash-isol/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/plugin-sdks-v1-system-plugin-loader-discovers-installed/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
