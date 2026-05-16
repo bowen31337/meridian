@@ -1,11 +1,13 @@
 # Types
 from ._types import (
+    AgentNetworkPolicy,
     AuditLogEntry,
     CapabilityEnvelope,
     EnvironmentFailure,
     ExecuteRequest,
     ExecuteResult,
     NetworkPolicy,
+    NetworkViolation,
     ProvisionRequest,
     ReclaimRequest,
     StructuredEvent,
@@ -20,6 +22,10 @@ from ._audit import AuditLog, NoopAuditLog
 # Telemetry
 from ._telemetry import get_tracer, record_environment_failure, record_invocation_event
 
+# Network policy enforcement
+from ._enforcer import NetworkEnforcer
+from ._proxy import OutboundProxyTransport
+
 # Runtime
 from ._runtime import EnvironmentRuntime, RuntimeOptions, default_runtime
 
@@ -28,12 +34,14 @@ from ._version import ENVIRONMENT_SDK_VERSION
 
 __all__ = [
     # Types
+    "AgentNetworkPolicy",
     "AuditLogEntry",
     "CapabilityEnvelope",
     "EnvironmentFailure",
     "ExecuteRequest",
     "ExecuteResult",
     "NetworkPolicy",
+    "NetworkViolation",
     "ProvisionRequest",
     "ReclaimRequest",
     "StructuredEvent",
@@ -46,6 +54,9 @@ __all__ = [
     "get_tracer",
     "record_environment_failure",
     "record_invocation_event",
+    # Network policy
+    "NetworkEnforcer",
+    "OutboundProxyTransport",
     # Runtime
     "EnvironmentRuntime",
     "RuntimeOptions",

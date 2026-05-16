@@ -70,6 +70,18 @@ def mock_span(mock_tracer: MockTracer) -> MockSpan:
     return mock_tracer.span
 
 
+@pytest.fixture()
+def mock_proxy_tracer(monkeypatch: pytest.MonkeyPatch) -> MockTracer:
+    tracer = MockTracer()
+    monkeypatch.setattr("sdk_environment._proxy.get_tracer", lambda: tracer)
+    return tracer
+
+
+@pytest.fixture()
+def mock_proxy_span(mock_proxy_tracer: MockTracer) -> MockSpan:
+    return mock_proxy_tracer.span
+
+
 # ---------------------------------------------------------------------------
 # Audit log capture
 # ---------------------------------------------------------------------------

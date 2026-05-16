@@ -68,6 +68,34 @@ class ExecuteResult:
     duration_ms: float
 
 
+@dataclass(frozen=True)
+class AgentNetworkPolicy:
+    """Per-agent host allowlist; must be a strict subset of the environment NetworkPolicy."""
+
+    agent_id: str
+    allowed_hosts: tuple[str, ...] = ()
+
+
+class NetworkViolation(Exception):
+    """Raised by the outbound proxy when a connection is denied by the active network policy."""
+
+    def __init__(
+        self,
+        *,
+        host: str,
+        agent_id: str,
+        environment_id: str,
+        session_id: str,
+        timestamp: str,
+    ) -> None:
+        super().__init__(f"Outbound connection to '{host}' denied by network policy")
+        self.host = host
+        self.agent_id = agent_id
+        self.environment_id = environment_id
+        self.session_id = session_id
+        self.timestamp = timestamp
+
+
 class EnvironmentFailure(Exception):
     """
     Structured failure raised by the runtime on any operation error.
