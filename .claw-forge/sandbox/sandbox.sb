@@ -1,5 +1,5 @@
 (version 1)
 (allow default)
 (deny file-write* (subpath "/Users/bowenli/development/meridian"))
-(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/plugin-sdks-v1-system-environment-backend-sdk-packages"))
+(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/plugin-sdks-v1-system-channel-driver-sdk-packages-sdk-c"))
 (allow file-write* (subpath "/Users/bowenli/development/meridian/.git"))
