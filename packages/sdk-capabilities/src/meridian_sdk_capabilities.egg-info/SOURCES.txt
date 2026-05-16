@@ -5,10 +5,14 @@ src/meridian_sdk_capabilities.egg-info/dependency_links.txt
 src/meridian_sdk_capabilities.egg-info/requires.txt
 src/meridian_sdk_capabilities.egg-info/top_level.txt
 src/sdk_capabilities/__init__.py
+src/sdk_capabilities/_audit.py
+src/sdk_capabilities/_authorize.py
 src/sdk_capabilities/_enforcement.py
 src/sdk_capabilities/_grammar.py
 src/sdk_capabilities/_registry.py
+src/sdk_capabilities/_telemetry.py
 src/sdk_capabilities/_types.py
 src/sdk_capabilities/_version.py
+tests/test_authorize.py
 tests/test_enforcement.py
 tests/test_grammar.py

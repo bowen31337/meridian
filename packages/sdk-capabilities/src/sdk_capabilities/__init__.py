@@ -21,6 +21,10 @@ from ._enforcement import (
     satisfies,
 )
 
+# Authorize
+from ._audit import AuditLog, AuditLogEntry, NoopAuditLog
+from ._authorize import authorize
+
 # Version
 from ._version import CAPABILITIES_SDK_VERSION
 
@@ -44,6 +48,11 @@ __all__ = [
     "is_subset",
     "missing",
     "satisfies",
+    # Authorize
+    "AuditLog",
+    "AuditLogEntry",
+    "NoopAuditLog",
+    "authorize",
     # Version
     "CAPABILITIES_SDK_VERSION",
 ]

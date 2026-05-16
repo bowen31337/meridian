@@ -3,5 +3,7 @@ Name: meridian-sdk-capabilities
 Version: 0.1.0
 Summary: System Capability grammar and enforcement for Meridian
 Requires-Python: >=3.11
+Requires-Dist: opentelemetry-api>=1.24
 Provides-Extra: dev
 Requires-Dist: pytest>=8; extra == "dev"
+Requires-Dist: opentelemetry-sdk>=1.24; extra == "dev"
