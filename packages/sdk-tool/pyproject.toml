@@ -1,0 +1,53 @@
+[project]
+name = "meridian-sdk-tool"
+version = "0.1.0"
+description = "Meridian Tool Plugin SDK – in-process Python tool decorator and out-of-process subprocess/HTTP/MCP tool helpers"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "pydantic>=2.0",
+    "jsonschema>=4.0",
+    "anyio>=4.0",
+]
+
+[project.optional-dependencies]
+http = ["httpx>=0.27"]
+otel = ["opentelemetry-api>=1.24"]
+all = [
+    "meridian-sdk-tool[http]",
+    "meridian-sdk-tool[otel]",
+]
+dev = [
+    "meridian-sdk-tool[all]",
+    "pytest>=8.0",
+    "pytest-anyio>=0.0.0",
+    "anyio[trio]",
+    "httpx>=0.27",
+    "opentelemetry-api>=1.24",
+    "opentelemetry-sdk>=1.24",
+    "pyright>=1.1",
+    "ruff>=0.4",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/meridian_sdk_tool"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "TCH"]
+ignore = ["B008"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+strict = true
+include = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/foundation-repo-system-makefile-at-repo-root-wraps-cros/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/plugin-sdks-v1-system-tool-plugin-sdk-packages-sdk-tool/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
