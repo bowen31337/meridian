@@ -3,12 +3,20 @@ package = false
 
 [tool.uv.workspace]
 members = [
+    "apps/meridiand",
+    "apps/meridian-cli",
     "packages/core-errors",
+    "packages/knowledge-base-indexer",
     "packages/sdk-capabilities",
     "packages/sdk-channel",
     "packages/sdk-environment",
+    "packages/sdk-provider",
+    "packages/sdk-sandbox",
+    "packages/sdk-tool",
     "packages/storage-blob",
     "packages/storage-event-log",
+    "packages/storage-reposit",
+    "packages/storage-repository",
     "packages/system-ulid",
 ]
 
@@ -23,16 +31,34 @@ dev = [
     "opentelemetry-api>=1.24",
     "fastapi>=0.110",
     "httpx>=0.27",
+    "uvicorn[standard]>=0.29",
+    "pyyaml>=6.0",
+    "anyio>=4.0",
+    "pydantic>=2.0",
+    "jsonschema>=4.0",
+    "watchdog>=3.0",
+    "tree-sitter>=0.21",
+    "aiosqlite>=0.19",
+    "asyncpg>=0.29",
+    "click>=8.0",
 ]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = [
+    "apps/meridiand/tests",
+    "apps/meridian-cli/tests",
     "packages/core-errors/tests",
+    "packages/knowledge-base-indexer/tests",
     "packages/sdk-capabilities/tests",
     "packages/sdk-channel/tests",
     "packages/sdk-environment/tests",
+    "packages/sdk-provider/tests",
+    "packages/sdk-sandbox/tests",
+    "packages/sdk-tool/tests",
     "packages/storage-blob/tests",
     "packages/storage-event-log/tests",
+    "packages/storage-reposit/tests",
+    "packages/storage-repository/tests",
     "packages/system-ulid/tests",
 ]

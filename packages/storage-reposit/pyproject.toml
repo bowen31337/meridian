@@ -19,6 +19,9 @@ dev = [
     "opentelemetry-sdk>=1.24",
 ]
 
+[tool.uv.sources]
+meridian-storage-event-log = { workspace = true }
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
