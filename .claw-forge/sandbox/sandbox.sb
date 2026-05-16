@@ -1,5 +1,5 @@
 (version 1)
 (allow default)
 (deny file-write* (subpath "/Users/bowenli/development/meridian"))
-(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/storage-reposit-system-ndjson-event-log-writer-appends"))
+(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/foundation-repo-system-meridianerror-base-class-with-co"))
 (allow file-write* (subpath "/Users/bowenli/development/meridian/.git"))
