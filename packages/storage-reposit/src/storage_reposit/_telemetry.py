@@ -14,12 +14,12 @@ def get_tracer() -> trace.Tracer:
 
 
 def record_invocation_event(span: Span, event: StructuredEvent) -> None:
-    """Attaches a structured "indexer.invocation" event to the active span."""
+    """Attaches a structured invocation event to the active span using event.name."""
     attrs: dict[str, str | int | float | bool] = {}
     for k, v in vars(event).items():
         if isinstance(v, (str, int, float, bool)):
             attrs[k] = v
-    span.add_event("indexer.invocation", attrs)
+    span.add_event(event.name, attrs)
 
 
 def record_indexer_failure(span: Span, failure: IndexerFailure) -> None:
@@ -30,6 +30,22 @@ def record_indexer_failure(span: Span, failure: IndexerFailure) -> None:
         "indexer.error",
         {
             "indexer.session_id": failure.session_id,
+            "error.code": failure.code,
+            "error.message": failure.message,
+        },
+    )
+    if failure.cause is not None:
+        span.record_exception(failure.cause)
+
+
+def record_reader_failure(span: Span, failure: IndexerFailure) -> None:
+    """Records a failure on the span: sets status to ERROR, adds a "reader.error" event,
+    and records the underlying exception if present."""
+    span.set_status(Status(StatusCode.ERROR, failure.message))
+    span.add_event(
+        "reader.error",
+        {
+            "reader.session_id": failure.session_id,
             "error.code": failure.code,
             "error.message": failure.message,
         },

@@ -3,6 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
+EventSeq = int
+"""Monotonically increasing sequence number identifying a position in the event log."""
+
 
 class IndexerFailure(Exception):
     """

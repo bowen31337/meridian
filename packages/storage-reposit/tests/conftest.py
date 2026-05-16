@@ -6,12 +6,14 @@ OTel is mocked with a lightweight MockSpan / MockTracer pair.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import AsyncIterator
 from typing import Any
 
 import pytest
 
+from storage_event_log import SessionEvent
 from storage_reposit._audit import AuditLog
-from storage_reposit._types import AuditLogEntry
+from storage_reposit._types import AuditLogEntry, IndexerFailure
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +71,18 @@ def mock_span(mock_tracer: MockTracer) -> MockSpan:
     return mock_tracer.span
 
 
+@pytest.fixture()
+def mock_reader_tracer(monkeypatch: pytest.MonkeyPatch) -> MockTracer:
+    tracer = MockTracer()
+    monkeypatch.setattr("storage_reposit._reader_runtime.get_tracer", lambda: tracer)
+    return tracer
+
+
+@pytest.fixture()
+def mock_reader_span(mock_reader_tracer: MockTracer) -> MockSpan:
+    return mock_reader_tracer.span
+
+
 # ---------------------------------------------------------------------------
 # Audit log capture
 # ---------------------------------------------------------------------------
@@ -122,3 +136,33 @@ class FailingEventHandler:
         self._count += 1
         if self._count == self._fail_on:
             raise self._exc
+
+
+# ---------------------------------------------------------------------------
+# Reader stubs
+# ---------------------------------------------------------------------------
+
+class StubReader:
+    """LocalEventLogReader substitute for ReaderRuntime tests."""
+
+    def __init__(
+        self,
+        *,
+        raises: Exception | None = None,
+        events: list[SessionEvent] | None = None,
+    ) -> None:
+        self._raises = raises
+        self._events = events or []
+
+    async def read_events(
+        self,
+        session_id: str,
+        since: int = -1,
+        *,
+        follow: bool = False,
+        **_: Any,
+    ) -> AsyncIterator[SessionEvent]:
+        if self._raises:
+            raise self._raises
+        for event in self._events:
+            yield event

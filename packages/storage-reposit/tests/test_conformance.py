@@ -13,6 +13,18 @@ Covers:
     - Omits thread_id from SessionEvent when absent from record.
     - Includes thread_id when present.
 
+  LocalEventLogReader.read_events (cat mode, follow=False):
+    - Yields [] when no NDJSON files exist.
+    - Yields all events with since=-1.
+    - Filters events at or below since.
+    - Yields events in ascending seq order.
+    - Raises IndexerFailure(INDEXER_READ_FAILED) on malformed JSON.
+    - Stops after all existing events (does not poll).
+
+  LocalEventLogReader.read_events (tail mode, follow=True):
+    - Yields existing events then polls for new ones.
+    - New events appended to the file are yielded after the next poll.
+
   SQLiteProjectionStore:
     - get_watermark returns -1 for an unknown session.
     - set_watermark upserts correctly (insert then update).
@@ -50,9 +62,30 @@ Covers:
     - Exception recorded on span via record_exception.
     - on_error callback invoked for every failure.
     - Span is ended on unexpected exception.
+
+  ReaderRuntime:
+    - read_events yields events on success.
+    - Span name is "reader.read_events".
+    - Span carries reader.session_id attribute.
+    - "reader.invocation" event is attached to the span.
+    - Invocation event has operation="read_events".
+    - No audit entries written on success.
+    - Span is ended on success.
+    - IndexerFailure from reader is re-raised and audited.
+    - Audit entry level is "error" and event is "reader.read_events.failed".
+    - Span is marked ERROR on IndexerFailure.
+    - Span is ended on IndexerFailure.
+    - Unexpected exception is wrapped as READER_READ_EVENTS_FAILED.
+    - Cause is preserved in wrapped failure.
+    - Audit entry written for unexpected exception.
+    - "reader.error" event added to span on unexpected exception.
+    - Exception recorded on span via record_exception.
+    - on_error callback invoked for every failure.
+    - Span is ended on unexpected exception.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
 from pathlib import Path
@@ -60,6 +93,7 @@ from typing import Any
 
 import pytest
 
+from storage_event_log import SessionEvent
 from storage_reposit import (
     AuditLogEntry,
     BackgroundIndexer,
@@ -67,11 +101,13 @@ from storage_reposit import (
     IndexerOptions,
     IndexerRuntime,
     LocalEventLogReader,
+    ReaderOptions,
+    ReaderRuntime,
     SQLiteProjectionStore,
 )
 from opentelemetry.trace import StatusCode
 
-from .conftest import CapturingAuditLog, CapturingEventHandler, FailingEventHandler, MockSpan
+from .conftest import CapturingAuditLog, CapturingEventHandler, FailingEventHandler, MockSpan, StubReader
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +150,20 @@ def make_options(
         audit_log=audit,
         on_error=(lambda e: errors.append(e)) if errors is not None else None,
     )
+
+
+def make_reader_options(
+    audit: CapturingAuditLog,
+    errors: list[IndexerFailure] | None = None,
+) -> ReaderOptions:
+    return ReaderOptions(
+        audit_log=audit,
+        on_error=(lambda e: errors.append(e)) if errors is not None else None,
+    )
+
+
+def make_session_event(seq: int) -> SessionEvent:
+    return SessionEvent(seq=seq, ts=f"2024-01-01T00:00:0{seq}.000+00:00", type="message.added", data={})
 
 
 class StubIndexer:
@@ -555,3 +605,252 @@ class TestIndexerRuntimeUnexpectedException:
         with pytest.raises(IndexerFailure):
             await rt.index_session("s1", options=make_options(audit_log))
         assert mock_span.ended
+
+
+# ===========================================================================
+# LocalEventLogReader.read_events
+# ===========================================================================
+
+class TestLocalEventLogReaderReadEvents:
+    async def test_empty_when_no_files(self, tmp_path: Path) -> None:
+        reader = LocalEventLogReader(tmp_path)
+        events = [e async for e in reader.read_events("s1", since=-1)]
+        assert events == []
+
+    async def test_yields_all_events_since_minus_one(self, tmp_path: Path) -> None:
+        write_ndjson(ndjson_path(tmp_path, "s1"), [make_record(0), make_record(1)])
+        reader = LocalEventLogReader(tmp_path)
+        events = [e async for e in reader.read_events("s1", since=-1)]
+        assert [e.seq for e in events] == [0, 1]
+
+    async def test_filters_events_at_or_below_since(self, tmp_path: Path) -> None:
+        write_ndjson(ndjson_path(tmp_path, "s1"), [make_record(0), make_record(1), make_record(2)])
+        reader = LocalEventLogReader(tmp_path)
+        events = [e async for e in reader.read_events("s1", since=1)]
+        assert [e.seq for e in events] == [2]
+
+    async def test_yields_events_in_seq_order(self, tmp_path: Path) -> None:
+        write_ndjson(ndjson_path(tmp_path, "s1"), [make_record(2), make_record(0), make_record(1)])
+        reader = LocalEventLogReader(tmp_path)
+        events = [e async for e in reader.read_events("s1", since=-1)]
+        assert [e.seq for e in events] == [0, 1, 2]
+
+    async def test_empty_when_all_below_since(self, tmp_path: Path) -> None:
+        write_ndjson(ndjson_path(tmp_path, "s1"), [make_record(0), make_record(1)])
+        reader = LocalEventLogReader(tmp_path)
+        events = [e async for e in reader.read_events("s1", since=5)]
+        assert events == []
+
+    async def test_multiple_date_files_merged(self, tmp_path: Path) -> None:
+        write_ndjson(ndjson_path(tmp_path, "s1", "2024/01/01"), [make_record(0), make_record(1)])
+        write_ndjson(ndjson_path(tmp_path, "s1", "2024/01/02"), [make_record(2), make_record(3)])
+        reader = LocalEventLogReader(tmp_path)
+        events = [e async for e in reader.read_events("s1", since=-1)]
+        assert [e.seq for e in events] == [0, 1, 2, 3]
+
+    async def test_raises_on_bad_json(self, tmp_path: Path) -> None:
+        p = ndjson_path(tmp_path, "s1")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("not-json\n", encoding="utf-8")
+        reader = LocalEventLogReader(tmp_path)
+        with pytest.raises(IndexerFailure) as exc_info:
+            async for _ in reader.read_events("s1", since=-1):
+                pass
+        assert exc_info.value.code == "INDEXER_READ_FAILED"
+
+    async def test_stops_after_existing_events_cat_mode(self, tmp_path: Path) -> None:
+        write_ndjson(ndjson_path(tmp_path, "s1"), [make_record(0), make_record(1)])
+        reader = LocalEventLogReader(tmp_path)
+        count = 0
+        async for _ in reader.read_events("s1", since=-1, follow=False):
+            count += 1
+        assert count == 2
+
+    async def test_tail_yields_new_events(self, tmp_path: Path) -> None:
+        p = ndjson_path(tmp_path, "s1")
+        write_ndjson(p, [make_record(0)])
+        reader = LocalEventLogReader(tmp_path)
+
+        gen = reader.read_events("s1", since=-1, follow=True, poll_interval=0.01)
+        first = await gen.__anext__()
+        assert first.seq == 0
+
+        write_ndjson(p, [make_record(0), make_record(1)])
+        second = await asyncio.wait_for(gen.__anext__(), timeout=2.0)
+        assert second.seq == 1
+
+        await gen.aclose()
+
+    async def test_tail_yields_events_from_multiple_polls(self, tmp_path: Path) -> None:
+        p = ndjson_path(tmp_path, "s1")
+        write_ndjson(p, [make_record(0)])
+        reader = LocalEventLogReader(tmp_path)
+
+        gen = reader.read_events("s1", since=-1, follow=True, poll_interval=0.01)
+        await gen.__anext__()
+
+        write_ndjson(p, [make_record(0), make_record(1)])
+        e1 = await asyncio.wait_for(gen.__anext__(), timeout=2.0)
+
+        write_ndjson(p, [make_record(0), make_record(1), make_record(2)])
+        e2 = await asyncio.wait_for(gen.__anext__(), timeout=2.0)
+
+        await gen.aclose()
+        assert e1.seq == 1
+        assert e2.seq == 2
+
+
+# ===========================================================================
+# ReaderRuntime
+# ===========================================================================
+
+def make_reader_runtime(stub: StubReader | None = None) -> ReaderRuntime:
+    return ReaderRuntime(stub or StubReader())  # type: ignore[arg-type]
+
+
+class TestReaderRuntimeSuccess:
+    async def test_yields_events(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+        events_in = [make_session_event(0), make_session_event(1)]
+        rt = make_reader_runtime(StubReader(events=events_in))
+        out = [e async for e in rt.read_events("s1", options=make_reader_options(audit_log))]
+        assert [e.seq for e in out] == [0, 1]
+
+    async def test_span_name(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+        async for _ in make_reader_runtime().read_events("s1", options=make_reader_options(audit_log)):
+            pass
+        assert mock_reader_span.name == "reader.read_events"
+
+    async def test_span_session_id_attribute(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+        async for _ in make_reader_runtime().read_events("s1", options=make_reader_options(audit_log)):
+            pass
+        assert mock_reader_span.attributes["reader.session_id"] == "s1"
+
+    async def test_invocation_event_attached(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+        async for _ in make_reader_runtime().read_events("s1", options=make_reader_options(audit_log)):
+            pass
+        event_names = [e[0] for e in mock_reader_span.events]
+        assert "reader.invocation" in event_names
+
+    async def test_invocation_event_operation(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+        async for _ in make_reader_runtime().read_events("s1", options=make_reader_options(audit_log)):
+            pass
+        inv = next(e for e in mock_reader_span.events if e[0] == "reader.invocation")
+        assert inv[1]["operation"] == "read_events"
+
+    async def test_no_audit_entries_on_success(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+        async for _ in make_reader_runtime().read_events("s1", options=make_reader_options(audit_log)):
+            pass
+        assert audit_log.entries == []
+
+    async def test_span_ended(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+        async for _ in make_reader_runtime().read_events("s1", options=make_reader_options(audit_log)):
+            pass
+        assert mock_reader_span.ended
+
+
+class TestReaderRuntimeIndexerFailure:
+    def _make_failure(self) -> IndexerFailure:
+        return IndexerFailure(
+            code="INDEXER_READ_FAILED",
+            message="bad json",
+            session_id="s1",
+            timestamp="2024-01-01T00:00:00+00:00",
+        )
+
+    async def test_re_raises_indexer_failure(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+        rt = make_reader_runtime(StubReader(raises=self._make_failure()))
+        with pytest.raises(IndexerFailure) as exc_info:
+            async for _ in rt.read_events("s1", options=make_reader_options(audit_log)):
+                pass
+        assert exc_info.value.code == "INDEXER_READ_FAILED"
+
+    async def test_audit_entry_written(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+        rt = make_reader_runtime(StubReader(raises=self._make_failure()))
+        with pytest.raises(IndexerFailure):
+            async for _ in rt.read_events("s1", options=make_reader_options(audit_log)):
+                pass
+        assert len(audit_log.entries) == 1
+        entry: AuditLogEntry = audit_log.entries[0]
+        assert entry.level == "error"
+        assert entry.event == "reader.read_events.failed"
+
+    async def test_span_marked_error(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+        rt = make_reader_runtime(StubReader(raises=self._make_failure()))
+        with pytest.raises(IndexerFailure):
+            async for _ in rt.read_events("s1", options=make_reader_options(audit_log)):
+                pass
+        assert mock_reader_span.status.status_code == StatusCode.ERROR
+
+    async def test_span_ended_on_failure(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+        rt = make_reader_runtime(StubReader(raises=self._make_failure()))
+        with pytest.raises(IndexerFailure):
+            async for _ in rt.read_events("s1", options=make_reader_options(audit_log)):
+                pass
+        assert mock_reader_span.ended
+
+
+class TestReaderRuntimeUnexpectedException:
+    async def test_wraps_as_reader_read_events_failed(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+        rt = make_reader_runtime(StubReader(raises=OSError("disk full")))
+        with pytest.raises(IndexerFailure) as exc_info:
+            async for _ in rt.read_events("s1", options=make_reader_options(audit_log)):
+                pass
+        assert exc_info.value.code == "READER_READ_EVENTS_FAILED"
+
+    async def test_cause_preserved(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+        orig = OSError("disk full")
+        rt = make_reader_runtime(StubReader(raises=orig))
+        with pytest.raises(IndexerFailure) as exc_info:
+            async for _ in rt.read_events("s1", options=make_reader_options(audit_log)):
+                pass
+        assert exc_info.value.cause is orig
+
+    async def test_audit_entry_written(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+        rt = make_reader_runtime(StubReader(raises=OSError("boom")))
+        with pytest.raises(IndexerFailure):
+            async for _ in rt.read_events("s1", options=make_reader_options(audit_log)):
+                pass
+        assert len(audit_log.entries) == 1
+        entry: AuditLogEntry = audit_log.entries[0]
+        assert entry.level == "error"
+        assert entry.event == "reader.read_events.failed"
+        assert entry.session_id == "s1"
+
+    async def test_reader_error_event_on_span(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+        rt = make_reader_runtime(StubReader(raises=OSError("boom")))
+        with pytest.raises(IndexerFailure):
+            async for _ in rt.read_events("s1", options=make_reader_options(audit_log)):
+                pass
+        event_names = [e[0] for e in mock_reader_span.events]
+        assert "reader.error" in event_names
+
+    async def test_exception_recorded_on_span(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+        orig = OSError("boom")
+        rt = make_reader_runtime(StubReader(raises=orig))
+        with pytest.raises(IndexerFailure):
+            async for _ in rt.read_events("s1", options=make_reader_options(audit_log)):
+                pass
+        assert orig in mock_reader_span.recorded_exceptions
+
+    async def test_on_error_callback(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+        errors: list[IndexerFailure] = []
+        rt = make_reader_runtime(StubReader(raises=OSError("boom")))
+        with pytest.raises(IndexerFailure):
+            async for _ in rt.read_events("s1", options=make_reader_options(audit_log, errors)):
+                pass
+        assert len(errors) == 1
+        assert errors[0].code == "READER_READ_EVENTS_FAILED"
+
+    async def test_span_marked_error(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+        rt = make_reader_runtime(StubReader(raises=OSError("boom")))
+        with pytest.raises(IndexerFailure):
+            async for _ in rt.read_events("s1", options=make_reader_options(audit_log)):
+                pass
+        assert mock_reader_span.status.status_code == StatusCode.ERROR
+
+    async def test_span_ended_on_failure(self, mock_reader_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+        rt = make_reader_runtime(StubReader(raises=OSError("boom")))
+        with pytest.raises(IndexerFailure):
+            async for _ in rt.read_events("s1", options=make_reader_options(audit_log)):
+                pass
+        assert mock_reader_span.ended

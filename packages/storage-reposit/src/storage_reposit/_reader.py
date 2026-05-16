@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import json
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from pathlib import Path
 
 from storage_event_log import SessionEvent
 
-from ._types import IndexerFailure
+from ._types import EventSeq, IndexerFailure
 
 
 def _now() -> str:
@@ -54,3 +56,29 @@ class LocalEventLogReader:
                         )
                     )
         return sorted(events, key=lambda e: e.seq)
+
+    async def read_events(
+        self,
+        session_id: str,
+        since: EventSeq = -1,
+        *,
+        follow: bool = False,
+        poll_interval: float = 0.1,
+    ) -> AsyncIterator[SessionEvent]:
+        """
+        Yield events for session_id with seq > since, in ascending seq order.
+
+        follow=False (default): yields all existing events then stops (cat-equivalent).
+        follow=True: after yielding existing events, polls for new ones indefinitely.
+
+        Raises IndexerFailure(INDEXER_READ_FAILED) on malformed JSON.
+        """
+        watermark = since
+        while True:
+            batch = self.read_after(session_id, watermark)
+            for event in batch:
+                yield event
+                watermark = event.seq
+            if not follow:
+                return
+            await asyncio.sleep(poll_interval)

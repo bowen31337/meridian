@@ -1,5 +1,5 @@
 # Types
-from ._types import AuditLogEntry, IndexerFailure, StructuredEvent
+from ._types import AuditLogEntry, EventSeq, IndexerFailure, StructuredEvent
 
 # Contract
 from ._contract import EventHandler
@@ -13,10 +13,11 @@ from ._indexer import BackgroundIndexer
 from ._audit import AuditLog, NoopAuditLog
 
 # Telemetry
-from ._telemetry import get_tracer, record_indexer_failure, record_invocation_event
+from ._telemetry import get_tracer, record_indexer_failure, record_invocation_event, record_reader_failure
 
 # Runtime
 from ._runtime import IndexerOptions, IndexerRuntime
+from ._reader_runtime import ReaderOptions, ReaderRuntime
 
 # Version
 from ._version import INDEXER_SDK_VERSION
@@ -24,6 +25,7 @@ from ._version import INDEXER_SDK_VERSION
 __all__ = [
     # Types
     "AuditLogEntry",
+    "EventSeq",
     "IndexerFailure",
     "StructuredEvent",
     # Contract
@@ -39,9 +41,12 @@ __all__ = [
     "get_tracer",
     "record_indexer_failure",
     "record_invocation_event",
+    "record_reader_failure",
     # Runtime
     "IndexerOptions",
     "IndexerRuntime",
+    "ReaderOptions",
+    "ReaderRuntime",
     # Version
     "INDEXER_SDK_VERSION",
 ]

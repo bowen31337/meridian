@@ -9,6 +9,7 @@ src/storage_reposit/_audit.py
 src/storage_reposit/_contract.py
 src/storage_reposit/_indexer.py
 src/storage_reposit/_reader.py
+src/storage_reposit/_reader_runtime.py
 src/storage_reposit/_runtime.py
 src/storage_reposit/_store.py
 src/storage_reposit/_telemetry.py
