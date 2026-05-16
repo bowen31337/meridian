@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  ci:
+    name: CI
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: packages/sdk-widget/package-lock.json
+
+      - name: uv lock check
+        run: |
+          uv lock --check || {
+            echo "::error::STAGE FAILED: uv lock check — run 'uv lock' locally and commit uv.lock"
+            exit 1
+          }
+
+      - name: Install Python dependencies
+        run: uv sync --frozen --group dev
+
+      - name: Install Node dependencies
+        working-directory: packages/sdk-widget
+        run: npm ci
+
+      - name: ruff
+        run: |
+          FAILED=0
+          uv run ruff format --check . || FAILED=1
+          uv run ruff check . || FAILED=1
+          if [ "$FAILED" -ne 0 ]; then
+            echo "::error::STAGE FAILED: ruff — run 'ruff format . && ruff check --fix .' to fix"
+            exit 1
+          fi
+
+      - name: pyright
+        run: |
+          uv run pyright || {
+            echo "::error::STAGE FAILED: pyright — fix type errors shown above"
+            exit 1
+          }
+
+      - name: lint-imports
+        run: |
+          uv run lint-imports || {
+            echo "::error::STAGE FAILED: lint-imports — fix import boundary violations shown above"
+            exit 1
+          }
+
+      - name: biome check
+        working-directory: packages/sdk-widget
+        run: |
+          npx biome check . || {
+            echo "::error::STAGE FAILED: biome check — run 'biome check --write .' to auto-fix"
+            exit 1
+          }
+
+      - name: "tsc --noEmit"
+        working-directory: packages/sdk-widget
+        run: |
+          npx tsc --noEmit || {
+            echo "::error::STAGE FAILED: tsc --noEmit — fix TypeScript type errors shown above"
+            exit 1
+          }
+
+      - name: codegen-drift check
+        run: |
+          DIRS=""
+          [ -d packages/sdk-ts/src ] && DIRS="$DIRS packages/sdk-ts/src"
+          [ -d packages/sdk-py/src ] && DIRS="$DIRS packages/sdk-py/src"
+          if [ -n "$DIRS" ]; then
+            # shellcheck disable=SC2086
+            git diff --exit-code $DIRS || {
+              echo "::error::STAGE FAILED: codegen-drift check — generated SDK files have uncommitted changes; run 'make codegen' and commit"
+              exit 1
+            }
+          fi
+
+      - name: pytest
+        run: |
+          uv run pytest || {
+            echo "::error::STAGE FAILED: pytest — fix failing tests shown above"
+            exit 1
+          }
+
+      - name: vitest
+        working-directory: packages/sdk-widget
+        run: |
+          npm test || {
+            echo "::error::STAGE FAILED: vitest — fix failing tests shown above"
+            exit 1
+          }

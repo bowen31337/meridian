@@ -1,5 +1,5 @@
 (version 1)
 (allow default)
 (deny file-write* (subpath "/Users/bowenli/development/meridian"))
-(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/foundation-repo-system-pre-commit-hooks-run-ruff-format"))
+(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/foundation-repo-system-ci-workflow-runs-uv-lock-check-r"))
 (allow file-write* (subpath "/Users/bowenli/development/meridian/.git"))

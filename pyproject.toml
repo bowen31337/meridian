@@ -1,0 +1,38 @@
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = [
+    "packages/core-errors",
+    "packages/sdk-capabilities",
+    "packages/sdk-channel",
+    "packages/sdk-environment",
+    "packages/storage-blob",
+    "packages/storage-event-log",
+    "packages/system-ulid",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.9.7",
+    "pyright>=1.1.400",
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "import-linter>=2.1",
+    "opentelemetry-sdk>=1.24",
+    "opentelemetry-api>=1.24",
+    "fastapi>=0.110",
+    "httpx>=0.27",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = [
+    "packages/core-errors/tests",
+    "packages/sdk-capabilities/tests",
+    "packages/sdk-channel/tests",
+    "packages/sdk-environment/tests",
+    "packages/storage-blob/tests",
+    "packages/storage-event-log/tests",
+    "packages/system-ulid/tests",
+]

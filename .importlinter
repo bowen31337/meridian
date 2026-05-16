@@ -1,0 +1,21 @@
+[importlinter]
+root_packages =
+    core_errors
+    sdk_capabilities
+    sdk_channel
+    sdk_environment
+    storage_blob
+    storage_event_log
+    system_ulid
+
+[importlinter:contract:1]
+name = Packages are independent
+type = independence
+modules =
+    core_errors
+    sdk_capabilities
+    sdk_channel
+    sdk_environment
+    storage_blob
+    storage_event_log
+    system_ulid
