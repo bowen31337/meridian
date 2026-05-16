@@ -7,8 +7,14 @@ src/meridian_sdk_environment.egg-info/top_level.txt
 src/sdk_environment/__init__.py
 src/sdk_environment/_audit.py
 src/sdk_environment/_contract.py
+src/sdk_environment/_enforcer.py
+src/sdk_environment/_fs_enforcer.py
+src/sdk_environment/_fs_gate.py
+src/sdk_environment/_proxy.py
 src/sdk_environment/_runtime.py
 src/sdk_environment/_telemetry.py
 src/sdk_environment/_types.py
 src/sdk_environment/_version.py
 tests/test_conformance.py
+tests/test_filesystem_jail.py
+tests/test_network_policy.py

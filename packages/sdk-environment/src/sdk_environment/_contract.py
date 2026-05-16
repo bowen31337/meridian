@@ -6,6 +6,7 @@ from ._types import (
     CapabilityEnvelope,
     ExecuteRequest,
     ExecuteResult,
+    FilesystemPolicy,
     NetworkPolicy,
     ProvisionRequest,
     ReclaimRequest,
@@ -42,6 +43,16 @@ class EnvironmentDriver(ABC):
     @abstractmethod
     def network_policy(self) -> NetworkPolicy:
         """Return the network access policy this driver enforces."""
+
+    @abstractmethod
+    def filesystem_policy(self) -> FilesystemPolicy:
+        """
+        Return the filesystem access policy this driver enforces.
+
+        Container and SSH backends must mount only $WORKSPACE when provisioning,
+        providing a physical enforcement layer in addition to the software-level
+        FilesystemGate that checks this policy on every fs.* invocation.
+        """
 
     @abstractmethod
     def capability_envelope(self) -> CapabilityEnvelope:

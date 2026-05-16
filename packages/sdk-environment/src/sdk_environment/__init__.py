@@ -1,11 +1,14 @@
 # Types
 from ._types import (
+    AgentFilesystemPolicy,
     AgentNetworkPolicy,
     AuditLogEntry,
     CapabilityEnvelope,
     EnvironmentFailure,
     ExecuteRequest,
     ExecuteResult,
+    FilesystemPolicy,
+    FilesystemViolation,
     NetworkPolicy,
     NetworkViolation,
     ProvisionRequest,
@@ -26,6 +29,10 @@ from ._telemetry import get_tracer, record_environment_failure, record_invocatio
 from ._enforcer import NetworkEnforcer
 from ._proxy import OutboundProxyTransport
 
+# Filesystem policy enforcement
+from ._fs_enforcer import FilesystemEnforcer
+from ._fs_gate import FilesystemGate
+
 # Runtime
 from ._runtime import EnvironmentRuntime, RuntimeOptions, default_runtime
 
@@ -34,12 +41,15 @@ from ._version import ENVIRONMENT_SDK_VERSION
 
 __all__ = [
     # Types
+    "AgentFilesystemPolicy",
     "AgentNetworkPolicy",
     "AuditLogEntry",
     "CapabilityEnvelope",
     "EnvironmentFailure",
     "ExecuteRequest",
     "ExecuteResult",
+    "FilesystemPolicy",
+    "FilesystemViolation",
     "NetworkPolicy",
     "NetworkViolation",
     "ProvisionRequest",
@@ -57,6 +67,9 @@ __all__ = [
     # Network policy
     "NetworkEnforcer",
     "OutboundProxyTransport",
+    # Filesystem policy
+    "FilesystemEnforcer",
+    "FilesystemGate",
     # Runtime
     "EnvironmentRuntime",
     "RuntimeOptions",

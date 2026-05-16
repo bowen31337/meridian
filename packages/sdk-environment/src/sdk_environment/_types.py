@@ -15,6 +15,25 @@ class NetworkPolicy:
 
 
 @dataclass(frozen=True)
+class FilesystemPolicy:
+    """Glob-pattern allowlists for read/write/delete operations under $WORKSPACE."""
+
+    read_globs: tuple[str, ...] = ()
+    write_globs: tuple[str, ...] = ()
+    delete_globs: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class AgentFilesystemPolicy:
+    """Per-agent filesystem glob allowlists; must be a strict subset of the environment FilesystemPolicy."""
+
+    agent_id: str
+    read_globs: tuple[str, ...] = ()
+    write_globs: tuple[str, ...] = ()
+    delete_globs: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class CapabilityEnvelope:
     """Resource limits and permission set for an environment kind."""
 
@@ -25,6 +44,7 @@ class CapabilityEnvelope:
     can_write_filesystem: bool = True
     can_exec_subprocesses: bool = True
     network: NetworkPolicy = field(default_factory=NetworkPolicy)
+    filesystem: FilesystemPolicy = field(default_factory=FilesystemPolicy)
 
 
 @dataclass(frozen=True)
@@ -90,6 +110,28 @@ class NetworkViolation(Exception):
     ) -> None:
         super().__init__(f"Outbound connection to '{host}' denied by network policy")
         self.host = host
+        self.agent_id = agent_id
+        self.environment_id = environment_id
+        self.session_id = session_id
+        self.timestamp = timestamp
+
+
+class FilesystemViolation(Exception):
+    """Raised by the filesystem gate when an operation is denied by the active policy."""
+
+    def __init__(
+        self,
+        *,
+        operation: str,
+        path: str,
+        agent_id: str,
+        environment_id: str,
+        session_id: str,
+        timestamp: str,
+    ) -> None:
+        super().__init__(f"Filesystem {operation} on '{path}' denied by policy")
+        self.operation = operation
+        self.path = path
         self.agent_id = agent_id
         self.environment_id = environment_id
         self.session_id = session_id

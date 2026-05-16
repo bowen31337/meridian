@@ -82,6 +82,18 @@ def mock_proxy_span(mock_proxy_tracer: MockTracer) -> MockSpan:
     return mock_proxy_tracer.span
 
 
+@pytest.fixture()
+def mock_fs_gate_tracer(monkeypatch: pytest.MonkeyPatch) -> MockTracer:
+    tracer = MockTracer()
+    monkeypatch.setattr("sdk_environment._fs_gate.get_tracer", lambda: tracer)
+    return tracer
+
+
+@pytest.fixture()
+def mock_fs_gate_span(mock_fs_gate_tracer: MockTracer) -> MockSpan:
+    return mock_fs_gate_tracer.span
+
+
 # ---------------------------------------------------------------------------
 # Audit log capture
 # ---------------------------------------------------------------------------

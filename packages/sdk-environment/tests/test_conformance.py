@@ -28,6 +28,7 @@ from sdk_environment import (
     EnvironmentRuntime,
     ExecuteRequest,
     ExecuteResult,
+    FilesystemPolicy,
     NetworkPolicy,
     ProvisionRequest,
     ReclaimRequest,
@@ -77,6 +78,9 @@ class StubDriver(EnvironmentDriver):
 
     def network_policy(self) -> NetworkPolicy:
         return NetworkPolicy(egress_allowed=True, allowed_hosts=("example.com",))
+
+    def filesystem_policy(self) -> FilesystemPolicy:
+        return FilesystemPolicy(read_globs=("**",), write_globs=("**",))
 
     def capability_envelope(self) -> CapabilityEnvelope:
         return CapabilityEnvelope(cpu_millicores=500, memory_mb=256)

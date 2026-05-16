@@ -13,6 +13,7 @@ from ._types import (
     EnvironmentFailure,
     ExecuteRequest,
     ExecuteResult,
+    FilesystemPolicy,
     NetworkPolicy,
     ProvisionRequest,
     ReclaimRequest,
@@ -73,6 +74,23 @@ class EnvironmentRuntime:
                 timestamp=_now(),
             )
         return driver.network_policy()
+
+    def filesystem_policy(self, kind: str, options: RuntimeOptions | None = None) -> FilesystemPolicy:
+        """
+        Return the filesystem policy for a registered kind.
+        Raises EnvironmentFailure(ENV_KIND_NOT_REGISTERED) if unknown.
+        """
+        driver = self._drivers.get(kind)
+        if driver is None:
+            raise EnvironmentFailure(
+                code="ENV_KIND_NOT_REGISTERED",
+                message=f'No driver registered for kind "{kind}"',
+                environment_id="",
+                environment_kind=kind,
+                session_id="",
+                timestamp=_now(),
+            )
+        return driver.filesystem_policy()
 
     def capability_envelope(self, kind: str, options: RuntimeOptions | None = None) -> CapabilityEnvelope:
         """
