@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/sessions-event--system-sessionevent-type-union-covers-s/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/storage-reposit-system-background-indexer-reads-new-eve/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
