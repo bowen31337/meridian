@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "meridian-sdk-provider"
+version = "0.1.0"
+description = "Meridian Model Provider SDK — ModelProvider protocol, capability hints, and Router"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "pydantic>=2.0",
+    "opentelemetry-api>=1.24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "opentelemetry-sdk>=1.24.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/meridian_sdk_provider"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+include = ["src"]
+strict = true
