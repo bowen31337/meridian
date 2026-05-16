@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/capabilities-se-system-capability-grammar-dotted-name-s/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/storage-reposit-system-blob-store-interface-with-local/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

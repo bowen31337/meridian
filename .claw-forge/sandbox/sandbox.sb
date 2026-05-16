@@ -1,5 +1,5 @@
 (version 1)
 (allow default)
 (deny file-write* (subpath "/Users/bowenli/development/meridian"))
-(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/capabilities-se-system-capability-grammar-dotted-name-s"))
+(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/storage-reposit-system-blob-store-interface-with-local"))
 (allow file-write* (subpath "/Users/bowenli/development/meridian/.git"))

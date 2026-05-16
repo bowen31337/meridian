@@ -1,0 +1,15 @@
+pyproject.toml
+src/meridian_storage_blob.egg-info/PKG-INFO
+src/meridian_storage_blob.egg-info/SOURCES.txt
+src/meridian_storage_blob.egg-info/dependency_links.txt
+src/meridian_storage_blob.egg-info/requires.txt
+src/meridian_storage_blob.egg-info/top_level.txt
+src/storage_blob/__init__.py
+src/storage_blob/_audit.py
+src/storage_blob/_contract.py
+src/storage_blob/_local.py
+src/storage_blob/_runtime.py
+src/storage_blob/_telemetry.py
+src/storage_blob/_types.py
+src/storage_blob/_version.py
+tests/test_conformance.py
