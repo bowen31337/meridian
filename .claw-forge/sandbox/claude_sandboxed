@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/foundation-repo-system-meridianerror-base-class-with-co/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/foundation-repo-system-ulid-generator-produces-monotoni/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
