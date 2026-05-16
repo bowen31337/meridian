@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/plugin-sdks-v1-system-live-canvas-widget-sdk-packages-s/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/plugin-sdks-v1-system-environment-backend-sdk-packages/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
