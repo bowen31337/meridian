@@ -1,0 +1,14 @@
+target-version = "py311"
+line-length = 100
+
+exclude = [
+    "packages/sdk-py/src",
+    ".claw-forge",
+]
+
+[lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[format]
+quote-style = "double"
+indent-style = "space"

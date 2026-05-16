@@ -1,0 +1,29 @@
+repos:
+  # --- Python: format then lint (lint after format so style fixes are seen) ---
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.7
+    hooks:
+      - id: ruff-format
+        exclude: ^packages/sdk-py/src/
+      - id: ruff
+        args: [--fix]
+        exclude: ^packages/sdk-py/src/
+
+  # --- TypeScript / JavaScript: Biome format + lint ---
+  - repo: https://github.com/biomejs/pre-commit
+    rev: v0.5.0
+    hooks:
+      - id: biome-check
+        additional_dependencies: ["@biomejs/biome@1.9.4"]
+        exclude: ^packages/sdk-ts/src/
+
+  # --- Guard: reject manual edits to codegen-owned SDK files ---
+  - repo: local
+    hooks:
+      - id: no-sdk-manual-edits
+        name: Reject manual edits to generated SDK files
+        language: script
+        entry: scripts/check-generated-sdk.sh
+        pass_filenames: true
+        # Only fires when files inside the generated SDK directories are staged.
+        files: ^packages/sdk-(ts|py)/src/
