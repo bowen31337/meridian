@@ -33,19 +33,19 @@ describe("validateProps", () => {
     const result = validateProps(textManifest, {});
     expect(result.valid).toBe(false);
     expect(result.errors).toBeDefined();
-    expect(result.errors!.length).toBeGreaterThan(0);
+    expect(result.errors?.length).toBeGreaterThan(0);
   });
 
   it("returns valid:false when prop has wrong type", () => {
     const result = validateProps(textManifest, { text: 42 });
     expect(result.valid).toBe(false);
-    expect(result.errors!.some((e) => e.includes("text"))).toBe(true);
+    expect(result.errors?.some((e) => e.includes("text"))).toBe(true);
   });
 
   it("returns valid:false with multiple errors when allErrors is set", () => {
     const result = validateProps(textManifest, { text: 42, bold: "yes" });
     expect(result.valid).toBe(false);
-    expect(result.errors!.length).toBeGreaterThanOrEqual(2);
+    expect(result.errors?.length).toBeGreaterThanOrEqual(2);
   });
 
   it("returns valid:false on additional properties", () => {

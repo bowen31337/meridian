@@ -1,5 +1,5 @@
-import React from "react";
 import type { Span } from "@opentelemetry/api";
+import type React from "react";
 import { AuditLogContext } from "./audit.js";
 import type { AuditLog } from "./audit.js";
 import type { WidgetComponent, WidgetContext } from "./contract.js";

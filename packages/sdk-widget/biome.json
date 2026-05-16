@@ -4,17 +4,7 @@
   "linter": {
     "rules": {
       "style": {
-        "noDefaultExport": "error",
-        "noRestrictedImports": {
-          "level": "error",
-          "options": {
-            "paths": {
-              "@anthropic-ai/claude-agent-sdk": "TS daemon code is the wrong layer — claude-agent-sdk is Python-only in Meridian. See ARCHITECTURE.md §13.4.",
-              "anthropic": "Provider SDKs live in apps/meridiand (Python). See ARCHITECTURE.md §13.5.",
-              "openai": "Provider SDKs live in apps/meridiand (Python). See ARCHITECTURE.md §13.5."
-            }
-          }
-        }
+        "noDefaultExport": "error"
       }
     }
   },

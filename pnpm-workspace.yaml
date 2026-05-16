@@ -1,0 +1,4 @@
+packages:
+  - apps/meridian-ui
+  - packages/sdk-ts
+  - packages/sdk-widget

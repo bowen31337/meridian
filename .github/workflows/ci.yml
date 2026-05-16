@@ -19,12 +19,15 @@ jobs:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: npm
-          cache-dependency-path: packages/sdk-widget/package-lock.json
+          cache: pnpm
 
       - name: uv lock check
         run: |
@@ -37,8 +40,7 @@ jobs:
         run: uv sync --frozen --group dev
 
       - name: Install Node dependencies
-        working-directory: packages/sdk-widget
-        run: npm ci
+        run: pnpm install --frozen-lockfile
 
       - name: ruff
         run: |
@@ -63,15 +65,14 @@ jobs:
 
       - name: biome check
         run: |
-          packages/sdk-widget/node_modules/.bin/biome check . || {
+          node_modules/.bin/biome check . || {
             echo "::error::STAGE FAILED: biome check — run 'biome check --write .' to auto-fix"
             exit 1
           }
 
       - name: "tsc --noEmit"
-        working-directory: packages/sdk-widget
         run: |
-          npx tsc --noEmit || {
+          pnpm -r typecheck || {
             echo "::error::STAGE FAILED: tsc --noEmit — fix TypeScript type errors shown above"
             exit 1
           }
@@ -97,9 +98,8 @@ jobs:
           }
 
       - name: vitest
-        working-directory: packages/sdk-widget
         run: |
-          npm test || {
+          pnpm -r test || {
             echo "::error::STAGE FAILED: vitest — fix failing tests shown above"
             exit 1
           }

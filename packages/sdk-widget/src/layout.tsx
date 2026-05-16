@@ -1,4 +1,4 @@
-import React from "react";
+import type React from "react";
 
 // ---------------------------------------------------------------------------
 // Shared prop interfaces
@@ -123,10 +123,7 @@ export function Col({
  * Vertical stack with a default 8 px gap between children.
  * Shorthand for `<Col gap={8}>`.
  */
-export function Stack({
-  gap = 8,
-  ...rest
-}: FlexContainerProps): React.ReactElement {
+export function Stack({ gap = 8, ...rest }: FlexContainerProps): React.ReactElement {
   return <Col gap={gap} {...rest} />;
 }
 
@@ -152,10 +149,8 @@ export function Grid({
     <div
       style={{
         display: "grid",
-        gridTemplateColumns:
-          typeof columns === "number" ? `repeat(${columns}, 1fr)` : columns,
-        gridTemplateRows:
-          typeof rows === "number" ? `repeat(${rows}, 1fr)` : rows,
+        gridTemplateColumns: typeof columns === "number" ? `repeat(${columns}, 1fr)` : columns,
+        gridTemplateRows: typeof rows === "number" ? `repeat(${rows}, 1fr)` : rows,
         gap,
         columnGap,
         rowGap,
@@ -214,5 +209,6 @@ export function Divider({
       ? { width: "100%", height: thickness, border: "none", flexShrink: 0 }
       : { width: thickness, height: "100%", border: "none", alignSelf: "stretch", flexShrink: 0 };
 
+  // biome-ignore lint/a11y/noRedundantRoles: explicit role makes it testable via getAttribute
   return <hr role="separator" style={{ ...base, ...style }} {...rest} />;
 }

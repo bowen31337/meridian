@@ -12,11 +12,7 @@
     "packages/storage-event-log/src",
     "packages/system-ulid/src"
   ],
-  "exclude": [
-    "packages/sdk-py/src",
-    ".claw-forge",
-    "**/__pycache__"
-  ],
+  "exclude": ["packages/sdk-py/src", ".claw-forge", "**/__pycache__"],
   "extraPaths": [
     "packages/core-errors/src",
     "packages/sdk-capabilities/src",

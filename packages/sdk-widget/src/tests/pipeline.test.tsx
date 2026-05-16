@@ -1,9 +1,9 @@
-import React from "react";
 import { cleanup, render, screen } from "@testing-library/react";
+import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AuditLog } from "../audit.js";
 import type { WidgetProps } from "../contract.js";
 import { defineWidget } from "../contract.js";
-import type { AuditLog } from "../audit.js";
 import { WidgetRegistry } from "../pipeline.js";
 import type { ContentBlockCanvasOp, WidgetError } from "../types.js";
 
@@ -20,11 +20,8 @@ const mockSpan = {
 vi.mock("@opentelemetry/api", () => ({
   trace: {
     getTracer: () => ({
-      startActiveSpan: (
-        _name: string,
-        _opts: unknown,
-        fn: (span: typeof mockSpan) => unknown,
-      ) => fn(mockSpan),
+      startActiveSpan: (_name: string, _opts: unknown, fn: (span: typeof mockSpan) => unknown) =>
+        fn(mockSpan),
     }),
   },
   SpanStatusCode: { UNSET: 0, OK: 1, ERROR: 2 },
@@ -113,7 +110,7 @@ describe("WidgetRegistry", () => {
     registry.renderCanvasOp(makeBlock(), { auditLog });
     expect(mockSpan.addEvent).toHaveBeenCalledWith(
       "widget.invocation",
-      expect.objectContaining({ "widget_id": "w1", "widget_kind": "test.text" }),
+      expect.objectContaining({ widget_id: "w1", widget_kind: "test.text" }),
     );
   });
 
@@ -126,7 +123,10 @@ describe("WidgetRegistry", () => {
     const unknownBlock = makeBlock({ widget_kind: "acme.unknown" });
 
     it("renders WidgetErrorDisplay", () => {
-      const el = registry.renderCanvasOp(unknownBlock, { auditLog, onError: (e) => errors.push(e) });
+      const el = registry.renderCanvasOp(unknownBlock, {
+        auditLog,
+        onError: (e) => errors.push(e),
+      });
       render(el);
       expect(screen.getByRole("alert")).toBeTruthy();
       expect(screen.getByRole("alert").textContent).toMatch(/acme\.unknown/);
@@ -135,7 +135,7 @@ describe("WidgetRegistry", () => {
     it("calls onError with code WIDGET_NOT_FOUND", () => {
       registry.renderCanvasOp(unknownBlock, { auditLog, onError: (e) => errors.push(e) });
       expect(errors).toHaveLength(1);
-      expect(errors[0]!.code).toBe("WIDGET_NOT_FOUND");
+      expect(errors[0]?.code).toBe("WIDGET_NOT_FOUND");
     });
 
     it("writes an error entry to the audit log", () => {
@@ -148,9 +148,7 @@ describe("WidgetRegistry", () => {
 
     it("marks the OTel span as ERROR", () => {
       registry.renderCanvasOp(unknownBlock, { auditLog });
-      expect(mockSpan.setStatus).toHaveBeenCalledWith(
-        expect.objectContaining({ code: 2 }),
-      );
+      expect(mockSpan.setStatus).toHaveBeenCalledWith(expect.objectContaining({ code: 2 }));
     });
   });
 
@@ -165,7 +163,7 @@ describe("WidgetRegistry", () => {
 
     it("calls onError with code WIDGET_PROPS_INVALID", () => {
       registry.renderCanvasOp(badBlock, { auditLog, onError: (e) => errors.push(e) });
-      expect(errors[0]!.code).toBe("WIDGET_PROPS_INVALID");
+      expect(errors[0]?.code).toBe("WIDGET_PROPS_INVALID");
     });
 
     it("writes an error entry to the audit log", () => {

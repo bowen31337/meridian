@@ -24,9 +24,7 @@ export interface WidgetProps<TProps = Record<string, unknown>> {
  * a React function component accepting WidgetProps<TProps> with a `manifest`
  * property attached for registration.
  */
-export type WidgetComponent<TProps = Record<string, unknown>> = React.FC<
-  WidgetProps<TProps>
-> & {
+export type WidgetComponent<TProps = Record<string, unknown>> = React.FC<WidgetProps<TProps>> & {
   readonly manifest: WidgetManifest;
 };
 

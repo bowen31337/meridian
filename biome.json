@@ -22,11 +22,6 @@
     }
   },
   "files": {
-    "ignore": [
-      "packages/sdk-ts/src/**",
-      "node_modules/**",
-      "dist/**",
-      "coverage/**"
-    ]
+    "ignore": ["packages/sdk-ts/src/**", "node_modules/**", "dist/**", "coverage/**"]
   }
 }
