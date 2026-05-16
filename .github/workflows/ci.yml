@@ -42,13 +42,10 @@ jobs:
 
       - name: ruff
         run: |
-          FAILED=0
-          uv run ruff format --check . || FAILED=1
-          uv run ruff check . || FAILED=1
-          if [ "$FAILED" -ne 0 ]; then
+          bash scripts/check-ruff.sh || {
             echo "::error::STAGE FAILED: ruff — run 'ruff format . && ruff check --fix .' to fix"
             exit 1
-          fi
+          }
 
       - name: pyright
         run: |
@@ -106,3 +103,11 @@ jobs:
             echo "::error::STAGE FAILED: vitest — fix failing tests shown above"
             exit 1
           }
+
+      - name: Upload audit log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-audit-log
+          path: ci-audit.ndjson
+          if-no-files-found: ignore

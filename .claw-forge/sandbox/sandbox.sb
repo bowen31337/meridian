@@ -1,5 +1,5 @@
 (version 1)
 (allow default)
 (deny file-write* (subpath "/Users/bowenli/development/meridian"))
-(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/foundation-repo-system-pyright-strict-mode-ci-config-re"))
+(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/foundation-repo-system-ruff-config-enforces-formatting"))
 (allow file-write* (subpath "/Users/bowenli/development/meridian/.git"))

@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/foundation-repo-system-pyright-strict-mode-ci-config-re/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/foundation-repo-system-ruff-config-enforces-formatting/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

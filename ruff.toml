@@ -7,7 +7,11 @@ exclude = [
 ]
 
 [lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
+select = ["E", "F", "I", "W", "UP", "B", "SIM"]
+
+[lint.isort]
+combine-as-imports = true
+force-sort-within-sections = true
 
 [format]
 quote-style = "double"
