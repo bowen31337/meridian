@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ._contract import EventLogWriter
-from ._types import EventLogFailure, SessionEvent
+from ._types import EventLogFailure, EventType, SessionEvent
 
 
 def _now_dt() -> datetime:
@@ -57,7 +57,7 @@ class LocalEventLogWriter(EventLogWriter):
     async def append(
         self,
         session_id: str,
-        event_type: str,
+        event_type: EventType,
         data: dict[str, Any],
         *,
         thread_id: str | None = None,

@@ -2,6 +2,7 @@
 from ._types import (
     AuditLogEntry,
     EventLogFailure,
+    EventType,
     SessionEvent,
     StructuredEvent,
 )
@@ -28,6 +29,7 @@ __all__ = [
     # Types
     "AuditLogEntry",
     "EventLogFailure",
+    "EventType",
     "SessionEvent",
     "StructuredEvent",
     # Contract

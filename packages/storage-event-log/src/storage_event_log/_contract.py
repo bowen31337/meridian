@@ -3,6 +3,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
+from ._types import EventType
+
 
 class EventLogWriter(ABC):
     """
@@ -17,7 +19,7 @@ class EventLogWriter(ABC):
     async def append(
         self,
         session_id: str,
-        event_type: str,
+        event_type: EventType,
         data: dict[str, Any],
         *,
         thread_id: str | None = None,

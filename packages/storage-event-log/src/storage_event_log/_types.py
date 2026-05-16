@@ -3,6 +3,34 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
+EventType = Literal[
+    "session.created",
+    "session.phase_change",
+    "message.added",
+    "message.delta",
+    "tool_call.requested",
+    "tool_call.dispatched",
+    "tool_call.result",
+    "tool_call.error",
+    "model_call.started",
+    "model_call.completed",
+    "hook.invoked",
+    "hook.verdict",
+    "usage.delta",
+    "budget.warning",
+    "budget.exceeded",
+    "checkpoint.created",
+    "child_session.spawned",
+    "child_session.completed",
+    "channel.inbound",
+    "channel.outbound",
+    "acp.outbound",
+    "acp.inbound",
+    "memory.read",
+    "memory.write",
+    "error",
+]
+
 
 class EventLogFailure(Exception):
     """
@@ -44,7 +72,7 @@ class SessionEvent:
 
     seq: int
     ts: str
-    type: str
+    type: EventType
     data: dict[str, Any]
     thread_id: str | None = None
 

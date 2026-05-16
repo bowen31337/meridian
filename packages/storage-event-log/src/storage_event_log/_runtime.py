@@ -7,7 +7,7 @@ from typing import Any, Callable
 from ._audit import AuditLog, NoopAuditLog
 from ._contract import EventLogWriter
 from ._telemetry import get_tracer, record_event_log_failure, record_invocation_event
-from ._types import AuditLogEntry, EventLogFailure, StructuredEvent
+from ._types import AuditLogEntry, EventLogFailure, EventType, StructuredEvent
 
 
 @dataclass
@@ -59,7 +59,7 @@ class EventLogRuntime:
     async def append(
         self,
         session_id: str,
-        event_type: str,
+        event_type: EventType,
         data: dict[str, Any],
         *,
         thread_id: str | None = None,
