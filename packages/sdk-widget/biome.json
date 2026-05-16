@@ -1,0 +1,40 @@
+{
+  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+  "organizeImports": {
+    "enabled": true
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "style": {
+        "noDefaultExport": "error",
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "@anthropic-ai/claude-agent-sdk": "TS daemon code is the wrong layer — claude-agent-sdk is Python-only in Meridian. See ARCHITECTURE.md §13.4.",
+              "anthropic": "Provider SDKs live in apps/meridiand (Python). See ARCHITECTURE.md §13.5.",
+              "openai": "Provider SDKs live in apps/meridiand (Python). See ARCHITECTURE.md §13.5."
+            }
+          }
+        }
+      }
+    }
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 100
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "trailingCommas": "all"
+    }
+  },
+  "files": {
+    "ignore": ["dist/**", "node_modules/**", "coverage/**"]
+  }
+}
