@@ -65,9 +65,8 @@ jobs:
           }
 
       - name: biome check
-        working-directory: packages/sdk-widget
         run: |
-          npx biome check . || {
+          packages/sdk-widget/node_modules/.bin/biome check . || {
             echo "::error::STAGE FAILED: biome check — run 'biome check --write .' to auto-fix"
             exit 1
           }
