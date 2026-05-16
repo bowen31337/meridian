@@ -1,5 +1,5 @@
 (version 1)
 (allow default)
 (deny file-write* (subpath "/Users/bowenli/development/meridian"))
-(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/foundation-repo-system-biome-config-at-repo-root-replac"))
+(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/foundation-repo-system-makefile-at-repo-root-wraps-cros"))
 (allow file-write* (subpath "/Users/bowenli/development/meridian/.git"))
