@@ -23,6 +23,19 @@ _MAX_STDERR_BYTES = 64 * 1024  # 64 KB cap per Architecture §11.2
 _SIGKILL_GRACE_S = 2.0
 
 
+class SubprocessCrashError(RuntimeError):
+    """Raised when a subprocess exits non-zero or produces unparseable output.
+
+    Carries *stderr_tail* as a structured field so the execution layer can
+    surface it separately in OTel events and error details without needing to
+    parse it back out of the exception message.
+    """
+
+    def __init__(self, message: str, *, stderr_tail: str = "") -> None:
+        super().__init__(message)
+        self.stderr_tail = stderr_tail
+
+
 async def _call_subprocess(path: str, args: Any, ctx: ToolContext, timeout_ms: int) -> Any:
     """Spawn *path*, write args+context to stdin, parse result from stdout."""
     payload = json.dumps(
@@ -62,14 +75,18 @@ async def _call_subprocess(path: str, args: Any, ctx: ToolContext, timeout_ms: i
 
     if proc.returncode != 0:
         stderr_text = stderr[:_MAX_STDERR_BYTES].decode("utf-8", errors="replace")
-        raise RuntimeError(f"Subprocess exited with code {proc.returncode}. stderr: {stderr_text}")
+        raise SubprocessCrashError(
+            f"Subprocess exited with code {proc.returncode}. stderr: {stderr_text}",
+            stderr_tail=stderr_text,
+        )
 
     try:
         response: dict[str, Any] = json.loads(stdout)
     except json.JSONDecodeError as exc:
         stderr_text = stderr[:_MAX_STDERR_BYTES].decode("utf-8", errors="replace")
-        raise RuntimeError(
-            f"Subprocess produced invalid JSON: {exc}. stderr: {stderr_text}"
+        raise SubprocessCrashError(
+            f"Subprocess produced invalid JSON: {exc}. stderr: {stderr_text}",
+            stderr_tail=stderr_text,
         ) from exc
 
     if "error" in response:

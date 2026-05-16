@@ -18,6 +18,36 @@ except ImportError:  # pragma: no cover
     _OTEL_AVAILABLE = False
 
 
+def record_tool_call_error(
+    code: str,
+    message: str,
+    *,
+    stderr_tail: str | None = None,
+) -> None:
+    """Add a ``tool_call.error`` event to the active span and set ERROR status.
+
+    Emits a structured ``tool_call.error`` event with ``error.code`` and
+    ``error.message`` attributes. When *stderr_tail* is provided (subprocess
+    crash path) it is attached as ``subprocess.stderr_tail`` so operators can
+    inspect the raw subprocess output without parsing the error message string.
+
+    Safe to call with no active span — degrades to a no-op when
+    opentelemetry-api is absent or no span is active in the current context.
+    """
+    if not _OTEL_AVAILABLE:
+        return
+
+    span = trace.get_current_span()
+    attrs: dict[str, str] = {
+        "error.code": code,
+        "error.message": message,
+    }
+    if stderr_tail:
+        attrs["subprocess.stderr_tail"] = stderr_tail
+    span.set_status(StatusCode.ERROR, message)
+    span.add_event("tool_call.error", attrs)
+
+
 @asynccontextmanager
 async def tool_span(
     tool_name: str,

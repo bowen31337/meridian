@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
 from ._audit import write_audit_event
-from ._otel import tool_span
+from ._otel import record_tool_call_error, tool_span
 from ._schema import SchemaValidationError, validate_input, validate_output
 from ._types import ToolContext, ToolDefinition, ToolError, ToolResult
 
@@ -65,12 +65,16 @@ async def execute_tool(
         try:
             raw_result = await handler(args, ctx)
         except Exception as exc:  # noqa: BLE001
+            details: dict[str, Any] = {"exception_type": type(exc).__name__}
+            stderr_tail = getattr(exc, "stderr_tail", None)
+            if isinstance(stderr_tail, str) and stderr_tail:
+                details["stderr_tail"] = stderr_tail
             return _fail(
                 definition.name,
                 ctx.session_id,
                 "execution_failed",
                 str(exc),
-                {"exception_type": type(exc).__name__},
+                details,
                 start,
                 audit_log_path,
             )
@@ -118,6 +122,13 @@ def _fail(
 ) -> ToolResult:
     duration_ms = int((time.monotonic() - start) * 1000)
     error = ToolError(code=code, message=message, details=details)
+
+    stderr_tail = details.get("stderr_tail")
+    record_tool_call_error(
+        code,
+        message,
+        stderr_tail=stderr_tail if isinstance(stderr_tail, str) else None,
+    )
 
     logger.warning(
         "tool.%s",
