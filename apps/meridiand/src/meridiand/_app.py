@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from meridian_plugin_loader import PluginLoader
 
 from ._checkpoint import make_checkpoint_router
+from ._kb import make_kb_router
 from ._replay import make_replay_router
 
 _LOG = logging.getLogger("meridiand")
@@ -45,4 +46,5 @@ def create_app(
     if storage_root is not None:
         app.include_router(make_replay_router(audit_log=audit_log, storage_root=storage_root))
         app.include_router(make_checkpoint_router(audit_log=audit_log, storage_root=storage_root))
+        app.include_router(make_kb_router(audit_log=audit_log, storage_root=storage_root))
     return app
