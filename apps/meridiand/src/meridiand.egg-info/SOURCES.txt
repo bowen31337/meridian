@@ -8,6 +8,7 @@ src/meridiand/_config.py
 src/meridiand/_kb.py
 src/meridiand/_replay.py
 src/meridiand/_services.py
+src/meridiand/_spawn.py
 src/meridiand/_version.py
 src/meridiand.egg-info/PKG-INFO
 src/meridiand.egg-info/SOURCES.txt
@@ -19,3 +20,4 @@ tests/test_checkpoint.py
 tests/test_conformance.py
 tests/test_kb.py
 tests/test_replay.py
+tests/test_spawn.py

@@ -15,6 +15,7 @@ dependencies = [
     "meridian-core-errors>=0.1.0",
     "meridian-kb-indexer>=0.1.0",
     "meridian-plugin-loader>=0.1.0",
+    "meridian-sdk-capabilities>=0.1.0",
     "meridian-storage-blob>=0.1.0",
     "meridian-storage-event-log>=0.1.0",
     "sqlite-vec>=0.1.6",
@@ -36,6 +37,7 @@ dev = [
 meridian-core-errors = { workspace = true }
 meridian-kb-indexer = { workspace = true }
 meridian-plugin-loader = { workspace = true }
+meridian-sdk-capabilities = { workspace = true }
 meridian-storage-blob = { workspace = true }
 meridian-storage-event-log = { workspace = true }
 
@@ -50,6 +52,7 @@ pythonpath = [
     "../../packages/core-errors/src",
     "../../packages/knowledge-base-indexer/src",
     "../../packages/plugin-loader/src",
+    "../../packages/sdk-capabilities/src",
     "../../packages/storage-blob/src",
     "../../packages/storage-event-log/src",
 ]
