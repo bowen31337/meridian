@@ -1,5 +1,5 @@
 (version 1)
 (allow default)
 (deny file-write* (subpath "/Users/bowenli/development/meridian"))
-(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/plugin-sdks-v1-system-plugin-loader-discovers-installed"))
+(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/checkpoints-det-api-post-v1-x-sessions-id-replay-runs-h"))
 (allow file-write* (subpath "/Users/bowenli/development/meridian/.git"))

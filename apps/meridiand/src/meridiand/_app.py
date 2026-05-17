@@ -3,15 +3,22 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from core_errors import AuditLog, HandlerOptions, install_error_handler
 from fastapi import FastAPI
 from meridian_plugin_loader import PluginLoader
 
+from ._replay import make_replay_router
+
 _LOG = logging.getLogger("meridiand")
 
 
-def create_app(audit_log: AuditLog, plugin_loader: PluginLoader | None = None) -> FastAPI:
+def create_app(
+    audit_log: AuditLog,
+    plugin_loader: PluginLoader | None = None,
+    storage_root: Path | None = None,
+) -> FastAPI:
     @asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         if plugin_loader is not None:
@@ -34,4 +41,6 @@ def create_app(audit_log: AuditLog, plugin_loader: PluginLoader | None = None) -
 
     app = FastAPI(title="meridiand", lifespan=_lifespan)
     install_error_handler(app, HandlerOptions(audit_log=audit_log))
+    if storage_root is not None:
+        app.include_router(make_replay_router(audit_log=audit_log, storage_root=storage_root))
     return app
