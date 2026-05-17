@@ -107,6 +107,30 @@ def make_spawn_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                 )
                 raise err
 
+            if not any(c.namespace == "agent" and c.name == "spawn" for c in parent_caps):
+                err = SpawnError(
+                    message=(
+                        f"Spawn denied for session {session_id!r}: "
+                        "parent does not hold the agent.spawn capability"
+                    ),
+                    timestamp=_now(),
+                )
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="session.spawn.denied",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "parent_session_id": session_id,
+                            "child_session_id": child_session_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise err
+
             escalating = missing(child_caps, parent_caps)
             if escalating:
                 escalating_strs = sorted(str(c) for c in escalating)

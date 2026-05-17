@@ -2,12 +2,15 @@
 Spawn endpoint conformance suite.
 
 Tests cover:
-  - POST /v1/x/sessions/{id}/spawn returns 200 when child caps ⊆ parent caps.
+  - POST /v1/x/sessions/{id}/spawn returns 200 when child caps ⊆ parent caps
+    and parent holds agent.spawn.
   - Response fields: child_session_id, parent_session_id, capabilities, status.
-  - Empty child_capabilities is always valid.
+  - Empty child_capabilities is always valid (parent still needs agent.spawn).
   - Equal capability sets are valid.
+  - Returns 403 with code "spawn_denied" when parent lacks agent.spawn capability.
   - Returns 403 with code "spawn_denied" when child requests a cap parent lacks.
   - Returns 403 with code "spawn_denied" on invalid capability string.
+  - agent.spawn[param] (parameterized) also passes the spawn gate.
   - On denial, audit log entry written with event "session.spawn.denied".
   - Audit detail includes parent_session_id and escalating_caps on escalation.
   - Error message is included in response body on denial.
@@ -49,7 +52,7 @@ def _make_body(
     return {
         "parent_capabilities": parent_capabilities
         if parent_capabilities is not None
-        else ["exec.shell", "fs.read", "net.listen"],
+        else ["agent.spawn", "exec.shell", "fs.read", "net.listen"],
         "child_capabilities": child_capabilities
         if child_capabilities is not None
         else ["exec.shell"],
@@ -108,7 +111,7 @@ class TestSpawnEndpointSuccess:
         assert resp.status_code == 200
 
     def test_equal_caps_is_valid(self, storage_root: Path) -> None:
-        caps = ["exec.shell", "fs.read"]
+        caps = ["agent.spawn", "exec.shell", "fs.read"]
         client = _make_client(storage_root, FileAuditLog(storage_root))
         resp = client.post(
             "/v1/x/sessions/parent-7/spawn",
@@ -121,7 +124,7 @@ class TestSpawnEndpointSuccess:
         resp = client.post(
             "/v1/x/sessions/parent-8/spawn",
             json=_make_body(
-                parent_capabilities=["fs.read"],
+                parent_capabilities=["agent.spawn", "fs.read"],
                 child_capabilities=["fs.read[/workspace]"],
             ),
         )
@@ -149,7 +152,7 @@ class TestSpawnEndpointDenial:
         resp = client.post(
             "/v1/x/sessions/parent-d1/spawn",
             json=_make_body(
-                parent_capabilities=["exec.shell"],
+                parent_capabilities=["agent.spawn", "exec.shell"],
                 child_capabilities=["exec.shell", "exec.sudo"],
             ),
         )
@@ -160,7 +163,7 @@ class TestSpawnEndpointDenial:
         body = client.post(
             "/v1/x/sessions/parent-d2/spawn",
             json=_make_body(
-                parent_capabilities=["exec.shell"],
+                parent_capabilities=["agent.spawn", "exec.shell"],
                 child_capabilities=["exec.sudo"],
             ),
         ).json()
@@ -171,7 +174,7 @@ class TestSpawnEndpointDenial:
         body = client.post(
             "/v1/x/sessions/parent-d3/spawn",
             json=_make_body(
-                parent_capabilities=["exec.shell"],
+                parent_capabilities=["agent.spawn", "exec.shell"],
                 child_capabilities=["exec.sudo"],
             ),
         ).json()
@@ -182,7 +185,7 @@ class TestSpawnEndpointDenial:
         resp = client.post(
             "/v1/x/sessions/parent-d4/spawn",
             json=_make_body(
-                parent_capabilities=["exec.shell"],
+                parent_capabilities=["agent.spawn", "exec.shell"],
                 child_capabilities=["net.listen"],
             ),
         )
@@ -194,7 +197,7 @@ class TestSpawnEndpointDenial:
         resp = client.post(
             "/v1/x/sessions/parent-d5/spawn",
             json=_make_body(
-                parent_capabilities=["fs.read[/workspace]"],
+                parent_capabilities=["agent.spawn", "fs.read[/workspace]"],
                 child_capabilities=["fs.read"],
             ),
         )
@@ -216,7 +219,7 @@ class TestSpawnEndpointDenial:
         resp = client.post(
             "/v1/x/sessions/parent-d7/spawn",
             json=_make_body(
-                parent_capabilities=["exec.shell"],
+                parent_capabilities=["agent.spawn", "exec.shell"],
                 child_capabilities=["INVALID!!"],
             ),
         )
@@ -234,7 +237,7 @@ class TestSpawnAuditLog:
         client.post(
             "/v1/x/sessions/audit-d1/spawn",
             json=_make_body(
-                parent_capabilities=["exec.shell"],
+                parent_capabilities=["agent.spawn", "exec.shell"],
                 child_capabilities=["exec.sudo"],
             ),
         )
@@ -246,7 +249,7 @@ class TestSpawnAuditLog:
         client.post(
             "/v1/x/sessions/audit-d2/spawn",
             json=_make_body(
-                parent_capabilities=["exec.shell"],
+                parent_capabilities=["agent.spawn", "exec.shell"],
                 child_capabilities=["exec.sudo"],
             ),
         )
@@ -260,7 +263,7 @@ class TestSpawnAuditLog:
         client.post(
             "/v1/x/sessions/audit-parent-3/spawn",
             json=_make_body(
-                parent_capabilities=["exec.shell"],
+                parent_capabilities=["agent.spawn", "exec.shell"],
                 child_capabilities=["exec.sudo"],
             ),
         )
@@ -274,7 +277,7 @@ class TestSpawnAuditLog:
         client.post(
             "/v1/x/sessions/audit-d4/spawn",
             json=_make_body(
-                parent_capabilities=["exec.shell"],
+                parent_capabilities=["agent.spawn", "exec.shell"],
                 child_capabilities=["exec.shell", "exec.sudo"],
             ),
         )
@@ -288,7 +291,7 @@ class TestSpawnAuditLog:
         client.post(
             "/v1/x/sessions/audit-d5/spawn",
             json=_make_body(
-                parent_capabilities=["exec.shell"],
+                parent_capabilities=["agent.spawn", "exec.shell"],
                 child_capabilities=["exec.sudo"],
             ),
         )
@@ -305,6 +308,94 @@ class TestSpawnAuditLog:
         )
         records = _audit_records(storage_root)
         assert any(r.get("event") == "session.spawn.denied" for r in records)
+
+
+# ---------------------------------------------------------------------------
+# agent.spawn capability gate
+# ---------------------------------------------------------------------------
+
+
+class TestSpawnAgentSpawnGate:
+    def test_returns_403_when_parent_lacks_agent_spawn(self, storage_root: Path) -> None:
+        client = _make_client(storage_root, FileAuditLog(storage_root))
+        resp = client.post(
+            "/v1/x/sessions/gate-1/spawn",
+            json=_make_body(
+                parent_capabilities=["exec.shell", "fs.read"],
+                child_capabilities=["exec.shell"],
+            ),
+        )
+        assert resp.status_code == 403
+
+    def test_error_code_on_missing_agent_spawn(self, storage_root: Path) -> None:
+        client = _make_client(storage_root, FileAuditLog(storage_root))
+        body = client.post(
+            "/v1/x/sessions/gate-2/spawn",
+            json=_make_body(
+                parent_capabilities=["exec.shell"],
+                child_capabilities=["exec.shell"],
+            ),
+        ).json()
+        assert body["error"]["code"] == "spawn_denied"
+
+    def test_error_message_mentions_agent_spawn(self, storage_root: Path) -> None:
+        client = _make_client(storage_root, FileAuditLog(storage_root))
+        body = client.post(
+            "/v1/x/sessions/gate-3/spawn",
+            json=_make_body(
+                parent_capabilities=["exec.shell"],
+                child_capabilities=["exec.shell"],
+            ),
+        ).json()
+        assert "agent.spawn" in body["error"]["message"]
+
+    def test_parameterized_agent_spawn_passes_gate(self, storage_root: Path) -> None:
+        client = _make_client(storage_root, FileAuditLog(storage_root))
+        resp = client.post(
+            "/v1/x/sessions/gate-4/spawn",
+            json=_make_body(
+                parent_capabilities=["agent.spawn[worker]", "exec.shell"],
+                child_capabilities=["exec.shell"],
+            ),
+        )
+        assert resp.status_code == 200
+
+    def test_gate_denial_writes_audit_log(self, storage_root: Path) -> None:
+        client = _make_client(storage_root, FileAuditLog(storage_root))
+        client.post(
+            "/v1/x/sessions/gate-5/spawn",
+            json=_make_body(
+                parent_capabilities=["exec.shell"],
+                child_capabilities=["exec.shell"],
+            ),
+        )
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "session.spawn.denied" for r in records)
+
+    def test_gate_denial_audit_detail_has_parent_session_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root, FileAuditLog(storage_root))
+        client.post(
+            "/v1/x/sessions/gate-session-6/spawn",
+            json=_make_body(
+                parent_capabilities=["exec.shell"],
+                child_capabilities=["exec.shell"],
+            ),
+        )
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "session.spawn.denied"
+        )
+        assert record["detail"]["parent_session_id"] == "gate-session-6"
+
+    def test_empty_parent_caps_denied(self, storage_root: Path) -> None:
+        client = _make_client(storage_root, FileAuditLog(storage_root))
+        resp = client.post(
+            "/v1/x/sessions/gate-7/spawn",
+            json=_make_body(
+                parent_capabilities=[],
+                child_capabilities=[],
+            ),
+        )
+        assert resp.status_code == 403
 
 
 # ---------------------------------------------------------------------------
@@ -380,7 +471,7 @@ class TestSpawnOtel:
         client.post(
             "/v1/x/sessions/otel-2/spawn",
             json=_make_body(
-                parent_capabilities=["exec.shell"],
+                parent_capabilities=["agent.spawn", "exec.shell"],
                 child_capabilities=["exec.sudo"],
             ),
         )
