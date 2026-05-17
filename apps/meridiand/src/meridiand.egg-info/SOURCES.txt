@@ -3,7 +3,9 @@ src/meridiand/__init__.py
 src/meridiand/__main__.py
 src/meridiand/_app.py
 src/meridiand/_audit.py
+src/meridiand/_checkpoint.py
 src/meridiand/_config.py
+src/meridiand/_replay.py
 src/meridiand/_services.py
 src/meridiand/_version.py
 src/meridiand.egg-info/PKG-INFO
@@ -12,4 +14,6 @@ src/meridiand.egg-info/dependency_links.txt
 src/meridiand.egg-info/entry_points.txt
 src/meridiand.egg-info/requires.txt
 src/meridiand.egg-info/top_level.txt
+tests/test_checkpoint.py
 tests/test_conformance.py
+tests/test_replay.py

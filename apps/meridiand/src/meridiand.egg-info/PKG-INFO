@@ -8,6 +8,7 @@ Requires-Dist: uvicorn[standard]>=0.29
 Requires-Dist: pyyaml>=6.0
 Requires-Dist: opentelemetry-api>=1.24
 Requires-Dist: meridian-core-errors>=0.1.0
+Requires-Dist: meridian-plugin-loader>=0.1.0
 Requires-Dist: meridian-storage-blob>=0.1.0
 Requires-Dist: meridian-storage-event-log>=0.1.0
 Provides-Extra: dev

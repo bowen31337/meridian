@@ -7,6 +7,7 @@ members = [
     "meridian-cli",
     "meridian-core-errors",
     "meridian-kb-indexer",
+    "meridian-plugin-loader",
     "meridian-sdk-capabilities",
     "meridian-sdk-channel",
     "meridian-sdk-environment",
@@ -570,6 +571,34 @@ requires-dist = [
 provides-extras = ["dev"]
 
 [[package]]
+name = "meridian-plugin-loader"
+version = "0.1.0"
+source = { editable = "packages/plugin-loader" }
+dependencies = [
+    { name = "meridian-core-errors" },
+    { name = "opentelemetry-api" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "opentelemetry-sdk" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "meridian-core-errors", editable = "packages/core-errors" },
+    { name = "opentelemetry-api", specifier = ">=1.24" },
+    { name = "opentelemetry-sdk", marker = "extra == 'dev'", specifier = ">=1.24" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
+    { name = "pyyaml", specifier = ">=6.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
 name = "meridian-sdk-capabilities"
 version = "0.1.0"
 source = { editable = "packages/sdk-capabilities" }
@@ -883,6 +912,7 @@ source = { editable = "apps/meridiand" }
 dependencies = [
     { name = "fastapi" },
     { name = "meridian-core-errors" },
+    { name = "meridian-plugin-loader" },
     { name = "meridian-storage-blob" },
     { name = "meridian-storage-event-log" },
     { name = "opentelemetry-api" },
@@ -903,6 +933,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.110" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "meridian-core-errors", editable = "packages/core-errors" },
+    { name = "meridian-plugin-loader", editable = "packages/plugin-loader" },
     { name = "meridian-storage-blob", editable = "packages/storage-blob" },
     { name = "meridian-storage-event-log", editable = "packages/storage-event-log" },
     { name = "opentelemetry-api", specifier = ">=1.24" },

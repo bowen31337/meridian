@@ -27,9 +27,11 @@ from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from meridiand._replay import FakeModelAdapter, FakeSandboxAdapter, _run_harness
+from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
-from opentelemetry import trace
+
+from tests._otel_shared import otel_exporter as _otel_exporter
 
 
 # ---------------------------------------------------------------------------
@@ -279,21 +281,7 @@ class TestReplayEndpoint:
 # OTel span tests
 # ---------------------------------------------------------------------------
 
-# The global TracerProvider can only be set once per process; set it up once
-# here at module scope and share the exporter across all OTel tests.
-_otel_exporter = InMemorySpanExporter()
-_otel_provider = TracerProvider()
-
-
-def _setup_otel() -> None:
-    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-    _otel_provider.add_span_processor(SimpleSpanProcessor(_otel_exporter))
-    # Only set if not already a real provider (avoids "not allowed" warning).
-    if not isinstance(trace.get_tracer_provider(), TracerProvider):
-        trace.set_tracer_provider(_otel_provider)
-
-
-_setup_otel()
+# OTel provider is registered once in conftest.py; _otel_exporter is imported from there.
 
 
 class TestReplayOtel:
