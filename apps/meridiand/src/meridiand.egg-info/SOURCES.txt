@@ -4,6 +4,7 @@ src/meridiand/__main__.py
 src/meridiand/_app.py
 src/meridiand/_audit.py
 src/meridiand/_checkpoint.py
+src/meridiand/_ci_regression.py
 src/meridiand/_config.py
 src/meridiand/_kb.py
 src/meridiand/_replay.py
@@ -17,6 +18,7 @@ src/meridiand.egg-info/entry_points.txt
 src/meridiand.egg-info/requires.txt
 src/meridiand.egg-info/top_level.txt
 tests/test_checkpoint.py
+tests/test_ci_regression.py
 tests/test_conformance.py
 tests/test_kb.py
 tests/test_replay.py
