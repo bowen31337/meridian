@@ -40,8 +40,10 @@ dev = [
     "watchdog>=3.0",
     "tree-sitter>=0.21",
     "aiosqlite>=0.19",
+    "sqlite-vec>=0.1.6",
     "asyncpg>=0.29",
     "click>=8.0",
+    "sqlean-py>=3.50.4.5",
 ]
 
 [tool.pytest.ini_options]

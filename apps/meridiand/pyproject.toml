@@ -17,6 +17,8 @@ dependencies = [
     "meridian-plugin-loader>=0.1.0",
     "meridian-storage-blob>=0.1.0",
     "meridian-storage-event-log>=0.1.0",
+    "sqlite-vec>=0.1.6",
+    "sqlean-py>=3.50.4",
 ]
 
 [project.scripts]

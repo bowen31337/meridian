@@ -1,17 +1,17 @@
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import json
-import math
 import os
 import re
-import sqlite3
 import tempfile
-from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+import sqlite_vec
+import sqlean
 from core_errors import (
     AuditLog,
     AuditLogEntry,
@@ -27,7 +27,12 @@ from meridian_kb_indexer import Chunk, WorkspaceIndexer, should_index_path
 from pydantic import BaseModel
 
 _WORKSPACE_ENV = "WORKSPACE"
-_DEFAULT_SCOPE = "workspace"
+
+KbScope = Literal["global", "project", "agent", "session"]
+_DEFAULT_SCOPE: KbScope = "global"
+
+# Embedding dimension for hashing-trick dense vectors stored in sqlite-vec.
+_EMBED_DIM = 128
 
 
 def _now() -> str:
@@ -88,12 +93,12 @@ class KbQueryError(MeridianError):
 
 class KbIndexRequest(BaseModel):
     path: str | None = None
-    scope: str | None = None
+    scope: KbScope | None = None
 
 
 class KbQueryRequest(BaseModel):
     query: str
-    scope: str | None = None
+    scope: KbScope | None = None
     method: Literal["glob", "bm25", "vector", "hybrid"] = "hybrid"
     limit: int = 10
 
@@ -127,25 +132,19 @@ def _write_status_atomic(storage_root: Path, data: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# TF-IDF helpers (for vector search)
+# Embedding helpers
 # ---------------------------------------------------------------------------
 
 
-def _tokenize(text: str) -> list[str]:
-    return re.findall(r"\b\w+\b", text.lower())
-
-
-def _tfidf_vec(text: str) -> Counter[str]:
-    return Counter(_tokenize(text))
-
-
-def _cosine(a: Counter[str], b: Counter[str]) -> float:
-    dot = sum(a[t] * b[t] for t in a if t in b)
-    norm_a = math.sqrt(sum(v * v for v in a.values()))
-    norm_b = math.sqrt(sum(v * v for v in b.values()))
-    if norm_a == 0.0 or norm_b == 0.0:
-        return 0.0
-    return dot / (norm_a * norm_b)
+def _hash_embed(text: str) -> bytes:
+    """Hashing-trick dense embedding stored as sqlite-vec float32 bytes."""
+    tokens = re.findall(r"\b\w+\b", text.lower())
+    vec = [0.0] * _EMBED_DIM
+    for token in tokens:
+        idx = int(hashlib.md5(token.encode()).hexdigest(), 16) % _EMBED_DIM
+        vec[idx] += 1.0
+    norm = sum(v * v for v in vec) ** 0.5 or 1.0
+    return sqlite_vec.serialize_float32([v / norm for v in vec])
 
 
 # ---------------------------------------------------------------------------
@@ -175,9 +174,12 @@ def _rrf_fuse(
 
 
 # ---------------------------------------------------------------------------
-# SQLite chunk store (FTS5 + BM25 + TF-IDF vector)
+# SQLite chunk store — FTS5 (BM25) + sqlite-vec (vector KNN)
 # ---------------------------------------------------------------------------
 
+# Columns stored in the FTS5 virtual table.  Only `content` is indexed for
+# BM25; all others are UNINDEXED metadata.  The embedding lives in a
+# companion vec0 virtual table linked by rowid.
 _COLS = (
     "file_path",
     "scope",
@@ -190,6 +192,7 @@ _COLS = (
     "heading_level",
     "heading_text",
     "language",
+    "content_hash",
 )
 
 _CREATE_FTS5 = f"""
@@ -199,39 +202,63 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
 )
 """
 
+_CREATE_VEC = f"CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0(embedding FLOAT[{_EMBED_DIM}])"
+
 _INSERT_SQL = (
     f"INSERT INTO chunks_fts ({', '.join(_COLS)}) "
     f"VALUES ({', '.join('?' * len(_COLS))})"
 )
 
 _SELECT_COLS = ", ".join(_COLS)
+_SELECT_COLS_F = ", ".join(f"f.{c}" for c in _COLS)
+
+
+def _open_conn(db_path: Path) -> sqlean.Connection:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn: sqlean.Connection = sqlean.connect(str(db_path), check_same_thread=False)
+    conn.row_factory = sqlean.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.enable_load_extension(True)
+    sqlite_vec.load(conn)
+    conn.enable_load_extension(False)
+    conn.execute(_CREATE_FTS5)
+    conn.execute(_CREATE_VEC)
+    conn.commit()
+    return conn
 
 
 class KbStore:
-    """Lazy-connecting SQLite store for indexed chunks."""
+    """Lazy-connecting store: FTS5 for BM25 tokens, vec0 for embedding vectors."""
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
-        self._conn: sqlite3.Connection | None = None
+        self._conn: sqlean.Connection | None = None
 
-    def _get_conn(self) -> sqlite3.Connection:
+    def _get_conn(self) -> sqlean.Connection:
         if self._conn is None:
-            self._db_path.parent.mkdir(parents=True, exist_ok=True)
-            conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute(_CREATE_FTS5)
-            conn.commit()
-            self._conn = conn
+            self._conn = _open_conn(self._db_path)
         return self._conn
 
     def upsert_chunks(self, file_path: str, scope: str, chunks: list[Chunk]) -> None:
         conn = self._get_conn()
         with conn:
+            # Remove old FTS5 rows and their companion vec0 rows.
+            old = conn.execute(
+                "SELECT rowid FROM chunks_fts WHERE file_path = ?", [file_path]
+            ).fetchall()
+            if old:
+                placeholders = ",".join("?" * len(old))
+                old_ids = [r[0] for r in old]
+                conn.execute(
+                    f"DELETE FROM chunks_vec WHERE rowid IN ({placeholders})", old_ids
+                )
             conn.execute("DELETE FROM chunks_fts WHERE file_path = ?", [file_path])
-            conn.executemany(
-                _INSERT_SQL,
-                [
+
+            # Insert new chunks; link each FTS5 rowid into chunks_vec.
+            for c in chunks:
+                content_hash = hashlib.sha256(c.content.encode()).hexdigest()
+                conn.execute(
+                    _INSERT_SQL,
                     (
                         file_path,
                         scope,
@@ -244,10 +271,14 @@ class KbStore:
                         c.heading_level,
                         c.heading_text,
                         c.language,
-                    )
-                    for c in chunks
-                ],
-            )
+                        content_hash,
+                    ),
+                )
+                rowid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+                conn.execute(
+                    "INSERT INTO chunks_vec(rowid, embedding) VALUES (?, ?)",
+                    [rowid, _hash_embed(c.content)],
+                )
 
     def glob_search(
         self, pattern: str, scope: str | None, limit: int
@@ -258,9 +289,7 @@ class KbStore:
                 f"SELECT {_SELECT_COLS} FROM chunks_fts WHERE scope = ?", [scope]
             ).fetchall()
         else:
-            rows = conn.execute(
-                f"SELECT {_SELECT_COLS} FROM chunks_fts"
-            ).fetchall()
+            rows = conn.execute(f"SELECT {_SELECT_COLS} FROM chunks_fts").fetchall()
 
         results: list[dict[str, Any]] = []
         for row in rows:
@@ -298,14 +327,46 @@ class KbStore:
     def vector_search(
         self, query: str, scope: str | None, limit: int
     ) -> list[dict[str, Any]]:
-        # Retrieve BM25 candidates then rerank by TF-IDF cosine similarity.
-        candidates = self.bm25_search(query, scope, limit * 5)
-        if not candidates:
-            return []
-        q_vec = _tfidf_vec(query)
-        scored = [(c, _cosine(q_vec, _tfidf_vec(c["content"]))) for c in candidates]
-        scored.sort(key=lambda x: x[1], reverse=True)
-        return [c for c, _ in scored[:limit]]
+        """KNN search via sqlite-vec, filtered by scope."""
+        conn = self._get_conn()
+        q_embed = _hash_embed(query)
+        candidates_per_scope = limit * 10
+
+        # Retrieve top-K candidates from the vec0 table, then join to get scope + metadata.
+        if scope:
+            rows = conn.execute(
+                f"""
+                SELECT {_SELECT_COLS_F}
+                FROM (
+                    SELECT rowid, distance
+                    FROM chunks_vec
+                    WHERE embedding MATCH ? AND k = ?
+                    ORDER BY distance
+                ) v
+                JOIN chunks_fts f ON f.rowid = v.rowid
+                WHERE f.scope = ?
+                ORDER BY v.distance
+                LIMIT ?
+                """,
+                [q_embed, candidates_per_scope, scope, limit],
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                f"""
+                SELECT {_SELECT_COLS_F}
+                FROM (
+                    SELECT rowid, distance
+                    FROM chunks_vec
+                    WHERE embedding MATCH ? AND k = ?
+                    ORDER BY distance
+                ) v
+                JOIN chunks_fts f ON f.rowid = v.rowid
+                ORDER BY v.distance
+                LIMIT ?
+                """,
+                [q_embed, candidates_per_scope, limit],
+            ).fetchall()
+        return [dict(row) for row in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -322,13 +383,8 @@ def make_kb_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
         now = _now()
         tracer = get_tracer()
 
+        scope_key: KbScope = body.scope or _DEFAULT_SCOPE
         target_path = body.path
-        if target_path:
-            scope_key = target_path
-        elif body.scope:
-            scope_key = body.scope
-        else:
-            scope_key = _DEFAULT_SCOPE
 
         with tracer.start_as_current_span(
             "kb.index",
@@ -351,7 +407,7 @@ def make_kb_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                     chunk_count = len(chunks)
                     store.upsert_chunks(target_path, scope_key, chunks)
                 else:
-                    workspace = body.scope or os.environ.get(_WORKSPACE_ENV, os.getcwd())
+                    workspace = os.environ.get(_WORKSPACE_ENV, os.getcwd())
                     for p in Path(workspace).rglob("*"):
                         if p.is_file() and should_index_path(str(p)):
                             try:
@@ -359,7 +415,7 @@ def make_kb_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                                 chunk_count += len(file_chunks)
                                 store.upsert_chunks(str(p), scope_key, file_chunks)
                             except Exception:
-                                pass  # per-file failures already audited in WorkspaceIndexer
+                                pass
 
                 status = _load_status(storage_root)
                 status["status"] = "idle"

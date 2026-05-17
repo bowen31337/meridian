@@ -12,6 +12,8 @@ Requires-Dist: meridian-kb-indexer>=0.1.0
 Requires-Dist: meridian-plugin-loader>=0.1.0
 Requires-Dist: meridian-storage-blob>=0.1.0
 Requires-Dist: meridian-storage-event-log>=0.1.0
+Requires-Dist: sqlite-vec>=0.1.6
+Requires-Dist: sqlean-py>=3.50.4
 Provides-Extra: dev
 Requires-Dist: pytest>=8; extra == "dev"
 Requires-Dist: pytest-asyncio>=0.23; extra == "dev"

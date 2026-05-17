@@ -1,5 +1,5 @@
 (version 1)
 (allow default)
 (deny file-write* (subpath "/Users/bowenli/development/meridian"))
-(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/knowledge-base--api-post-v1-x-kb-query-runs-glob-bm25-v"))
+(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/knowledge-base--system-kb-index-rows-carry-scope-global"))
 (allow file-write* (subpath "/Users/bowenli/development/meridian/.git"))

@@ -3,11 +3,12 @@ KB API conformance suite.
 
 Tests cover:
   - POST /v1/x/kb/index returns 200 with scope, row_count, status fields.
-  - POST /v1/x/kb/index with explicit path indexes that file and sets scope=path.
-  - POST /v1/x/kb/index with explicit scope scans that directory.
-  - POST /v1/x/kb/index with no path/scope uses WORKSPACE env or cwd.
+  - POST /v1/x/kb/index with explicit path indexes that file under requested scope.
+  - POST /v1/x/kb/index with explicit scope scans WORKSPACE directory.
+  - POST /v1/x/kb/index with no path/scope uses WORKSPACE env or cwd under scope "global".
   - POST /v1/x/kb/index updates storage_root/kb/status.json with row_counts and last_updated.
   - POST /v1/x/kb/index accumulates row_counts across multiple scopes.
+  - POST /v1/x/kb/index scope must be one of global/project/agent/session.
   - On index failure, returns 422 with code "kb_index_failed".
   - On index failure, writes audit log entry with event "kb.index.failed".
   - Audit log detail includes scope and path.
@@ -25,7 +26,7 @@ Tests cover:
   - POST /v1/x/kb/query hybrid method fuses glob + bm25 + vector via RRF.
   - POST /v1/x/kb/query scope filter narrows results to that scope.
   - POST /v1/x/kb/query limit is respected.
-  - POST /v1/x/kb/query result items have required fields.
+  - POST /v1/x/kb/query result items have required fields including content_hash.
   - On query failure, returns 422 with code "kb_query_failed".
   - On query failure, writes audit log entry with event "kb.query.failed".
   - Audit log detail includes query text.
@@ -78,11 +79,13 @@ class TestKbIndexEndpoint:
         resp = client.post("/v1/x/kb/index", json={"path": str(f)})
         assert resp.status_code == 200
 
-    def test_response_has_scope_equal_to_path(self, storage_root: Path, tmp_path: Path) -> None:
+    def test_response_has_scope_global_by_default(
+        self, storage_root: Path, tmp_path: Path
+    ) -> None:
         f = _make_py_file(tmp_path)
         client = _make_client(storage_root)
         body = client.post("/v1/x/kb/index", json={"path": str(f)}).json()
-        assert body["scope"] == str(f)
+        assert body["scope"] == "global"
 
     def test_response_has_row_count(self, storage_root: Path, tmp_path: Path) -> None:
         f = _make_py_file(tmp_path)
@@ -97,20 +100,26 @@ class TestKbIndexEndpoint:
         body = client.post("/v1/x/kb/index", json={"path": str(f)}).json()
         assert body["status"] == "indexed"
 
-    def test_scope_key_used_when_scope_provided(self, storage_root: Path, tmp_path: Path) -> None:
-        _make_py_file(tmp_path)
+    def test_explicit_scope_used_in_response(self, storage_root: Path, tmp_path: Path) -> None:
+        f = _make_py_file(tmp_path)
         client = _make_client(storage_root)
-        body = client.post("/v1/x/kb/index", json={"scope": str(tmp_path)}).json()
-        assert body["scope"] == str(tmp_path)
+        body = client.post("/v1/x/kb/index", json={"path": str(f), "scope": "project"}).json()
+        assert body["scope"] == "project"
 
-    def test_default_scope_is_workspace_string(
+    def test_default_scope_is_global(
         self, storage_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("WORKSPACE", str(tmp_path))
         _make_py_file(tmp_path)
         client = _make_client(storage_root)
         body = client.post("/v1/x/kb/index", json={}).json()
-        assert body["scope"] == "workspace"
+        assert body["scope"] == "global"
+
+    def test_invalid_scope_returns_422(self, storage_root: Path, tmp_path: Path) -> None:
+        f = _make_py_file(tmp_path)
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/kb/index", json={"path": str(f), "scope": "workspace"})
+        assert resp.status_code == 422
 
     def test_status_json_written_after_index(self, storage_root: Path, tmp_path: Path) -> None:
         f = _make_py_file(tmp_path)
@@ -125,24 +134,24 @@ class TestKbIndexEndpoint:
         data = json.loads((storage_root / "kb" / "status.json").read_text())
         assert data["last_updated"] is not None
 
-    def test_status_json_row_count_keyed_by_path(
+    def test_status_json_row_count_keyed_by_scope(
         self, storage_root: Path, tmp_path: Path
     ) -> None:
         f = _make_py_file(tmp_path)
         client = _make_client(storage_root)
         client.post("/v1/x/kb/index", json={"path": str(f)})
         data = json.loads((storage_root / "kb" / "status.json").read_text())
-        assert str(f) in data["row_counts"]
-        assert data["row_counts"][str(f)] >= 1
+        assert "global" in data["row_counts"]
+        assert data["row_counts"]["global"] >= 1
 
-    def test_status_json_row_count_keyed_by_scope(
+    def test_status_json_row_count_keyed_by_explicit_scope(
         self, storage_root: Path, tmp_path: Path
     ) -> None:
         _make_py_file(tmp_path)
         client = _make_client(storage_root)
-        client.post("/v1/x/kb/index", json={"scope": str(tmp_path)})
+        client.post("/v1/x/kb/index", json={"path": str(tmp_path / "sample.py"), "scope": "project"})
         data = json.loads((storage_root / "kb" / "status.json").read_text())
-        assert str(tmp_path) in data["row_counts"]
+        assert "project" in data["row_counts"]
 
     def test_row_counts_accumulate_across_scopes(
         self, storage_root: Path, tmp_path: Path
@@ -150,17 +159,20 @@ class TestKbIndexEndpoint:
         f1 = _make_py_file(tmp_path, "a.py")
         f2 = _make_py_file(tmp_path, "b.py")
         client = _make_client(storage_root)
-        client.post("/v1/x/kb/index", json={"path": str(f1)})
-        client.post("/v1/x/kb/index", json={"path": str(f2)})
+        client.post("/v1/x/kb/index", json={"path": str(f1), "scope": "global"})
+        client.post("/v1/x/kb/index", json={"path": str(f2), "scope": "project"})
         data = json.loads((storage_root / "kb" / "status.json").read_text())
-        assert str(f1) in data["row_counts"]
-        assert str(f2) in data["row_counts"]
+        assert "global" in data["row_counts"]
+        assert "project" in data["row_counts"]
 
-    def test_scope_scan_indexes_all_files(self, storage_root: Path, tmp_path: Path) -> None:
+    def test_scope_scan_indexes_all_files(
+        self, storage_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WORKSPACE", str(tmp_path))
         _make_py_file(tmp_path, "x.py")
         _make_py_file(tmp_path, "y.py")
         client = _make_client(storage_root)
-        resp = client.post("/v1/x/kb/index", json={"scope": str(tmp_path)})
+        resp = client.post("/v1/x/kb/index", json={"scope": "global"})
         assert resp.status_code == 200
         body = resp.json()
         assert body["row_count"] >= 2
@@ -269,8 +281,8 @@ class TestKbStatusEndpoint:
         client = _make_client(storage_root)
         client.post("/v1/x/kb/index", json={"path": str(f)})
         body = client.get("/v1/x/kb").json()
-        assert str(f) in body["row_counts"]
-        assert body["row_counts"][str(f)] >= 1
+        assert "global" in body["row_counts"]
+        assert body["row_counts"]["global"] >= 1
 
     def test_last_updated_set_after_index(self, storage_root: Path, tmp_path: Path) -> None:
         f = _make_py_file(tmp_path)
@@ -283,11 +295,11 @@ class TestKbStatusEndpoint:
         f1 = _make_py_file(tmp_path, "p.py")
         f2 = _make_py_file(tmp_path, "q.py")
         client = _make_client(storage_root)
-        client.post("/v1/x/kb/index", json={"path": str(f1)})
-        client.post("/v1/x/kb/index", json={"path": str(f2)})
+        client.post("/v1/x/kb/index", json={"path": str(f1), "scope": "global"})
+        client.post("/v1/x/kb/index", json={"path": str(f2), "scope": "project"})
         body = client.get("/v1/x/kb").json()
-        assert str(f1) in body["row_counts"]
-        assert str(f2) in body["row_counts"]
+        assert "global" in body["row_counts"]
+        assert "project" in body["row_counts"]
 
 
 # ---------------------------------------------------------------------------
@@ -547,25 +559,46 @@ class TestKbQueryEndpoint:
         assert "start_line" in r
         assert "end_line" in r
 
+    def test_result_has_content_hash_field(self, storage_root: Path, tmp_path: Path) -> None:
+        f = _make_py_file(tmp_path)
+        client = _make_client(storage_root)
+        client.post("/v1/x/kb/index", json={"path": str(f)})
+        body = client.post("/v1/x/kb/query", json={"query": "foo", "method": "bm25"}).json()
+        assert body["count"] >= 1
+        r = body["results"][0]
+        assert "content_hash" in r
+        assert len(r["content_hash"]) == 64  # SHA-256 hex digest
+
+    def test_result_has_scope_field(self, storage_root: Path, tmp_path: Path) -> None:
+        f = _make_py_file(tmp_path)
+        client = _make_client(storage_root)
+        client.post("/v1/x/kb/index", json={"path": str(f)})
+        body = client.post("/v1/x/kb/query", json={"query": "foo", "method": "bm25"}).json()
+        assert body["count"] >= 1
+        assert body["results"][0]["scope"] == "global"
+
     def test_scope_filter_narrows_bm25_results(
         self, storage_root: Path, tmp_path: Path
     ) -> None:
         f1 = _make_py_file(tmp_path, "a.py")
         f2 = _make_py_file(tmp_path, "b.py")
         client = _make_client(storage_root)
-        client.post("/v1/x/kb/index", json={"path": str(f1)})
-        client.post("/v1/x/kb/index", json={"path": str(f2)})
+        client.post("/v1/x/kb/index", json={"path": str(f1), "scope": "global"})
+        client.post("/v1/x/kb/index", json={"path": str(f2), "scope": "project"})
         body = client.post(
             "/v1/x/kb/query",
-            json={"query": "foo", "method": "bm25", "scope": str(f1)},
+            json={"query": "foo", "method": "bm25", "scope": "global"},
         ).json()
+        assert all(r["scope"] == "global" for r in body["results"])
         assert all(r["file_path"] == str(f1) for r in body["results"])
 
     def test_limit_respected(self, storage_root: Path, tmp_path: Path) -> None:
         for name in ["a.py", "b.py", "c.py"]:
             _make_py_file(tmp_path, name)
         client = _make_client(storage_root)
-        client.post("/v1/x/kb/index", json={"scope": str(tmp_path)})
+        client.post("/v1/x/kb/index", json={"scope": "global", "path": str(tmp_path / "a.py")})
+        client.post("/v1/x/kb/index", json={"scope": "global", "path": str(tmp_path / "b.py")})
+        client.post("/v1/x/kb/index", json={"scope": "global", "path": str(tmp_path / "c.py")})
         body = client.post(
             "/v1/x/kb/query", json={"query": "foo", "method": "bm25", "limit": 1}
         ).json()
@@ -578,7 +611,6 @@ class TestKbQueryEndpoint:
         f = _make_py_file(tmp_path)
         client = _make_client(storage_root)
         client.post("/v1/x/kb/index", json={"path": str(f)})
-        # Overwrite file with new content and re-index
         f.write_text("def unique_reindex_marker():\n    pass\n")
         client.post("/v1/x/kb/index", json={"path": str(f)})
         body = client.post(
@@ -586,6 +618,11 @@ class TestKbQueryEndpoint:
             json={"query": "unique_reindex_marker", "method": "bm25"},
         ).json()
         assert body["count"] >= 1
+
+    def test_invalid_query_scope_returns_422(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/kb/query", json={"query": "foo", "scope": "workspace"})
+        assert resp.status_code == 422
 
 
 # ---------------------------------------------------------------------------

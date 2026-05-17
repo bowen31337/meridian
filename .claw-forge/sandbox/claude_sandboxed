@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/knowledge-base--api-post-v1-x-kb-query-runs-glob-bm25-v/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/knowledge-base--system-kb-index-rows-carry-scope-global/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
