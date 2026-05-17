@@ -3,6 +3,7 @@ uvicorn[standard]>=0.29
 pyyaml>=6.0
 opentelemetry-api>=1.24
 meridian-core-errors>=0.1.0
+meridian-kb-indexer>=0.1.0
 meridian-plugin-loader>=0.1.0
 meridian-storage-blob>=0.1.0
 meridian-storage-event-log>=0.1.0

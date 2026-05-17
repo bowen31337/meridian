@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import fnmatch
 import json
+import math
 import os
+import re
+import sqlite3
 import tempfile
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from core_errors import (
     AuditLog,
@@ -18,7 +23,7 @@ from core_errors import (
 )
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from meridian_kb_indexer import WorkspaceIndexer, should_index_path
+from meridian_kb_indexer import Chunk, WorkspaceIndexer, should_index_path
 from pydantic import BaseModel
 
 _WORKSPACE_ENV = "WORKSPACE"
@@ -62,14 +67,35 @@ class KbStatusError(MeridianError):
         return 422
 
 
+class KbQueryError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(code="kb_query_failed", message=message, timestamp=timestamp, cause=cause)
+
+    def http_status(self) -> int:
+        return 422
+
+
 # ---------------------------------------------------------------------------
-# Request model
+# Request models
 # ---------------------------------------------------------------------------
 
 
 class KbIndexRequest(BaseModel):
     path: str | None = None
     scope: str | None = None
+
+
+class KbQueryRequest(BaseModel):
+    query: str
+    scope: str | None = None
+    method: Literal["glob", "bm25", "vector", "hybrid"] = "hybrid"
+    limit: int = 10
 
 
 # ---------------------------------------------------------------------------
@@ -101,12 +127,195 @@ def _write_status_atomic(storage_root: Path, data: dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# TF-IDF helpers (for vector search)
+# ---------------------------------------------------------------------------
+
+
+def _tokenize(text: str) -> list[str]:
+    return re.findall(r"\b\w+\b", text.lower())
+
+
+def _tfidf_vec(text: str) -> Counter[str]:
+    return Counter(_tokenize(text))
+
+
+def _cosine(a: Counter[str], b: Counter[str]) -> float:
+    dot = sum(a[t] * b[t] for t in a if t in b)
+    norm_a = math.sqrt(sum(v * v for v in a.values()))
+    norm_b = math.sqrt(sum(v * v for v in b.values()))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+# ---------------------------------------------------------------------------
+# RRF fusion
+# ---------------------------------------------------------------------------
+
+
+def _rrf_fuse(
+    ranked_lists: list[list[dict[str, Any]]],
+    limit: int,
+    k: int = 60,
+) -> list[dict[str, Any]]:
+    def _key(c: dict[str, Any]) -> tuple[str, int, int]:
+        return (c["file_path"], c["start_line"], c["end_line"])
+
+    scores: dict[tuple[str, int, int], float] = {}
+    by_key: dict[tuple[str, int, int], dict[str, Any]] = {}
+
+    for ranked in ranked_lists:
+        for rank, chunk in enumerate(ranked, 1):
+            key = _key(chunk)
+            scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank)
+            by_key[key] = chunk
+
+    sorted_keys = sorted(scores, key=lambda kk: scores[kk], reverse=True)
+    return [by_key[kk] for kk in sorted_keys[:limit]]
+
+
+# ---------------------------------------------------------------------------
+# SQLite chunk store (FTS5 + BM25 + TF-IDF vector)
+# ---------------------------------------------------------------------------
+
+_COLS = (
+    "file_path",
+    "scope",
+    "kind",
+    "content",
+    "start_line",
+    "end_line",
+    "symbol_name",
+    "symbol_kind",
+    "heading_level",
+    "heading_text",
+    "language",
+)
+
+_CREATE_FTS5 = f"""
+CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+    {", ".join(c if c == "content" else c + " UNINDEXED" for c in _COLS)},
+    tokenize='unicode61'
+)
+"""
+
+_INSERT_SQL = (
+    f"INSERT INTO chunks_fts ({', '.join(_COLS)}) "
+    f"VALUES ({', '.join('?' * len(_COLS))})"
+)
+
+_SELECT_COLS = ", ".join(_COLS)
+
+
+class KbStore:
+    """Lazy-connecting SQLite store for indexed chunks."""
+
+    def __init__(self, db_path: Path) -> None:
+        self._db_path = db_path
+        self._conn: sqlite3.Connection | None = None
+
+    def _get_conn(self) -> sqlite3.Connection:
+        if self._conn is None:
+            self._db_path.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(str(self._db_path), check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute(_CREATE_FTS5)
+            conn.commit()
+            self._conn = conn
+        return self._conn
+
+    def upsert_chunks(self, file_path: str, scope: str, chunks: list[Chunk]) -> None:
+        conn = self._get_conn()
+        with conn:
+            conn.execute("DELETE FROM chunks_fts WHERE file_path = ?", [file_path])
+            conn.executemany(
+                _INSERT_SQL,
+                [
+                    (
+                        file_path,
+                        scope,
+                        c.kind,
+                        c.content,
+                        c.start_line,
+                        c.end_line,
+                        c.symbol_name,
+                        c.symbol_kind,
+                        c.heading_level,
+                        c.heading_text,
+                        c.language,
+                    )
+                    for c in chunks
+                ],
+            )
+
+    def glob_search(
+        self, pattern: str, scope: str | None, limit: int
+    ) -> list[dict[str, Any]]:
+        conn = self._get_conn()
+        if scope:
+            rows = conn.execute(
+                f"SELECT {_SELECT_COLS} FROM chunks_fts WHERE scope = ?", [scope]
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                f"SELECT {_SELECT_COLS} FROM chunks_fts"
+            ).fetchall()
+
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            d = dict(row)
+            if fnmatch.fnmatch(d["file_path"], pattern):
+                results.append(d)
+                if len(results) >= limit:
+                    break
+        return results
+
+    def bm25_search(
+        self, query: str, scope: str | None, limit: int
+    ) -> list[dict[str, Any]]:
+        words = re.findall(r"\w+", query)
+        if not words:
+            return []
+        fts_query = " ".join(words)
+        conn = self._get_conn()
+        if scope:
+            rows = conn.execute(
+                f"SELECT {_SELECT_COLS} FROM chunks_fts "
+                "WHERE chunks_fts MATCH ? AND scope = ? "
+                "ORDER BY bm25(chunks_fts) LIMIT ?",
+                [fts_query, scope, limit],
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                f"SELECT {_SELECT_COLS} FROM chunks_fts "
+                "WHERE chunks_fts MATCH ? "
+                "ORDER BY bm25(chunks_fts) LIMIT ?",
+                [fts_query, limit],
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def vector_search(
+        self, query: str, scope: str | None, limit: int
+    ) -> list[dict[str, Any]]:
+        # Retrieve BM25 candidates then rerank by TF-IDF cosine similarity.
+        candidates = self.bm25_search(query, scope, limit * 5)
+        if not candidates:
+            return []
+        q_vec = _tfidf_vec(query)
+        scored = [(c, _cosine(q_vec, _tfidf_vec(c["content"]))) for c in candidates]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return [c for c, _ in scored[:limit]]
+
+
+# ---------------------------------------------------------------------------
 # Router factory
 # ---------------------------------------------------------------------------
 
 
 def make_kb_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
     router = APIRouter()
+    store = KbStore(storage_root / "kb" / "chunks.db")
 
     @router.post("/v1/x/kb/index")
     async def kb_index(body: KbIndexRequest) -> JSONResponse:
@@ -140,6 +349,7 @@ def make_kb_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                 if target_path:
                     chunks = await indexer.index_file(target_path)
                     chunk_count = len(chunks)
+                    store.upsert_chunks(target_path, scope_key, chunks)
                 else:
                     workspace = body.scope or os.environ.get(_WORKSPACE_ENV, os.getcwd())
                     for p in Path(workspace).rglob("*"):
@@ -147,6 +357,7 @@ def make_kb_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                             try:
                                 file_chunks = await indexer.index_file(str(p))
                                 chunk_count += len(file_chunks)
+                                store.upsert_chunks(str(p), scope_key, file_chunks)
                             except Exception:
                                 pass  # per-file failures already audited in WorkspaceIndexer
 
@@ -222,5 +433,72 @@ def make_kb_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                 raise err
 
         return JSONResponse(content=data)
+
+    @router.post("/v1/x/kb/query")
+    async def kb_query(body: KbQueryRequest) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "kb.query",
+            attributes={
+                "kb.query": body.query,
+                "kb.scope": body.scope or "",
+                "kb.method": body.method,
+            },
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(name="kb.query.invocation", code="kb_query", timestamp=now),
+            )
+
+            try:
+                if body.method == "glob":
+                    results = store.glob_search(body.query, body.scope, body.limit)
+                elif body.method == "bm25":
+                    results = store.bm25_search(body.query, body.scope, body.limit)
+                elif body.method == "vector":
+                    results = store.vector_search(body.query, body.scope, body.limit)
+                else:  # hybrid
+                    glob_r = store.glob_search(body.query, body.scope, body.limit)
+                    bm25_r = store.bm25_search(body.query, body.scope, body.limit)
+                    vec_r = store.vector_search(body.query, body.scope, body.limit)
+                    results = _rrf_fuse([glob_r, bm25_r, vec_r], body.limit)
+
+                span.set_attribute("kb.result_count", len(results))
+
+            except KbQueryError:
+                raise
+            except Exception as exc:
+                err = KbQueryError(
+                    message=f"KB query failed: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="kb.query.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "query": body.query,
+                            "scope": body.scope,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise err
+
+        return JSONResponse(
+            content={
+                "results": results,
+                "query": body.query,
+                "scope": body.scope,
+                "method": body.method,
+                "count": len(results),
+            }
+        )
 
     return router
