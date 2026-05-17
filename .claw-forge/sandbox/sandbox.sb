@@ -1,5 +1,5 @@
 (version 1)
 (allow default)
 (deny file-write* (subpath "/Users/bowenli/development/meridian"))
-(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/capabilities-se-system-capability-denial-produces-synth"))
+(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/built-in-tools-system-canvas-built-in-tool-emits-conten"))
 (allow file-write* (subpath "/Users/bowenli/development/meridian/.git"))

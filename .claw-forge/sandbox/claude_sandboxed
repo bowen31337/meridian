@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/capabilities-se-system-capability-denial-produces-synth/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/built-in-tools-system-canvas-built-in-tool-emits-conten/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

@@ -33,3 +33,26 @@ export { WidgetRegistry, defaultRegistry } from "./pipeline.js";
 
 // Layout helpers
 export { Col, Divider, Grid, Row, Spacer, Stack } from "./layout.js";
+
+// Built-in widget components
+export {
+  ALL_WIDGETS,
+  CodeWidget,
+  FormWidget,
+  ImageWidget,
+  MarkdownWidget,
+  ProgressWidget,
+  TableWidget,
+  TextWidget,
+} from "./widgets/index.js";
+export type {
+  CodeProps,
+  FormField,
+  FormFieldType,
+  FormProps,
+  ImageProps,
+  MarkdownProps,
+  ProgressProps,
+  TableProps,
+  TextProps,
+} from "./widgets/index.js";
