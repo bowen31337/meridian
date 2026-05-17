@@ -24,6 +24,15 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+__all__ = [
+    "FakeModelAdapter",
+    "FakeSandboxAdapter",
+    "_run_harness",
+    "_run_harness_capturing",
+    "_find_divergence",
+]
+
+
 # ---------------------------------------------------------------------------
 # Error type
 # ---------------------------------------------------------------------------
@@ -150,6 +159,76 @@ async def _run_harness(
     return model_calls, tool_calls
 
 
+async def _run_harness_capturing(
+    model_adapter: FakeModelAdapter,
+    sandbox_adapter: FakeSandboxAdapter,
+) -> tuple[int, int, list[dict[str, Any]]]:
+    """Run the agent harness and capture the full event sequence.
+
+    Returns (model_calls, tool_calls, captured_events).  Tool dispatches are
+    represented as synthetic {"type": "tool_result", ...} entries so that the
+    baseline can detect changes to tool-dispatch ordering or content.
+    """
+    model_calls = 0
+    tool_calls = 0
+    captured: list[dict[str, Any]] = []
+
+    while True:
+        model_calls += 1
+        tool_use_blocks: list[dict[str, Any]] = []
+        current_tool: dict[str, Any] | None = None
+        stop_reason = "end_turn"
+
+        async for event in model_adapter.call():
+            captured.append(event)
+            etype = event.get("type", "")
+            if etype == "tool_use_start":
+                current_tool = {
+                    "id": event.get("id", ""),
+                    "name": event.get("name", ""),
+                    "input_json": "",
+                }
+                tool_use_blocks.append(current_tool)
+            elif etype == "tool_input_delta" and current_tool is not None:
+                current_tool["input_json"] += event.get("partial_json", "")
+            elif etype == "message_stop":
+                stop_reason = event.get("stop_reason") or "end_turn"
+
+        if not tool_use_blocks or stop_reason != "tool_use":
+            break
+
+        for block in tool_use_blocks:
+            tool_calls += 1
+            result = sandbox_adapter.next_result()
+            captured.append(
+                {
+                    "type": "tool_result",
+                    "tool_id": block["id"],
+                    "content": result.get("content", ""),
+                }
+            )
+
+    return model_calls, tool_calls, captured
+
+
+def _find_divergence(
+    expected: list[dict[str, Any]],
+    actual: list[dict[str, Any]],
+) -> tuple[int, dict[str, Any] | None, dict[str, Any] | None] | None:
+    """Return (seq, expected_event, actual_event) at the first divergence, or None if equal."""
+    for i, (exp, act) in enumerate(zip(expected, actual, strict=False)):
+        if exp != act:
+            return (i, exp, act)
+    if len(expected) != len(actual):
+        seq = min(len(expected), len(actual))
+        return (
+            seq,
+            expected[seq] if seq < len(expected) else None,
+            actual[seq] if seq < len(actual) else None,
+        )
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Router factory
 # ---------------------------------------------------------------------------
@@ -207,7 +286,46 @@ def make_replay_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
             try:
                 model_adapter = FakeModelAdapter(model_fixture)
                 sandbox_adapter = FakeSandboxAdapter(fixture_dir / "tool_responses.ndjson")
-                model_calls, tool_calls = await _run_harness(model_adapter, sandbox_adapter)
+                expected_path = fixture_dir / "expected_events.ndjson"
+
+                if expected_path.exists():
+                    expected_events = [
+                        json.loads(line)
+                        for line in expected_path.read_text().splitlines()
+                        if line.strip()
+                    ]
+                    model_calls, tool_calls, actual_events = await _run_harness_capturing(
+                        model_adapter, sandbox_adapter
+                    )
+                    divergence = _find_divergence(expected_events, actual_events)
+                    if divergence is not None:
+                        seq, exp_ev, act_ev = divergence
+                        err = ReplayError(
+                            message=(
+                                f"Replay diverged at event seq {seq} for session {session_id!r}"
+                            ),
+                            timestamp=_now(),
+                        )
+                        record_error(span, err)
+                        audit_log.write(
+                            AuditLogEntry(
+                                level="error",
+                                event="replay.run.failed",
+                                code=err.code,
+                                timestamp=err.timestamp,
+                                detail={
+                                    "session_id": session_id,
+                                    "run_id": run_id,
+                                    "first_deviating_seq": seq,
+                                    "expected_event": exp_ev,
+                                    "actual_event": act_ev,
+                                    "message": err.message,
+                                },
+                            )
+                        )
+                        raise err
+                else:
+                    model_calls, tool_calls = await _run_harness(model_adapter, sandbox_adapter)
             except ReplayError:
                 raise
             except Exception as exc:

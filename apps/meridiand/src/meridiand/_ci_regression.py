@@ -18,7 +18,7 @@ from core_errors import (
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from ._replay import FakeModelAdapter, FakeSandboxAdapter
+from ._replay import FakeModelAdapter, FakeSandboxAdapter, _find_divergence, _run_harness_capturing
 
 
 def _now() -> str:
@@ -44,86 +44,6 @@ class RegressionError(MeridianError):
 
     def http_status(self) -> int:
         return 422
-
-
-# ---------------------------------------------------------------------------
-# Harness with event capture
-# ---------------------------------------------------------------------------
-
-
-async def _run_harness_capturing(
-    model_adapter: FakeModelAdapter,
-    sandbox_adapter: FakeSandboxAdapter,
-) -> tuple[int, int, list[dict[str, Any]]]:
-    """Run the agent harness and capture the full event sequence.
-
-    Returns (model_calls, tool_calls, captured_events).  Tool dispatches are
-    represented as synthetic {"type": "tool_result", ...} entries so that the
-    baseline can detect changes to tool-dispatch ordering or content.
-    """
-    model_calls = 0
-    tool_calls = 0
-    captured: list[dict[str, Any]] = []
-
-    while True:
-        model_calls += 1
-        tool_use_blocks: list[dict[str, Any]] = []
-        current_tool: dict[str, Any] | None = None
-        stop_reason = "end_turn"
-
-        async for event in model_adapter.call():
-            captured.append(event)
-            etype = event.get("type", "")
-            if etype == "tool_use_start":
-                current_tool = {
-                    "id": event.get("id", ""),
-                    "name": event.get("name", ""),
-                    "input_json": "",
-                }
-                tool_use_blocks.append(current_tool)
-            elif etype == "tool_input_delta" and current_tool is not None:
-                current_tool["input_json"] += event.get("partial_json", "")
-            elif etype == "message_stop":
-                stop_reason = event.get("stop_reason") or "end_turn"
-
-        if not tool_use_blocks or stop_reason != "tool_use":
-            break
-
-        for block in tool_use_blocks:
-            tool_calls += 1
-            result = sandbox_adapter.next_result()
-            captured.append(
-                {
-                    "type": "tool_result",
-                    "tool_id": block["id"],
-                    "content": result.get("content", ""),
-                }
-            )
-
-    return model_calls, tool_calls, captured
-
-
-# ---------------------------------------------------------------------------
-# Divergence detection
-# ---------------------------------------------------------------------------
-
-
-def _find_divergence(
-    expected: list[dict[str, Any]],
-    actual: list[dict[str, Any]],
-) -> tuple[int, dict[str, Any] | None, dict[str, Any] | None] | None:
-    """Return (seq, expected_event, actual_event) at the first divergence, or None if equal."""
-    for i, (exp, act) in enumerate(zip(expected, actual, strict=False)):
-        if exp != act:
-            return (i, exp, act)
-    if len(expected) != len(actual):
-        seq = min(len(expected), len(actual))
-        return (
-            seq,
-            expected[seq] if seq < len(expected) else None,
-            actual[seq] if seq < len(actual) else None,
-        )
-    return None
 
 
 # ---------------------------------------------------------------------------

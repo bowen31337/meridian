@@ -15,6 +15,12 @@ Tests cover:
   - OTel span is set to ERROR status on fixture-not-found failure.
   - create_app wires the replay router when storage_root is supplied.
   - create_app omits the replay route when storage_root is None.
+  - When expected_events.ndjson is absent, replay succeeds without divergence check.
+  - When expected_events.ndjson matches actual events, replay returns 200.
+  - When expected_events.ndjson diverges from actual events, replay returns 422 with
+    code "replay_failed" and an error message pinned to the first deviating event seq.
+  - Divergence writes an audit log entry with first_deviating_seq in detail.
+  - OTel span is set to ERROR status on divergence.
 """
 
 from __future__ import annotations
@@ -49,6 +55,12 @@ def _write_tool_fixture(fixture_dir: Path, results: list[dict]) -> None:
     fixture_dir.mkdir(parents=True, exist_ok=True)
     lines = [json.dumps(r) for r in results]
     (fixture_dir / "tool_responses.ndjson").write_text("\n".join(lines) + "\n")
+
+
+def _write_expected_events(fixture_dir: Path, events: list[dict]) -> None:
+    fixture_dir.mkdir(parents=True, exist_ok=True)
+    lines = [json.dumps(e) for e in events]
+    (fixture_dir / "expected_events.ndjson").write_text("\n".join(lines) + "\n")
 
 
 def _end_turn_call() -> list[dict]:
@@ -278,6 +290,123 @@ class TestReplayEndpoint:
 
 
 # ---------------------------------------------------------------------------
+# Divergence detection tests
+# ---------------------------------------------------------------------------
+
+
+class TestReplayDivergence:
+    def _fixture_dir(self, storage_root: Path, session_id: str) -> Path:
+        d = storage_root / "fixtures" / session_id
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def test_no_expected_events_file_returns_200(self, storage_root: Path) -> None:
+        audit = FileAuditLog(storage_root)
+        fd = self._fixture_dir(storage_root, "div-sess0")
+        _write_model_fixture(fd, [_end_turn_call()])
+        client = _make_client(storage_root, audit)
+        resp = client.post("/v1/x/sessions/div-sess0/replay")
+        assert resp.status_code == 200
+
+    def test_matching_expected_events_returns_200(self, storage_root: Path) -> None:
+        audit = FileAuditLog(storage_root)
+        fd = self._fixture_dir(storage_root, "div-sess1")
+        events = _end_turn_call()
+        _write_model_fixture(fd, [events])
+        _write_expected_events(fd, events)
+        client = _make_client(storage_root, audit)
+        resp = client.post("/v1/x/sessions/div-sess1/replay")
+        assert resp.status_code == 200
+
+    def test_diverging_expected_events_returns_422(self, storage_root: Path) -> None:
+        audit = FileAuditLog(storage_root)
+        fd = self._fixture_dir(storage_root, "div-sess2")
+        _write_model_fixture(fd, [_end_turn_call()])
+        _write_expected_events(fd, [{"type": "wrong_event"}])
+        client = _make_client(storage_root, audit)
+        resp = client.post("/v1/x/sessions/div-sess2/replay")
+        assert resp.status_code == 422
+
+    def test_divergence_error_code_is_replay_failed(self, storage_root: Path) -> None:
+        audit = FileAuditLog(storage_root)
+        fd = self._fixture_dir(storage_root, "div-sess3")
+        _write_model_fixture(fd, [_end_turn_call()])
+        _write_expected_events(fd, [{"type": "wrong_event"}])
+        client = _make_client(storage_root, audit)
+        body = client.post("/v1/x/sessions/div-sess3/replay").json()
+        assert body["error"]["code"] == "replay_failed"
+
+    def test_divergence_error_message_contains_seq(self, storage_root: Path) -> None:
+        audit = FileAuditLog(storage_root)
+        fd = self._fixture_dir(storage_root, "div-sess4")
+        model_events = _end_turn_call()
+        _write_model_fixture(fd, [model_events])
+        # Diverge at index 1 (text_delta vs different)
+        diverged = [
+            model_events[0],
+            {"type": "different_delta"},
+            model_events[2],
+        ]
+        _write_expected_events(fd, diverged)
+        client = _make_client(storage_root, audit)
+        body = client.post("/v1/x/sessions/div-sess4/replay").json()
+        assert "seq 1" in body["error"]["message"]
+
+    def test_divergence_writes_audit_log(self, storage_root: Path) -> None:
+        audit = FileAuditLog(storage_root)
+        fd = self._fixture_dir(storage_root, "div-sess5")
+        _write_model_fixture(fd, [_end_turn_call()])
+        _write_expected_events(fd, [{"type": "wrong_event"}])
+        client = _make_client(storage_root, audit)
+        client.post("/v1/x/sessions/div-sess5/replay")
+        audit_path = storage_root / "audit.ndjson"
+        assert audit_path.exists()
+        records = [json.loads(line) for line in audit_path.read_text().splitlines() if line.strip()]
+        assert any(r.get("event") == "replay.run.failed" for r in records)
+
+    def test_divergence_audit_detail_has_first_deviating_seq(self, storage_root: Path) -> None:
+        audit = FileAuditLog(storage_root)
+        fd = self._fixture_dir(storage_root, "div-sess6")
+        model_events = _end_turn_call()
+        _write_model_fixture(fd, [model_events])
+        diverged = [model_events[0], {"type": "nope"}, model_events[2]]
+        _write_expected_events(fd, diverged)
+        client = _make_client(storage_root, audit)
+        client.post("/v1/x/sessions/div-sess6/replay")
+        audit_path = storage_root / "audit.ndjson"
+        records = [json.loads(line) for line in audit_path.read_text().splitlines() if line.strip()]
+        record = next(r for r in records if r.get("event") == "replay.run.failed")
+        assert record["detail"]["first_deviating_seq"] == 1
+
+    def test_divergence_audit_detail_has_session_id(self, storage_root: Path) -> None:
+        audit = FileAuditLog(storage_root)
+        fd = self._fixture_dir(storage_root, "div-sess7")
+        _write_model_fixture(fd, [_end_turn_call()])
+        _write_expected_events(fd, [{"type": "wrong"}])
+        client = _make_client(storage_root, audit)
+        client.post("/v1/x/sessions/div-sess7/replay")
+        audit_path = storage_root / "audit.ndjson"
+        records = [json.loads(line) for line in audit_path.read_text().splitlines() if line.strip()]
+        record = next(r for r in records if r.get("event") == "replay.run.failed")
+        assert record["detail"]["session_id"] == "div-sess7"
+
+    def test_matching_events_with_tool_use_returns_200(self, storage_root: Path) -> None:
+        audit = FileAuditLog(storage_root)
+        fd = self._fixture_dir(storage_root, "div-sess8")
+        _write_model_fixture(fd, [_tool_use_call("tu_1"), _end_turn_call()])
+        _write_tool_fixture(fd, [{"content": "result"}])
+        expected = (
+            list(_tool_use_call("tu_1"))
+            + [{"type": "tool_result", "tool_id": "tu_1", "content": "result"}]
+            + list(_end_turn_call())
+        )
+        _write_expected_events(fd, expected)
+        client = _make_client(storage_root, audit)
+        resp = client.post("/v1/x/sessions/div-sess8/replay")
+        assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
 # OTel span tests
 # ---------------------------------------------------------------------------
 
@@ -306,6 +435,19 @@ class TestReplayOtel:
 
         client = self._make_client(storage_root)
         client.post("/v1/x/sessions/no-fixture-otel/replay")
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        replay_span = spans.get("replay.run")
+        assert replay_span is not None
+        assert replay_span.status.status_code == StatusCode.ERROR
+
+    def test_divergence_span_has_error_status(self, storage_root: Path) -> None:
+        from opentelemetry.trace import StatusCode
+
+        client = self._make_client(storage_root)
+        fd = storage_root / "fixtures" / "otel-div-sess"
+        _write_model_fixture(fd, [_end_turn_call()])
+        _write_expected_events(fd, [{"type": "wrong"}])
+        client.post("/v1/x/sessions/otel-div-sess/replay")
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
         replay_span = spans.get("replay.run")
         assert replay_span is not None

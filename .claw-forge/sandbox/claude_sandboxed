@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/checkpoints-det-system-fakemodeladapter-and-fakesandbox/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/checkpoints-det-system-replay-divergence-detection-when/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

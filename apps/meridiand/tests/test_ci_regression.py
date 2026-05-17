@@ -36,11 +36,12 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
-from meridiand._ci_regression import (
+from meridiand._replay import (
+    FakeModelAdapter,
+    FakeSandboxAdapter,
     _find_divergence,
     _run_harness_capturing,
 )
-from meridiand._replay import FakeModelAdapter, FakeSandboxAdapter
 
 from tests._otel_shared import otel_exporter as _otel_exporter
 
