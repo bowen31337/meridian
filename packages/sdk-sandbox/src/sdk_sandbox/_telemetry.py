@@ -25,6 +25,34 @@ def record_invocation_event(span: Span, event: StructuredEvent) -> None:
     span.add_event("sandbox.invocation", attrs)
 
 
+def record_capability_denial(
+    span: Span,
+    tool_name: str,
+    session_id: str,
+    required: frozenset[str],
+    missing: frozenset[str],
+    granted: frozenset[str],
+    message: str,
+) -> None:
+    """
+    Records a capability denial on the span: sets status to ERROR and adds
+    a "capability.denied" event with required/missing/granted detail.
+    Does not record an exception (denial is policy, not an unexpected error).
+    """
+    span.set_status(Status(StatusCode.ERROR, message))
+    span.add_event(
+        "capability.denied",
+        {
+            "tool.name": tool_name,
+            "session.id": session_id,
+            "error.code": "capability_denied",
+            "capability.required": ", ".join(sorted(required)),
+            "capability.missing": ", ".join(sorted(missing)),
+            "capability.granted": ", ".join(sorted(granted)),
+        },
+    )
+
+
 def record_sandbox_failure(span: Span, failure: SandboxFailure) -> None:
     """
     Records a failure on the span: sets status to ERROR, adds a

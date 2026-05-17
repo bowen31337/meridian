@@ -7,7 +7,7 @@ from typing import Any
 
 from ._audit import AuditLog, NoopAuditLog
 from ._contract import ToolDispatcher
-from ._telemetry import get_tracer, record_invocation_event, record_sandbox_failure
+from ._telemetry import get_tracer, record_capability_denial, record_invocation_event, record_sandbox_failure
 from ._types import (
     AuditLogEntry,
     ExecutionContext,
@@ -154,6 +154,57 @@ class Sandbox:
                 )
                 self._fail(span, failure, opts, "sandbox.execute.failed")
                 raise failure
+
+            # Capability check: required caps must be a subset of granted caps.
+            # On denial, return a synthetic SandboxResult (is_error=True) so the
+            # orchestrator surfaces it to the model — never raise, never silent.
+            missing_caps = tool.required_capabilities - context.granted_capabilities
+            if missing_caps:
+                missing_str = ", ".join(sorted(missing_caps))
+                denial_message = (
+                    f'Capability denied for tool "{name}"; missing: {missing_str}'
+                )
+                record_capability_denial(
+                    span,
+                    tool_name=name,
+                    session_id=context.session_id,
+                    required=tool.required_capabilities,
+                    missing=missing_caps,
+                    granted=context.granted_capabilities,
+                    message=denial_message,
+                )
+                opts.audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="sandbox.capability.denied",
+                        tool_name=name,
+                        session_id=context.session_id,
+                        timestamp=now,
+                        detail={
+                            "code": "capability_denied",
+                            "message": denial_message,
+                            "required": sorted(tool.required_capabilities),
+                            "missing": sorted(missing_caps),
+                            "granted": sorted(context.granted_capabilities),
+                        },
+                    )
+                )
+                if opts.on_error is not None:
+                    opts.on_error(
+                        SandboxFailure(
+                            code="capability_denied",
+                            message=denial_message,
+                            tool_name=name,
+                            session_id=context.session_id,
+                            timestamp=now,
+                        )
+                    )
+                return SandboxResult(
+                    content=denial_message,
+                    is_error=True,
+                    error_code="capability_denied",
+                    error_message=denial_message,
+                )
 
             dispatcher = self._dispatchers.get(tool.handler.kind)
             if dispatcher is None:

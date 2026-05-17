@@ -73,10 +73,13 @@ class ToolDefinition:
 
 @dataclass(frozen=True)
 class SandboxResult:
-    """Successful outcome of a sandbox execute operation."""
+    """Outcome of a sandbox execute operation. is_error=True for denied/failed results."""
 
     content: Any
     duration_ms: float = 0.0
+    is_error: bool = False
+    error_code: str | None = None
+    error_message: str | None = None
 
     def to_mcp_content_blocks(self) -> list[dict[str, Any]]:
         """Convert result content to MCP content blocks."""

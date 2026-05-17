@@ -9,7 +9,7 @@ from ._contract import ToolDispatcher
 from ._runtime import RuntimeOptions, Sandbox, default_sandbox
 
 # Telemetry
-from ._telemetry import get_tracer, record_invocation_event, record_sandbox_failure
+from ._telemetry import get_tracer, record_capability_denial, record_invocation_event, record_sandbox_failure
 from ._types import (
     AuditLogEntry,
     ContainerHandler,
@@ -49,6 +49,7 @@ __all__ = [
     "NoopAuditLog",
     # Telemetry
     "get_tracer",
+    "record_capability_denial",
     "record_invocation_event",
     "record_sandbox_failure",
     # Runtime
