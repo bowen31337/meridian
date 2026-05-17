@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/multi-agent-acp-system-agent-spawn-capability-gates-chi/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/built-in-tools-system-parallel-runs-built-in-tool-spawn/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

@@ -12,6 +12,7 @@ from meridian_plugin_loader import PluginLoader
 from ._checkpoint import make_checkpoint_router
 from ._ci_regression import make_ci_regression_router
 from ._kb import make_kb_router
+from ._parallel_runs import make_parallel_runs_router
 from ._replay import make_replay_router
 from ._resume import make_resume_router
 from ._spawn import make_spawn_router
@@ -52,6 +53,9 @@ def create_app(
         app.include_router(make_resume_router(audit_log=audit_log, storage_root=storage_root))
         app.include_router(make_kb_router(audit_log=audit_log, storage_root=storage_root))
         app.include_router(make_spawn_router(audit_log=audit_log, storage_root=storage_root))
+        app.include_router(
+            make_parallel_runs_router(audit_log=audit_log, storage_root=storage_root)
+        )
         app.include_router(
             make_ci_regression_router(audit_log=audit_log, storage_root=storage_root)
         )
