@@ -1,6 +1,7 @@
 # Types
 # Audit log
 from ._audit import AuditLog, NoopAuditLog
+from .fake import FakeSandboxAdapter, write_sandbox_fixture
 
 # Contract
 from ._contract import ToolDispatcher
@@ -56,6 +57,9 @@ __all__ = [
     "RuntimeOptions",
     "Sandbox",
     "default_sandbox",
+    # Fake / testing
+    "FakeSandboxAdapter",
+    "write_sandbox_fixture",
     # Version
     "SANDBOX_SDK_VERSION",
 ]
