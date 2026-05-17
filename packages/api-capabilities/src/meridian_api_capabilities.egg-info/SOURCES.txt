@@ -1,0 +1,14 @@
+pyproject.toml
+src/api_capabilities/__init__.py
+src/api_capabilities/_audit.py
+src/api_capabilities/_registry.py
+src/api_capabilities/_routes.py
+src/api_capabilities/_telemetry.py
+src/api_capabilities/_types.py
+src/api_capabilities/_version.py
+src/meridian_api_capabilities.egg-info/PKG-INFO
+src/meridian_api_capabilities.egg-info/SOURCES.txt
+src/meridian_api_capabilities.egg-info/dependency_links.txt
+src/meridian_api_capabilities.egg-info/requires.txt
+src/meridian_api_capabilities.egg-info/top_level.txt
+tests/test_routes.py

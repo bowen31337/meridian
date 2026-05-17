@@ -1,5 +1,5 @@
 (version 1)
 (allow default)
 (deny file-write* (subpath "/Users/bowenli/development/meridian"))
-(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/checkpoints-det-system-replay-divergence-detection-when"))
+(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/capabilities-se-api-get-v1-x-capabilities-lists-declare"))
 (allow file-write* (subpath "/Users/bowenli/development/meridian/.git"))

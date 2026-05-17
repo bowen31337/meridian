@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/checkpoints-det-system-replay-divergence-detection-when/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/capabilities-se-api-get-v1-x-capabilities-lists-declare/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

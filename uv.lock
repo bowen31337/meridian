@@ -4,6 +4,7 @@ requires-python = ">=3.11"
 
 [manifest]
 members = [
+    "meridian-api-capabilities",
     "meridian-builtin-tools",
     "meridian-cli",
     "meridian-core-errors",
@@ -480,6 +481,40 @@ sdist = { url = "https://files.pythonhosted.org/packages/d6/54/cfe61301667036ec9
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8", size = 9979, upload-time = "2022-08-14T12:40:09.779Z" },
 ]
+
+[[package]]
+name = "meridian-api-capabilities"
+version = "0.1.0"
+source = { editable = "packages/api-capabilities" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "meridian-core-errors" },
+    { name = "meridian-sdk-capabilities" },
+    { name = "opentelemetry-api" },
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "httpx" },
+    { name = "opentelemetry-sdk" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.110" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
+    { name = "meridian-core-errors", editable = "packages/core-errors" },
+    { name = "meridian-sdk-capabilities", editable = "packages/sdk-capabilities" },
+    { name = "opentelemetry-api", specifier = ">=1.24" },
+    { name = "opentelemetry-sdk", marker = "extra == 'dev'", specifier = ">=1.24" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
+]
+provides-extras = ["dev"]
 
 [[package]]
 name = "meridian-builtin-tools"

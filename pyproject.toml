@@ -5,6 +5,7 @@ package = false
 members = [
     "apps/meridiand",
     "apps/meridian-cli",
+    "packages/api-capabilities",
     "packages/builtin-tools",
     "packages/core-errors",
     "packages/knowledge-base-indexer",
@@ -52,6 +53,7 @@ asyncio_mode = "auto"
 testpaths = [
     "apps/meridiand/tests",
     "apps/meridian-cli/tests",
+    "packages/api-capabilities/tests",
     "packages/builtin-tools/tests",
     "packages/core-errors/tests",
     "packages/knowledge-base-indexer/tests",
