@@ -16,11 +16,13 @@ SQLite >= 3.24 (Python 3.11 ships with SQLite >= 3.39).  Placeholders are `?`.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import aiosqlite
 
+from ._audit import AuditLog, NoopAuditLog
 from ._contract import (
     AgentRepository,
     ChannelRepository,
@@ -37,7 +39,11 @@ from ._contract import (
 )
 from ._migrations import MIGRATIONS
 from ._runtime import RepositoryDriver
+from ._telemetry import get_tracer, record_invocation_event, record_repo_failure
 from ._types import (
+    AuditLogEntry,
+    RepositoryFailure,
+    StructuredEvent,
     Agent,
     AgentFilter,
     Channel,
@@ -886,11 +892,66 @@ class SqliteRepositoryDriver(RepositoryDriver):
         self._webhooks = _SqliteWebhookRepo(conn)
 
     @classmethod
-    async def open(cls, db_path: str | Path = ":memory:") -> SqliteRepositoryDriver:
-        """Open (or create) an SQLite database and return a driver instance."""
-        conn = await aiosqlite.connect(str(db_path))
-        conn.row_factory = aiosqlite.Row
-        return cls(conn)
+    async def open(
+        cls,
+        db_path: str | Path = ":memory:",
+        *,
+        audit_log: AuditLog | None = None,
+    ) -> SqliteRepositoryDriver:
+        """Open (or create) a WAL-mode SQLite database and return a driver instance."""
+        _audit = audit_log if audit_log is not None else NoopAuditLog()
+        path_str = str(db_path)
+        now = datetime.now(UTC).isoformat()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "sqlite.open",
+            attributes={"db.system": "sqlite", "db.path": path_str},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="sqlite.invocation",
+                    entity_type="sqlite_driver",
+                    entity_id=path_str,
+                    operation="open",
+                    timestamp=now,
+                ),
+            )
+            conn: aiosqlite.Connection | None = None
+            try:
+                conn = await aiosqlite.connect(path_str)
+                conn.row_factory = aiosqlite.Row
+                await conn.execute("PRAGMA journal_mode=WAL")
+                await conn.execute("PRAGMA busy_timeout=5000")
+                await conn.execute("PRAGMA synchronous=NORMAL")
+                await conn.execute("PRAGMA foreign_keys=ON")
+                return cls(conn)
+            except Exception as exc:
+                if conn is not None:
+                    await conn.close()
+                failure = RepositoryFailure(
+                    code="SQLITE_OPEN_FAILED",
+                    message=str(exc),
+                    entity_type="sqlite_driver",
+                    entity_id=path_str,
+                    operation="open",
+                    timestamp=now,
+                    cause=exc,
+                )
+                record_repo_failure(span, failure)
+                _audit.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="sqlite.driver.open.failed",
+                        entity_type="sqlite_driver",
+                        entity_id=path_str,
+                        operation="open",
+                        timestamp=now,
+                        detail={"code": failure.code, "message": failure.message},
+                    )
+                )
+                raise failure from exc
 
     @property
     def agents(self) -> AgentRepository:

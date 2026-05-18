@@ -24,6 +24,8 @@ Covers RepositoryRuntime (via stub implementations) and SqliteRepositoryDriver
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 import pytest
 from opentelemetry.trace import StatusCode
@@ -985,3 +987,111 @@ class TestSqliteWebhook:
         result = await sqlite_driver.webhooks.get("wh1")
         assert result is not None
         assert result.secret_ref == "secret_ref://vault/my_secret"
+
+
+# ---------------------------------------------------------------------------
+# SqliteRepositoryDriver — WAL open tests
+# ---------------------------------------------------------------------------
+
+
+class TestSqliteWalOpen:
+    async def test_journal_mode_wal_on_file_db(self, tmp_path: Path) -> None:
+        db_file = tmp_path / "test.db"
+        driver = await SqliteRepositoryDriver.open(db_file)
+        try:
+            async with driver._conn.execute("PRAGMA journal_mode") as cur:
+                row = await cur.fetchone()
+            assert row[0] == "wal"
+        finally:
+            await driver.close()
+
+    async def test_foreign_keys_enabled(self) -> None:
+        driver = await SqliteRepositoryDriver.open(":memory:")
+        try:
+            async with driver._conn.execute("PRAGMA foreign_keys") as cur:
+                row = await cur.fetchone()
+            assert row[0] == 1
+        finally:
+            await driver.close()
+
+    async def test_synchronous_normal(self) -> None:
+        driver = await SqliteRepositoryDriver.open(":memory:")
+        try:
+            async with driver._conn.execute("PRAGMA synchronous") as cur:
+                row = await cur.fetchone()
+            assert row[0] == 1  # NORMAL = 1
+        finally:
+            await driver.close()
+
+    async def test_busy_timeout_set(self, tmp_path: Path) -> None:
+        db_file = tmp_path / "test.db"
+        driver = await SqliteRepositoryDriver.open(db_file)
+        try:
+            async with driver._conn.execute("PRAGMA busy_timeout") as cur:
+                row = await cur.fetchone()
+            assert row[0] == 5000
+        finally:
+            await driver.close()
+
+    async def test_emits_span(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from .conftest import MockTracer
+
+        tracer = MockTracer()
+        monkeypatch.setattr("storage_repository._sqlite.get_tracer", lambda: tracer)
+        driver = await SqliteRepositoryDriver.open(":memory:")
+        await driver.close()
+        assert tracer.span.name == "sqlite.open"
+
+    async def test_invocation_event_attached(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from .conftest import MockTracer
+
+        tracer = MockTracer()
+        monkeypatch.setattr("storage_repository._sqlite.get_tracer", lambda: tracer)
+        driver = await SqliteRepositoryDriver.open(":memory:")
+        await driver.close()
+        event_names = [e[0] for e in tracer.span.events]
+        assert "repo.invocation" in event_names
+
+    async def test_failure_raises_repo_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from .conftest import MockTracer
+
+        tracer = MockTracer()
+        monkeypatch.setattr("storage_repository._sqlite.get_tracer", lambda: tracer)
+
+        async def _bad_connect(*_: Any, **__: Any) -> Any:
+            raise OSError("disk full")
+
+        monkeypatch.setattr("aiosqlite.connect", _bad_connect)
+        with pytest.raises(RepositoryFailure) as exc_info:
+            await SqliteRepositoryDriver.open(":memory:")
+        assert exc_info.value.code == "SQLITE_OPEN_FAILED"
+
+    async def test_failure_writes_audit_log(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from .conftest import MockTracer
+
+        tracer = MockTracer()
+        monkeypatch.setattr("storage_repository._sqlite.get_tracer", lambda: tracer)
+        audit = CapturingAuditLog()
+
+        async def _bad_connect(*_: Any, **__: Any) -> Any:
+            raise OSError("disk full")
+
+        monkeypatch.setattr("aiosqlite.connect", _bad_connect)
+        with pytest.raises(RepositoryFailure):
+            await SqliteRepositoryDriver.open(":memory:", audit_log=audit)
+        assert len(audit.entries) == 1
+        assert audit.entries[0].event == "sqlite.driver.open.failed"
+
+    async def test_failure_marks_span_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from .conftest import MockTracer
+
+        tracer = MockTracer()
+        monkeypatch.setattr("storage_repository._sqlite.get_tracer", lambda: tracer)
+
+        async def _bad_connect(*_: Any, **__: Any) -> Any:
+            raise OSError("disk full")
+
+        monkeypatch.setattr("aiosqlite.connect", _bad_connect)
+        with pytest.raises(RepositoryFailure):
+            await SqliteRepositoryDriver.open(":memory:")
+        assert tracer.span.status.status_code == StatusCode.ERROR
