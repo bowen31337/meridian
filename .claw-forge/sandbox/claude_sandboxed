@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/skills-agentski-api-get-v1-skills-lists-installed-skill/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/skills-agentski-system-skill-activation-per-agent-is-ex/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

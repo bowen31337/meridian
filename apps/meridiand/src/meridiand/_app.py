@@ -28,6 +28,7 @@ from ._cron import make_cron_router
 from ._cron_scheduler import run_cron_scheduler_loop
 from ._webhook_sender import run_webhook_sender_loop
 from ._skill_forge import run_skill_forge_loop
+from ._skill_activations import make_skill_activations_router
 from ._skills import make_skills_router
 from ._user_profiles import make_user_profiles_router
 from ._webhooks import make_webhooks_router
@@ -226,6 +227,9 @@ def create_app(
                 )
                 app.include_router(
                     make_skills_router(audit_log=audit_log, storage_root=storage_root)
+                )
+                app.include_router(
+                    make_skill_activations_router(audit_log=audit_log, storage_root=storage_root)
                 )
                 app.include_router(
                     make_user_profiles_router(audit_log=audit_log, storage_root=storage_root)
