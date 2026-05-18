@@ -58,6 +58,37 @@ class ChannelInvalidRequestError(MeridianError):
         return 422
 
 
+class ChannelNotFoundError(MeridianError):
+    def __init__(self, *, channel_id: str, timestamp: str) -> None:
+        super().__init__(
+            code="channel_not_found",
+            message=f"Channel '{channel_id}' not found",
+            timestamp=timestamp,
+        )
+
+    def http_status(self) -> int:
+        return 404
+
+
+class ChannelPairError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="channel_pair_failed",
+            message=message,
+            timestamp=timestamp,
+            cause=cause,
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
 # ---------------------------------------------------------------------------
 # Request model
 # ---------------------------------------------------------------------------
@@ -70,6 +101,10 @@ class ChannelCreateRequest(BaseModel):
     default_user_profile_id: str | None = None
     inbound_policy: Literal["open", "paired_only", "quarantine"] = "open"
     egress_policy: Literal["enabled", "disabled"] = "enabled"
+
+
+class ChannelPairRequest(BaseModel):
+    user_profile_id: str | None = None
 
 
 def _validate_request(body: ChannelCreateRequest) -> ChannelInvalidRequestError | None:
@@ -183,5 +218,86 @@ def make_channels_router(*, audit_log: AuditLog, storage_root: Path) -> APIRoute
                 raise err2
 
         return JSONResponse(content=channel_record, status_code=201)
+
+    @router.post("/v1/channels/{channel_id}/pair", status_code=201)
+    async def pair_channel(channel_id: str, body: ChannelPairRequest) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+        token = f"pair_{uuid.uuid4().hex}"
+
+        with tracer.start_as_current_span(
+            "channel.pair",
+            attributes={"channel.id": channel_id},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="channel.pair.invocation",
+                    code="channel_pair",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                channel_file = channels_dir / f"{channel_id}.json"
+                if not channel_file.exists():
+                    raise ChannelNotFoundError(channel_id=channel_id, timestamp=now)
+
+                pairing_tokens_dir = storage_root / "pairing_tokens"
+                pairing_tokens_dir.mkdir(parents=True, exist_ok=True)
+
+                token_record: dict[str, Any] = {
+                    "token": token,
+                    "channel_id": channel_id,
+                    "user_profile_id": body.user_profile_id,
+                    "redeemed": False,
+                    "created_at": now,
+                }
+                (pairing_tokens_dir / f"{token}.json").write_text(json.dumps(token_record))
+
+            except ChannelNotFoundError as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="channel.pair.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "channel_id": channel_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = ChannelPairError(
+                    message=f"Failed to issue pairing token: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="channel.pair.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={
+                            "channel_id": channel_id,
+                            "message": err2.message,
+                        },
+                    )
+                )
+                raise err2
+
+        response_body: dict[str, Any] = {
+            "token": token_record["token"],
+            "channel_id": token_record["channel_id"],
+            "user_profile_id": token_record["user_profile_id"],
+            "created_at": token_record["created_at"],
+        }
+        return JSONResponse(content=response_body, status_code=201)
 
     return router

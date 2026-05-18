@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/user-profiles-p-api-get-v1-user-profiles-id-returns-a-s/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/user-profiles-p-api-post-v1-channels-id-pair-issues-an/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
