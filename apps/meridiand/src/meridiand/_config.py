@@ -113,6 +113,12 @@ class SkillForgeConfig(BaseModel):
     check_interval_seconds: float = 5.0
 
 
+class AuthConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    bearer_token: str | None = None
+
+
 class MeridianConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -125,6 +131,7 @@ class MeridianConfig(BaseModel):
     cron: CronSchedulerConfig = Field(default_factory=CronSchedulerConfig)
     webhook_sender: WebhookSenderConfig = Field(default_factory=WebhookSenderConfig)
     skill_forge: SkillForgeConfig = Field(default_factory=SkillForgeConfig)
+    auth: AuthConfig = Field(default_factory=AuthConfig)
 
     @field_validator("storage_root", mode="before")
     @classmethod

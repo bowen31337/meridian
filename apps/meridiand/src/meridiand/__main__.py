@@ -57,6 +57,7 @@ def main(argv: list[str] | None = None) -> int:
         storage_root=config.storage_root,
         event_log=services.event_log,
         cors=config.cors,
+        auth_config=config.auth,
     )
 
     bind = config.bind

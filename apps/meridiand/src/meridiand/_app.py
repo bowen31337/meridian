@@ -23,7 +23,7 @@ from ._cancel import make_cancel_router
 from ._checkpoint import make_checkpoint_router
 from ._ci_regression import make_ci_regression_router
 from ._compaction import make_compaction_router, run_compaction_loop
-from ._config import CompactionConfig, CronSchedulerConfig, CorsConfig, SkillForgeConfig, WebhookSenderConfig
+from ._config import AuthConfig, CompactionConfig, CronSchedulerConfig, CorsConfig, SkillForgeConfig, WebhookSenderConfig
 from ._cron import make_cron_router
 from ._cron_scheduler import run_cron_scheduler_loop
 from ._environments import make_environments_router
@@ -47,6 +47,7 @@ from ._phase import make_phase_router
 from ._replay import make_replay_router
 from ._resume import make_resume_router
 from ._wake import make_wake_router
+from ._auth_middleware import AuthMiddleware
 from ._cursor_middleware import CursorPaginationMiddleware
 from ._idempotency_middleware import IdempotencyKeyMiddleware
 from ._openapi_export import make_openapi_export_router
@@ -74,6 +75,7 @@ def create_app(
     cron_scheduler: CronSchedulerConfig | None = None,
     webhook_sender: WebhookSenderConfig | None = None,
     skill_forge: SkillForgeConfig | None = None,
+    auth_config: AuthConfig | None = None,
 ) -> FastAPI:
     """
     Application factory for the meridiand HTTP API.
@@ -85,6 +87,7 @@ def create_app(
     entry and re-raises so the caller receives the error.
     """
     cors_enabled = cors is not None and bool(cors.allow_origins)
+    bearer_token = auth_config.bearer_token if auth_config is not None else None
     tracer = get_tracer()
     with tracer.start_as_current_span(
         "app.factory.create",
@@ -193,6 +196,7 @@ def create_app(
                     allow_headers=cors.allow_headers,
                     allow_credentials=cors.allow_credentials,
                 )
+            app.add_middleware(AuthMiddleware, audit_log=audit_log, bearer_token=bearer_token)
 
             install_error_handler(app, HandlerOptions(audit_log=audit_log))
 
