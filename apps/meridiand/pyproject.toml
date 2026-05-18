@@ -20,6 +20,7 @@ dependencies = [
     "meridian-storage-blob>=0.1.0",
     "meridian-storage-event-log>=0.1.0",
     "meridian-storage-reposit>=0.1.0",
+    "meridian-sdk-provider>=0.1.0",
     "sqlite-vec>=0.1.6",
     "sqlean-py>=3.50.4",
     "jsonschema>=4.0",
@@ -44,6 +45,7 @@ meridian-sdk-capabilities = { workspace = true }
 meridian-storage-blob = { workspace = true }
 meridian-storage-event-log = { workspace = true }
 meridian-storage-reposit = { workspace = true }
+meridian-sdk-provider = { workspace = true }
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -60,4 +62,5 @@ pythonpath = [
     "../../packages/storage-blob/src",
     "../../packages/storage-event-log/src",
     "../../packages/storage-reposit/src",
+    "../../packages/sdk-provider/src",
 ]

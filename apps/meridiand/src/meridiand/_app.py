@@ -13,6 +13,8 @@ from fastapi.middleware.gzip import GZipMiddleware
 from meridian_plugin_loader import PluginLoader
 from storage_event_log import EventLogWriter
 
+from meridian_sdk_provider import ModelRouter
+
 from ._acp import AcpPeerClient, make_acp_router
 from ._cancel import make_cancel_router
 from ._checkpoint import make_checkpoint_router
@@ -21,6 +23,7 @@ from ._config import CorsConfig
 from ._events import make_events_router
 from ._handoff import make_handoff_router
 from ._kb import make_kb_router
+from ._messages import make_messages_router
 from ._parallel_runs import make_parallel_runs_router
 from ._phase import make_phase_router
 from ._replay import make_replay_router
@@ -43,6 +46,7 @@ def create_app(
     acp_targets: dict[str, str] | None = None,
     acp_peer_client: AcpPeerClient | None = None,
     cors: CorsConfig | None = None,
+    model_router: ModelRouter | None = None,
 ) -> FastAPI:
     """
     Application factory for the meridiand HTTP API.
@@ -142,6 +146,10 @@ def create_app(
                         targets=acp_targets,
                         peer_client=acp_peer_client,
                     )
+                )
+            if model_router is not None:
+                app.include_router(
+                    make_messages_router(audit_log=audit_log, model_router=model_router)
                 )
 
             record_create_event(
