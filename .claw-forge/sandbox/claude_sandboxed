@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/sandbox-tool-di-system-tool-definitions-carry-name-desc/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/sandbox-tool-di-system-post-dispatch-json-schema-valida/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

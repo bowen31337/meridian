@@ -8,6 +8,7 @@ src/sdk_sandbox/__init__.py
 src/sdk_sandbox/_audit.py
 src/sdk_sandbox/_contract.py
 src/sdk_sandbox/_runtime.py
+src/sdk_sandbox/_schema.py
 src/sdk_sandbox/_telemetry.py
 src/sdk_sandbox/_types.py
 src/sdk_sandbox/_version.py

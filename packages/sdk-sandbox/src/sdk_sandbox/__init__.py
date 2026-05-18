@@ -15,6 +15,7 @@ from ._telemetry import (
     record_capability_denial,
     record_env_mismatch,
     record_invocation_event,
+    record_output_schema_failure,
     record_sandbox_failure,
     record_tool_timeout,
 )
@@ -60,6 +61,7 @@ __all__ = [
     "record_capability_denial",
     "record_env_mismatch",
     "record_invocation_event",
+    "record_output_schema_failure",
     "record_sandbox_failure",
     "record_tool_timeout",
     # Runtime

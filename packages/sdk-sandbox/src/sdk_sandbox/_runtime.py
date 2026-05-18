@@ -8,11 +8,13 @@ from typing import Any
 
 from ._audit import AuditLog, NoopAuditLog
 from ._contract import ToolDispatcher
+from ._schema import OutputSchemaError, validate_output
 from ._telemetry import (
     get_tracer,
     record_capability_denial,
     record_env_mismatch,
     record_invocation_event,
+    record_output_schema_failure,
     record_sandbox_failure,
     record_tool_timeout,
 )
@@ -276,7 +278,7 @@ class Sandbox:
                 raise failure
 
             try:
-                return await asyncio.wait_for(
+                dispatch_result = await asyncio.wait_for(
                     dispatcher.dispatch(tool, input, context),
                     timeout=tool.timeout_ms / 1000,
                 )
@@ -332,6 +334,57 @@ class Sandbox:
                 )
                 self._fail(span, failure, opts, "sandbox.execute.failed")
                 raise failure from exc
+
+            # Post-dispatch output schema validation.  Only validates successful
+            # results — errors returned by the dispatcher are passed through as-is.
+            if tool.output_schema is not None and not dispatch_result.is_error:
+                try:
+                    validate_output(tool.output_schema, dispatch_result.content)
+                except OutputSchemaError as exc:
+                    offending_path = exc.errors[0] if exc.errors else str(exc)
+                    schema_message = (
+                        f'Output schema validation failed for tool "{name}": '
+                        f"{offending_path}"
+                    )
+                    record_output_schema_failure(
+                        span,
+                        tool_name=name,
+                        session_id=context.session_id,
+                        offending_path=offending_path,
+                        message=schema_message,
+                    )
+                    opts.audit_log.write(
+                        AuditLogEntry(
+                            level="error",
+                            event="sandbox.output.schema_failed",
+                            tool_name=name,
+                            session_id=context.session_id,
+                            timestamp=now,
+                            detail={
+                                "code": "output_validation_failed",
+                                "message": schema_message,
+                                "validation_errors": exc.errors,
+                            },
+                        )
+                    )
+                    if opts.on_error is not None:
+                        opts.on_error(
+                            SandboxFailure(
+                                code="output_validation_failed",
+                                message=schema_message,
+                                tool_name=name,
+                                session_id=context.session_id,
+                                timestamp=now,
+                            )
+                        )
+                    return SandboxResult(
+                        content=schema_message,
+                        is_error=True,
+                        error_code="output_validation_failed",
+                        error_message=schema_message,
+                    )
+
+            return dispatch_result
 
 
 default_sandbox = Sandbox()

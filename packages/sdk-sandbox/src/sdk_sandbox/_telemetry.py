@@ -101,6 +101,30 @@ def record_tool_timeout(
     )
 
 
+def record_output_schema_failure(
+    span: Span,
+    tool_name: str,
+    session_id: str,
+    offending_path: str,
+    message: str,
+) -> None:
+    """
+    Records a post-dispatch output schema failure on the span: sets status to
+    ERROR and adds an "output.schema.failed" event with the offending field path.
+    """
+    span.set_status(Status(StatusCode.ERROR, message))
+    span.add_event(
+        "output.schema.failed",
+        {
+            "tool.name": tool_name,
+            "session.id": session_id,
+            "error.code": "output_validation_failed",
+            "error.message": message,
+            "schema.offending_path": offending_path,
+        },
+    )
+
+
 def record_sandbox_failure(span: Span, failure: SandboxFailure) -> None:
     """
     Records a failure on the span: sets status to ERROR, adds a

@@ -14,9 +14,24 @@ class SchemaValidationError(Exception):
         self.errors: list[str] = errors or []
 
 
+def _fmt_path(absolute_path: Any) -> str:
+    """Format a jsonschema absolute_path deque as a JSON Path string (e.g. $.field[0].key)."""
+    parts = ["$"]
+    for key in absolute_path:
+        if isinstance(key, int):
+            parts.append(f"[{key}]")
+        else:
+            parts.append(f".{key}")
+    return "".join(parts)
+
+
 def _collect_errors(schema: dict[str, Any], data: Any) -> list[str]:
     validator = jsonschema.Draft7Validator(schema)
-    return [e.message for e in sorted(validator.iter_errors(data), key=str)]
+    errors = []
+    for e in sorted(validator.iter_errors(data), key=str):
+        path = _fmt_path(e.absolute_path)
+        errors.append(f"{path}: {e.message}")
+    return errors
 
 
 def validate_input(schema: dict[str, Any], data: Any) -> None:

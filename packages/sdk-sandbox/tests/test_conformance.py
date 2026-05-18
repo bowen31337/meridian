@@ -902,6 +902,207 @@ class TestExecuteTimeout:
 
 
 # ---------------------------------------------------------------------------
+# execute — post-dispatch output schema validation
+# ---------------------------------------------------------------------------
+
+OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "count": {"type": "integer", "minimum": 0},
+        "label": {"type": "string"},
+    },
+    "required": ["count", "label"],
+}
+
+SCHEMA_TOOL = ToolDefinition(
+    name="test.schema",
+    description="Tool with output_schema",
+    input_schema={"type": "object"},
+    handler=InProcessHandler(),
+    output_schema=OUTPUT_SCHEMA,
+)
+
+
+class SchemaDispatcher(ToolDispatcher):
+    """Dispatcher whose returned content is configurable per call."""
+
+    kind = "in_process"
+
+    def __init__(self, content: object) -> None:
+        self._content = content
+
+    async def dispatch(
+        self, tool: ToolDefinition, input: dict, context: ExecutionContext
+    ) -> SandboxResult:
+        return SandboxResult(content=self._content, duration_ms=1.0)
+
+
+def registered_sandbox_with_schema_tool(content: object) -> Sandbox:
+    sb = Sandbox()
+    sb.register_dispatcher(SchemaDispatcher(content))
+    sb.register_tool(SCHEMA_TOOL)
+    return sb
+
+
+class TestOutputSchemaValidation:
+    async def test_valid_output_returns_success(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb = registered_sandbox_with_schema_tool({"count": 3, "label": "ok"})
+        result = await sb.execute("test.schema", {}, CTX, make_options(audit_log))
+        assert result.is_error is False
+        assert audit_log.entries == []
+
+    async def test_invalid_output_returns_is_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb = registered_sandbox_with_schema_tool("not an object")
+        result = await sb.execute("test.schema", {}, CTX, make_options(audit_log))
+        assert result.is_error is True
+
+    async def test_invalid_output_error_code(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb = registered_sandbox_with_schema_tool("not an object")
+        result = await sb.execute("test.schema", {}, CTX, make_options(audit_log))
+        assert result.error_code == "output_validation_failed"
+
+    async def test_error_message_contains_offending_field_path(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """error_message must name the offending field path (JSON Path format)."""
+        sb = registered_sandbox_with_schema_tool({"count": -1, "label": "x"})
+        result = await sb.execute("test.schema", {}, CTX, make_options(audit_log))
+        assert result.error_message is not None
+        assert "$.count" in result.error_message
+
+    async def test_error_message_root_path_for_type_mismatch(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """Root-level type mismatch should report '$' as the offending path."""
+        sb = registered_sandbox_with_schema_tool("not an object")
+        result = await sb.execute("test.schema", {}, CTX, make_options(audit_log))
+        assert result.error_message is not None
+        assert "$" in result.error_message
+
+    async def test_does_not_raise_returns_result(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """Output schema failure must return SandboxResult, never raise."""
+        sb = registered_sandbox_with_schema_tool("bad")
+        result = await sb.execute("test.schema", {}, CTX, make_options(audit_log))
+        assert isinstance(result, SandboxResult)
+
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb = registered_sandbox_with_schema_tool("bad")
+        await sb.execute("test.schema", {}, CTX, make_options(audit_log))
+        assert len(audit_log.entries) == 1
+        entry = audit_log.entries[0]
+        assert entry.level == "error"
+        assert entry.event == "sandbox.output.schema_failed"
+
+    async def test_audit_entry_detail_contains_validation_errors(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb = registered_sandbox_with_schema_tool({"count": -1, "label": "x"})
+        await sb.execute("test.schema", {}, CTX, make_options(audit_log))
+        detail = audit_log.entries[0].detail
+        assert detail is not None
+        assert detail["code"] == "output_validation_failed"
+        assert isinstance(detail["validation_errors"], list)
+        assert any("$.count" in e for e in detail["validation_errors"])
+
+    async def test_span_marked_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        from opentelemetry.trace import StatusCode
+
+        sb = registered_sandbox_with_schema_tool("bad")
+        await sb.execute("test.schema", {}, CTX, make_options(audit_log))
+        assert mock_span.status is not None
+        assert mock_span.status.status_code == StatusCode.ERROR
+
+    async def test_output_schema_failed_event_on_span(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb = registered_sandbox_with_schema_tool("bad")
+        await sb.execute("test.schema", {}, CTX, make_options(audit_log))
+        event_names = [e[0] for e in mock_span.events]
+        assert "output.schema.failed" in event_names
+
+    async def test_output_schema_failed_event_attributes(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb = registered_sandbox_with_schema_tool({"count": -1, "label": "x"})
+        await sb.execute("test.schema", {}, CTX, make_options(audit_log))
+        ev = next(e for e in mock_span.events if e[0] == "output.schema.failed")
+        assert ev[1]["error.code"] == "output_validation_failed"
+        assert ev[1]["tool.name"] == "test.schema"
+        assert "$.count" in ev[1]["schema.offending_path"]
+
+    async def test_on_error_callback_called(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        errors: list[SandboxFailure] = []
+        sb = registered_sandbox_with_schema_tool("bad")
+        await sb.execute("test.schema", {}, CTX, make_options(audit_log, errors))
+        assert len(errors) == 1
+        assert errors[0].code == "output_validation_failed"
+
+    async def test_on_error_callback_message_contains_tool_name(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        errors: list[SandboxFailure] = []
+        sb = registered_sandbox_with_schema_tool("bad")
+        await sb.execute("test.schema", {}, CTX, make_options(audit_log, errors))
+        assert "test.schema" in errors[0].message
+
+    async def test_span_ended_on_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb = registered_sandbox_with_schema_tool("bad")
+        await sb.execute("test.schema", {}, CTX, make_options(audit_log))
+        assert mock_span.ended
+
+    async def test_no_output_schema_skips_validation(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """Tool with output_schema=None must pass through any content without error."""
+        result = await registered_sandbox().execute(
+            "test.echo", {}, CTX, make_options(audit_log)
+        )
+        assert result.is_error is False
+
+    async def test_dispatcher_error_skips_output_validation(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """If the dispatcher returns is_error=True, output schema is not checked."""
+
+        class ErrorDispatcher(ToolDispatcher):
+            kind = "in_process"
+
+            async def dispatch(
+                self, tool: ToolDefinition, input: dict, context: ExecutionContext
+            ) -> SandboxResult:
+                return SandboxResult(
+                    content="handler error",
+                    is_error=True,
+                    error_code="handler_failed",
+                    error_message="handler error",
+                )
+
+        sb = Sandbox()
+        sb.register_dispatcher(ErrorDispatcher())
+        sb.register_tool(SCHEMA_TOOL)
+        result = await sb.execute("test.schema", {}, CTX, make_options(audit_log))
+        # Passes through the handler error without re-wrapping as schema failure
+        assert result.error_code == "handler_failed"
+        assert audit_log.entries == []
+
+
+# ---------------------------------------------------------------------------
 # SandboxResult helpers
 # ---------------------------------------------------------------------------
 

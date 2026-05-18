@@ -68,3 +68,41 @@ class TestValidateOutput:
         with pytest.raises(SchemaValidationError) as exc_info:
             validate_output(_OBJ_SCHEMA, "not an object")
         assert "Output validation failed" in str(exc_info.value)
+
+
+class TestFieldPaths:
+    """Errors must be prefixed with their JSON Path ($.field[0].key)."""
+
+    def test_root_level_error_prefixed_with_dollar(self) -> None:
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_input(_STR_SCHEMA, 42)
+        assert exc_info.value.errors[0].startswith("$:")
+
+    def test_nested_field_path_included(self) -> None:
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_input(_OBJ_SCHEMA, {"name": "x", "count": -1})
+        paths = [e.split(":")[0] for e in exc_info.value.errors]
+        assert "$.count" in paths
+
+    def test_missing_required_field_at_root(self) -> None:
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_input(_OBJ_SCHEMA, {})
+        # Missing required shows at root ($)
+        paths = [e.split(":")[0] for e in exc_info.value.errors]
+        assert any(p == "$" for p in paths)
+
+    def test_array_index_in_path(self) -> None:
+        schema: dict = {
+            "type": "array",
+            "items": {"type": "integer"},
+        }
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_input(schema, [1, "two", 3])
+        paths = [e.split(":")[0] for e in exc_info.value.errors]
+        assert "$[1]" in paths
+
+    def test_output_errors_also_include_paths(self) -> None:
+        with pytest.raises(SchemaValidationError) as exc_info:
+            validate_output(_OBJ_SCHEMA, {"name": "x", "count": -1})
+        paths = [e.split(":")[0] for e in exc_info.value.errors]
+        assert "$.count" in paths
