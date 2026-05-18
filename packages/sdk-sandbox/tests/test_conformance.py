@@ -1103,6 +1103,210 @@ class TestOutputSchemaValidation:
 
 
 # ---------------------------------------------------------------------------
+# execute — pre-dispatch input schema validation
+# ---------------------------------------------------------------------------
+
+INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "count": {"type": "integer", "minimum": 0},
+        "label": {"type": "string"},
+    },
+    "required": ["count", "label"],
+}
+
+INPUT_SCHEMA_TOOL = ToolDefinition(
+    name="test.input_schema",
+    description="Tool with strict input_schema",
+    input_schema=INPUT_SCHEMA,
+    handler=InProcessHandler(),
+)
+
+
+def registered_sandbox_with_input_schema_tool() -> tuple[Sandbox, StubDispatcher]:
+    dispatcher = StubDispatcher()
+    sb = Sandbox()
+    sb.register_dispatcher(dispatcher)
+    sb.register_tool(INPUT_SCHEMA_TOOL)
+    return sb, dispatcher
+
+
+class TestInputSchemaValidation:
+    async def test_valid_input_dispatches_normally(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, dispatcher = registered_sandbox_with_input_schema_tool()
+        result = await sb.execute(
+            "test.input_schema", {"count": 3, "label": "ok"}, CTX, make_options(audit_log)
+        )
+        assert result.is_error is False
+        assert len(dispatcher.calls) == 1
+        assert audit_log.entries == []
+
+    async def test_invalid_input_returns_is_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """Schema failure must return SandboxResult(is_error=True), never raise."""
+        sb, _ = registered_sandbox_with_input_schema_tool()
+        result = await sb.execute(
+            "test.input_schema", "not an object", CTX, make_options(audit_log)  # type: ignore[arg-type]
+        )
+        assert result.is_error is True
+
+    async def test_invalid_input_error_code(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_input_schema_tool()
+        result = await sb.execute(
+            "test.input_schema", {"count": -1, "label": "x"}, CTX, make_options(audit_log)
+        )
+        assert result.error_code == "input_validation_failed"
+
+    async def test_error_message_contains_offending_field_path(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """error_message must name the offending field path (JSON Path format)."""
+        sb, _ = registered_sandbox_with_input_schema_tool()
+        result = await sb.execute(
+            "test.input_schema", {"count": -1, "label": "x"}, CTX, make_options(audit_log)
+        )
+        assert result.error_message is not None
+        assert "$.count" in result.error_message
+
+    async def test_error_message_root_path_for_type_mismatch(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """Root-level type mismatch should report '$' as the offending path."""
+        sb, _ = registered_sandbox_with_input_schema_tool()
+        result = await sb.execute(
+            "test.input_schema", "not an object", CTX, make_options(audit_log)  # type: ignore[arg-type]
+        )
+        assert result.error_message is not None
+        assert "$" in result.error_message
+
+    async def test_does_not_raise_returns_result(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """Input schema failure must return SandboxResult, never raise."""
+        sb, _ = registered_sandbox_with_input_schema_tool()
+        result = await sb.execute(
+            "test.input_schema", "bad", CTX, make_options(audit_log)  # type: ignore[arg-type]
+        )
+        assert isinstance(result, SandboxResult)
+
+    async def test_dispatcher_not_called_on_invalid_input(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """Dispatcher must not be invoked when input schema validation fails."""
+        sb, dispatcher = registered_sandbox_with_input_schema_tool()
+        await sb.execute(
+            "test.input_schema", "bad", CTX, make_options(audit_log)  # type: ignore[arg-type]
+        )
+        assert dispatcher.calls == []
+
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_input_schema_tool()
+        await sb.execute(
+            "test.input_schema", "bad", CTX, make_options(audit_log)  # type: ignore[arg-type]
+        )
+        assert len(audit_log.entries) == 1
+        entry = audit_log.entries[0]
+        assert entry.level == "error"
+        assert entry.event == "sandbox.input.schema_failed"
+
+    async def test_audit_entry_detail_contains_validation_errors(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_input_schema_tool()
+        await sb.execute(
+            "test.input_schema", {"count": -1, "label": "x"}, CTX, make_options(audit_log)
+        )
+        detail = audit_log.entries[0].detail
+        assert detail is not None
+        assert detail["code"] == "input_validation_failed"
+        assert isinstance(detail["validation_errors"], list)
+        assert any("$.count" in e for e in detail["validation_errors"])
+
+    async def test_span_marked_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        from opentelemetry.trace import StatusCode
+
+        sb, _ = registered_sandbox_with_input_schema_tool()
+        await sb.execute(
+            "test.input_schema", "bad", CTX, make_options(audit_log)  # type: ignore[arg-type]
+        )
+        assert mock_span.status is not None
+        assert mock_span.status.status_code == StatusCode.ERROR
+
+    async def test_input_schema_failed_event_on_span(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_input_schema_tool()
+        await sb.execute(
+            "test.input_schema", "bad", CTX, make_options(audit_log)  # type: ignore[arg-type]
+        )
+        event_names = [e[0] for e in mock_span.events]
+        assert "input.schema.failed" in event_names
+
+    async def test_input_schema_failed_event_attributes(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_input_schema_tool()
+        await sb.execute(
+            "test.input_schema", {"count": -1, "label": "x"}, CTX, make_options(audit_log)
+        )
+        ev = next(e for e in mock_span.events if e[0] == "input.schema.failed")
+        assert ev[1]["error.code"] == "input_validation_failed"
+        assert ev[1]["tool.name"] == "test.input_schema"
+        assert "$.count" in ev[1]["schema.offending_path"]
+
+    async def test_on_error_callback_called(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        errors: list[SandboxFailure] = []
+        sb, _ = registered_sandbox_with_input_schema_tool()
+        await sb.execute(
+            "test.input_schema", "bad", CTX, make_options(audit_log, errors)  # type: ignore[arg-type]
+        )
+        assert len(errors) == 1
+        assert errors[0].code == "input_validation_failed"
+
+    async def test_on_error_callback_message_contains_tool_name(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        errors: list[SandboxFailure] = []
+        sb, _ = registered_sandbox_with_input_schema_tool()
+        await sb.execute(
+            "test.input_schema", "bad", CTX, make_options(audit_log, errors)  # type: ignore[arg-type]
+        )
+        assert "test.input_schema" in errors[0].message
+
+    async def test_span_ended_on_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_input_schema_tool()
+        await sb.execute(
+            "test.input_schema", "bad", CTX, make_options(audit_log)  # type: ignore[arg-type]
+        )
+        assert mock_span.ended
+
+    async def test_missing_required_field_returns_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """Missing required field is caught pre-dispatch."""
+        sb, dispatcher = registered_sandbox_with_input_schema_tool()
+        result = await sb.execute(
+            "test.input_schema", {"count": 1}, CTX, make_options(audit_log)
+        )
+        assert result.is_error is True
+        assert result.error_code == "input_validation_failed"
+        assert dispatcher.calls == []
+
+
+# ---------------------------------------------------------------------------
 # SandboxResult helpers
 # ---------------------------------------------------------------------------
 

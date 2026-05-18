@@ -6,6 +6,14 @@ import jsonschema
 import jsonschema.exceptions
 
 
+class InputSchemaError(Exception):
+    """Raised when pre-dispatch input JSON Schema validation fails."""
+
+    def __init__(self, message: str, errors: list[str]) -> None:
+        super().__init__(message)
+        self.errors: list[str] = errors
+
+
 class OutputSchemaError(Exception):
     """Raised when post-dispatch output JSON Schema validation fails."""
 
@@ -25,6 +33,30 @@ def _fmt_path(absolute_path: Any) -> str:
     return "".join(parts)
 
 
+def _collect_errors(schema: dict[str, Any], data: Any) -> list[str]:
+    validator = jsonschema.Draft7Validator(schema)
+    errors: list[str] = []
+    for e in sorted(validator.iter_errors(data), key=str):
+        path = _fmt_path(e.absolute_path)
+        errors.append(f"{path}: {e.message}")
+    return errors
+
+
+def validate_input(schema: dict[str, Any], data: Any) -> None:
+    """Validate *data* against *schema* before the dispatcher is called.
+
+    Raises InputSchemaError with per-error strings formatted as
+    "<json-path>: <message>" so callers can surface the offending field path.
+    Never raises other exceptions — jsonschema failures are always wrapped.
+    """
+    errors = _collect_errors(schema, data)
+    if errors:
+        raise InputSchemaError(
+            f"Input validation failed ({len(errors)} error(s)): {errors[0]}",
+            errors=errors,
+        )
+
+
 def validate_output(schema: dict[str, Any], data: Any) -> None:
     """Validate *data* against *schema* after the dispatcher returns.
 
@@ -32,11 +64,7 @@ def validate_output(schema: dict[str, Any], data: Any) -> None:
     "<json-path>: <message>" so callers can surface the offending field path.
     Never raises other exceptions — jsonschema failures are always wrapped.
     """
-    validator = jsonschema.Draft7Validator(schema)
-    errors: list[str] = []
-    for e in sorted(validator.iter_errors(data), key=str):
-        path = _fmt_path(e.absolute_path)
-        errors.append(f"{path}: {e.message}")
+    errors = _collect_errors(schema, data)
     if errors:
         raise OutputSchemaError(
             f"Output validation failed ({len(errors)} error(s)): {errors[0]}",

@@ -101,6 +101,30 @@ def record_tool_timeout(
     )
 
 
+def record_input_schema_failure(
+    span: Span,
+    tool_name: str,
+    session_id: str,
+    offending_path: str,
+    message: str,
+) -> None:
+    """
+    Records a pre-dispatch input schema failure on the span: sets status to
+    ERROR and adds an "input.schema.failed" event with the offending field path.
+    """
+    span.set_status(Status(StatusCode.ERROR, message))
+    span.add_event(
+        "input.schema.failed",
+        {
+            "tool.name": tool_name,
+            "session.id": session_id,
+            "error.code": "input_validation_failed",
+            "error.message": message,
+            "schema.offending_path": offending_path,
+        },
+    )
+
+
 def record_output_schema_failure(
     span: Span,
     tool_name: str,

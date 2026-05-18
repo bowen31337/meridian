@@ -8,11 +8,12 @@ from typing import Any
 
 from ._audit import AuditLog, NoopAuditLog
 from ._contract import ToolDispatcher
-from ._schema import OutputSchemaError, validate_output
+from ._schema import InputSchemaError, OutputSchemaError, validate_input, validate_output
 from ._telemetry import (
     get_tracer,
     record_capability_denial,
     record_env_mismatch,
+    record_input_schema_failure,
     record_invocation_event,
     record_output_schema_failure,
     record_sandbox_failure,
@@ -263,6 +264,55 @@ class Sandbox:
                     is_error=True,
                     error_code="env_mismatch",
                     error_message=env_message,
+                )
+
+            # Pre-dispatch input schema validation.  Always validates — even
+            # when input_schema is a bare {"type": "object"} — so callers
+            # receive a structured error instead of a silent type mismatch.
+            try:
+                validate_input(tool.input_schema, input)
+            except InputSchemaError as exc:
+                offending_path = exc.errors[0] if exc.errors else str(exc)
+                schema_message = (
+                    f'Input schema validation failed for tool "{name}": '
+                    f"{offending_path}"
+                )
+                record_input_schema_failure(
+                    span,
+                    tool_name=name,
+                    session_id=context.session_id,
+                    offending_path=offending_path,
+                    message=schema_message,
+                )
+                opts.audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="sandbox.input.schema_failed",
+                        tool_name=name,
+                        session_id=context.session_id,
+                        timestamp=now,
+                        detail={
+                            "code": "input_validation_failed",
+                            "message": schema_message,
+                            "validation_errors": exc.errors,
+                        },
+                    )
+                )
+                if opts.on_error is not None:
+                    opts.on_error(
+                        SandboxFailure(
+                            code="input_validation_failed",
+                            message=schema_message,
+                            tool_name=name,
+                            session_id=context.session_id,
+                            timestamp=now,
+                        )
+                    )
+                return SandboxResult(
+                    content=schema_message,
+                    is_error=True,
+                    error_code="input_validation_failed",
+                    error_message=schema_message,
                 )
 
             dispatcher = self._dispatchers.get(tool.handler.kind)
