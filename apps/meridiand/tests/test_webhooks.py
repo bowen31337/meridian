@@ -29,6 +29,17 @@ Tests cover:
   - Span carries webhook.id, webhook.url, webhook.name attributes.
   - create_app wires webhook router when storage_root is supplied.
   - create_app omits webhook route when storage_root is None.
+  - DELETE /v1/webhooks/{id} returns 204 on success.
+  - DELETE response has no body.
+  - DELETE unknown id returns 404 with code "webhook_not_found".
+  - DELETE removes the webhook JSON file.
+  - Second DELETE on same id returns 404.
+  - DELETE not-found writes audit log entry with event "webhook.delete.failed".
+  - Audit entry level is "error", code is "webhook_not_found".
+  - Audit detail includes webhook_id and message.
+  - OTel span "webhook.delete" emitted on success and failure.
+  - Not-found span has ERROR status and webhook.id attribute.
+  - DELETE route present with storage_root, absent without.
 """
 
 from __future__ import annotations
@@ -482,4 +493,177 @@ class TestWebhookRouteWiring:
         app = create_app(FileAuditLog(storage_root))
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post("/v1/webhooks", json=_body())
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# DELETE success
+# ---------------------------------------------------------------------------
+
+
+class TestWebhookDeleteSuccess:
+    def test_delete_returns_204(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        webhook_id = client.post("/v1/webhooks", json=_body()).json()["id"]
+        resp = client.delete(f"/v1/webhooks/{webhook_id}")
+        assert resp.status_code == 204
+
+    def test_delete_response_has_no_body(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        webhook_id = client.post("/v1/webhooks", json=_body()).json()["id"]
+        resp = client.delete(f"/v1/webhooks/{webhook_id}")
+        assert resp.content == b""
+
+
+# ---------------------------------------------------------------------------
+# DELETE not found
+# ---------------------------------------------------------------------------
+
+
+class TestWebhookDeleteNotFound:
+    def test_unknown_id_returns_404(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.delete("/v1/webhooks/webhook_nonexistent")
+        assert resp.status_code == 404
+
+    def test_not_found_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.delete("/v1/webhooks/webhook_nonexistent").json()
+        assert body["error"]["code"] == "webhook_not_found"
+
+    def test_not_found_error_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.delete("/v1/webhooks/webhook_nonexistent").json()
+        assert len(body["error"]["message"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# DELETE persistence
+# ---------------------------------------------------------------------------
+
+
+class TestWebhookDeletePersistence:
+    def test_file_removed_after_delete(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        webhook_id = client.post("/v1/webhooks", json=_body()).json()["id"]
+        client.delete(f"/v1/webhooks/{webhook_id}")
+        assert not (storage_root / "webhooks" / f"{webhook_id}.json").exists()
+
+    def test_second_delete_returns_404(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        webhook_id = client.post("/v1/webhooks", json=_body()).json()["id"]
+        client.delete(f"/v1/webhooks/{webhook_id}")
+        resp = client.delete(f"/v1/webhooks/{webhook_id}")
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# DELETE audit log
+# ---------------------------------------------------------------------------
+
+
+class TestWebhookDeleteAuditLog:
+    def test_not_found_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.delete("/v1/webhooks/webhook_missing")
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "webhook.delete.failed" for r in records)
+
+    def test_not_found_audit_level_is_error(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.delete("/v1/webhooks/webhook_missing")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "webhook.delete.failed"
+        )
+        assert record["level"] == "error"
+
+    def test_not_found_audit_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.delete("/v1/webhooks/webhook_missing")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "webhook.delete.failed"
+        )
+        assert record["code"] == "webhook_not_found"
+
+    def test_not_found_audit_detail_has_webhook_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.delete("/v1/webhooks/webhook_missing")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "webhook.delete.failed"
+        )
+        assert record["detail"]["webhook_id"] == "webhook_missing"
+
+    def test_not_found_audit_detail_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.delete("/v1/webhooks/webhook_missing")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "webhook.delete.failed"
+        )
+        assert len(record["detail"]["message"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# DELETE OTel spans
+# ---------------------------------------------------------------------------
+
+
+class TestWebhookDeleteOtel:
+    def setup_method(self) -> None:
+        _otel_exporter.clear()
+
+    def _client(self, storage_root: Path) -> TestClient:
+        app = create_app(FileAuditLog(storage_root), storage_root=storage_root)
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_success_emits_webhook_delete_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        webhook_id = client.post("/v1/webhooks", json=_body()).json()["id"]
+        _otel_exporter.clear()
+        client.delete(f"/v1/webhooks/{webhook_id}")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "webhook.delete" in span_names
+
+    def test_not_found_emits_webhook_delete_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        client.delete("/v1/webhooks/webhook_missing")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "webhook.delete" in span_names
+
+    def test_not_found_span_has_error_status(self, storage_root: Path) -> None:
+        from opentelemetry.trace import StatusCode
+
+        client = self._client(storage_root)
+        client.delete("/v1/webhooks/webhook_missing")
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("webhook.delete")
+        assert span is not None
+        assert span.status.status_code == StatusCode.ERROR
+
+    def test_success_span_has_webhook_id_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        webhook_id = client.post("/v1/webhooks", json=_body()).json()["id"]
+        _otel_exporter.clear()
+        client.delete(f"/v1/webhooks/{webhook_id}")
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("webhook.delete")
+        assert span is not None
+        assert span.attributes["webhook.id"] == webhook_id
+
+
+# ---------------------------------------------------------------------------
+# DELETE route wiring
+# ---------------------------------------------------------------------------
+
+
+class TestWebhookDeleteRouteWiring:
+    def test_delete_route_present_with_storage_root(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        webhook_id = client.post("/v1/webhooks", json=_body()).json()["id"]
+        resp = client.delete(f"/v1/webhooks/{webhook_id}")
+        assert resp.status_code != 404
+
+    def test_delete_route_absent_without_storage_root(self, storage_root: Path) -> None:
+        app = create_app(FileAuditLog(storage_root))
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.delete("/v1/webhooks/webhook_any")
         assert resp.status_code == 404

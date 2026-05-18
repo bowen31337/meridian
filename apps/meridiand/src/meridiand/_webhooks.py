@@ -17,7 +17,7 @@ from core_errors import (
     record_invocation_event,
 )
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 
@@ -64,6 +64,34 @@ class WebhookInvalidRequestError(MeridianError):
 
     def http_status(self) -> int:
         return 422
+
+
+class WebhookNotFoundError(MeridianError):
+    def __init__(self, *, webhook_id: str, timestamp: str) -> None:
+        super().__init__(
+            code="webhook_not_found",
+            message=f"Webhook '{webhook_id}' not found",
+            timestamp=timestamp,
+        )
+
+    def http_status(self) -> int:
+        return 404
+
+
+class WebhookDeleteError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="webhook_delete_failed", message=message, timestamp=timestamp, cause=cause
+        )
+
+    def http_status(self) -> int:
+        return 500
 
 
 # ---------------------------------------------------------------------------
@@ -202,5 +230,62 @@ def make_webhooks_router(*, audit_log: AuditLog, storage_root: Path) -> APIRoute
                 raise err2
 
         return JSONResponse(content=resource, status_code=201)
+
+    @router.delete("/v1/webhooks/{webhook_id}", status_code=204)
+    async def delete_webhook(webhook_id: str) -> Response:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "webhook.delete",
+            attributes={"webhook.id": webhook_id},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="webhook.delete.invocation",
+                    code="webhook_delete",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                webhook_file = webhooks_dir / f"{webhook_id}.json"
+                if not webhook_file.exists():
+                    raise WebhookNotFoundError(webhook_id=webhook_id, timestamp=now)
+                webhook_file.unlink()
+
+            except WebhookNotFoundError as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="webhook.delete.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={"webhook_id": webhook_id, "message": err.message},
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = WebhookDeleteError(
+                    message=f"Failed to delete webhook: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="webhook.delete.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={"webhook_id": webhook_id, "message": err2.message},
+                    )
+                )
+                raise err2
+
+        return Response(status_code=204)
 
     return router
