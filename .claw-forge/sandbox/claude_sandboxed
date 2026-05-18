@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/skills-agentski-system-skillversionrecord-is-content-ad/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/channels-gatewa-api-post-v1-channels-creates-a-channel/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
