@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -66,6 +66,11 @@ def _event_to_dict(event: SessionEvent) -> dict[str, Any]:
     return d
 
 
+def _format_sse(event: SessionEvent) -> str:
+    data = json.dumps(_event_to_dict(event), separators=(",", ":"))
+    return f"event: {event.type}\nid: {event.seq}\ndata: {data}\n\n"
+
+
 # ---------------------------------------------------------------------------
 # Router factory
 # ---------------------------------------------------------------------------
@@ -80,7 +85,70 @@ def make_events_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
         request: Request,
         since: int = Query(default=-1),
         type: str | None = Query(default=None),
+        stream: bool = Query(default=False),
     ) -> JSONResponse:
+        type_set: set[str] | None = None
+        if type is not None:
+            type_set = {t.strip() for t in type.split(",") if t.strip()}
+
+        # SSE streaming branch
+        if stream:
+            effective_since = since
+            last_event_id = request.headers.get("last-event-id")
+            if last_event_id is not None:
+                try:
+                    effective_since = int(last_event_id)
+                except ValueError:
+                    pass
+
+            now = _now()
+            tracer = get_tracer()
+            with tracer.start_as_current_span(
+                "session.events.stream",
+                attributes={"session.id": session_id, "events.since": effective_since},
+            ) as span:
+                record_invocation_event(
+                    span,
+                    StructuredEvent(
+                        name="session.events.stream.invocation",
+                        code="session_events_stream",
+                        timestamp=now,
+                    ),
+                )
+
+            async def _sse() -> AsyncIterator[str]:
+                reader = LocalEventLogReader(storage_root)
+                try:
+                    async for event in reader.read_events(
+                        session_id, effective_since, follow=False
+                    ):
+                        if type_set is None or event.type in type_set:
+                            yield _format_sse(event)
+                except Exception as exc:
+                    err = SessionEventsError(
+                        message=f"Failed to stream events for session {session_id!r}: {exc}",
+                        timestamp=_now(),
+                        cause=exc,
+                    )
+                    audit_log.write(
+                        AuditLogEntry(
+                            level="error",
+                            event="session.events.stream.failed",
+                            code=err.code,
+                            timestamp=err.timestamp,
+                            detail={
+                                "session_id": session_id,
+                                "since": effective_since,
+                                "message": err.message,
+                            },
+                        )
+                    )
+                    error_data = json.dumps({"code": err.code, "message": err.message})
+                    yield f"event: error\ndata: {error_data}\n\n"
+
+            return StreamingResponse(_sse(), media_type="text/event-stream")  # type: ignore[return-value]
+
+        # Non-streaming branch
         now = _now()
         tracer = get_tracer()
 
@@ -103,10 +171,6 @@ def make_events_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
             try:
                 reader = LocalEventLogReader(storage_root)
                 raw_events = reader.read_after(session_id, since)
-
-                type_set: set[str] | None = None
-                if type is not None:
-                    type_set = {t.strip() for t in type.split(",") if t.strip()}
 
                 events = [e for e in raw_events if type_set is None or e.type in type_set]
 

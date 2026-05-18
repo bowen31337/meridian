@@ -1,4 +1,5 @@
 fastapi>=0.110
+httpx>=0.27
 pydantic>=2.0
 uvicorn[standard]>=0.29
 pyyaml>=6.0
@@ -10,6 +11,7 @@ meridian-sdk-capabilities>=0.1.0
 meridian-storage-blob>=0.1.0
 meridian-storage-event-log>=0.1.0
 meridian-storage-reposit>=0.1.0
+meridian-sdk-provider>=0.1.0
 sqlite-vec>=0.1.6
 sqlean-py>=3.50.4
 jsonschema>=4.0

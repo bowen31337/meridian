@@ -401,6 +401,218 @@ class TestSessionEventsOtel:
 
 
 # ---------------------------------------------------------------------------
+# SSE streaming (?stream=true)
+# ---------------------------------------------------------------------------
+
+
+def _parse_sse_frames(body: str) -> list[dict[str, Any]]:
+    """Parse SSE text body into a list of frame dicts with event/id/data keys."""
+    frames = []
+    for block in body.split("\n\n"):
+        frame: dict[str, Any] = {}
+        for line in block.splitlines():
+            line = line.strip()
+            if line.startswith("event:"):
+                frame["event"] = line[len("event:"):].strip()
+            elif line.startswith("id:"):
+                frame["id"] = line[len("id:"):].strip()
+            elif line.startswith("data:"):
+                frame["data"] = json.loads(line[len("data:"):].strip())
+        if frame:
+            frames.append(frame)
+    return frames
+
+
+class TestSseStream:
+    def test_stream_returns_200(self, storage_root: Path) -> None:
+        _seed(storage_root, "sse-200", "session.created", {})
+        client = _make_client(storage_root)
+        resp = client.get("/v1/sessions/sse-200/events?stream=true")
+        assert resp.status_code == 200
+
+    def test_stream_content_type_is_event_stream(self, storage_root: Path) -> None:
+        _seed(storage_root, "sse-ct", "session.created", {})
+        client = _make_client(storage_root)
+        resp = client.get("/v1/sessions/sse-ct/events?stream=true")
+        assert "text/event-stream" in resp.headers.get("content-type", "")
+
+    def test_stream_frame_has_event_field(self, storage_root: Path) -> None:
+        _seed(storage_root, "sse-ev", "session.created", {})
+        client = _make_client(storage_root)
+        frames = _parse_sse_frames(client.get("/v1/sessions/sse-ev/events?stream=true").text)
+        assert frames[0]["event"] == "session.created"
+
+    def test_stream_frame_has_id_field(self, storage_root: Path) -> None:
+        seqs = _seed_many(storage_root, "sse-id", [("session.created", {})])
+        client = _make_client(storage_root)
+        frames = _parse_sse_frames(client.get("/v1/sessions/sse-id/events?stream=true").text)
+        assert frames[0]["id"] == str(seqs[0])
+
+    def test_stream_frame_has_data_field(self, storage_root: Path) -> None:
+        _seed(storage_root, "sse-data", "session.created", {"k": "v"})
+        client = _make_client(storage_root)
+        frames = _parse_sse_frames(client.get("/v1/sessions/sse-data/events?stream=true").text)
+        assert frames[0]["data"]["data"] == {"k": "v"}
+
+    def test_stream_data_contains_seq(self, storage_root: Path) -> None:
+        _seed(storage_root, "sse-seq", "session.created", {})
+        client = _make_client(storage_root)
+        frames = _parse_sse_frames(client.get("/v1/sessions/sse-seq/events?stream=true").text)
+        assert "seq" in frames[0]["data"]
+        assert isinstance(frames[0]["data"]["seq"], int)
+
+    def test_stream_data_contains_type(self, storage_root: Path) -> None:
+        _seed(storage_root, "sse-type", "session.phase_change", {"before": "created", "after": "running"})
+        client = _make_client(storage_root)
+        frames = _parse_sse_frames(client.get("/v1/sessions/sse-type/events?stream=true").text)
+        assert frames[0]["data"]["type"] == "session.phase_change"
+
+    def test_stream_event_field_matches_data_type(self, storage_root: Path) -> None:
+        _seed(storage_root, "sse-match", "session.created", {})
+        client = _make_client(storage_root)
+        frames = _parse_sse_frames(client.get("/v1/sessions/sse-match/events?stream=true").text)
+        assert frames[0]["event"] == frames[0]["data"]["type"]
+
+    def test_stream_id_field_matches_data_seq(self, storage_root: Path) -> None:
+        _seed(storage_root, "sse-idseq", "session.created", {})
+        client = _make_client(storage_root)
+        frames = _parse_sse_frames(client.get("/v1/sessions/sse-idseq/events?stream=true").text)
+        assert frames[0]["id"] == str(frames[0]["data"]["seq"])
+
+    def test_stream_multiple_events_in_order(self, storage_root: Path) -> None:
+        _seed_many(storage_root, "sse-multi", [
+            ("session.created", {}),
+            ("session.phase_change", {"before": "created", "after": "running"}),
+            ("session.phase_change", {"before": "running", "after": "done"}),
+        ])
+        client = _make_client(storage_root)
+        frames = _parse_sse_frames(client.get("/v1/sessions/sse-multi/events?stream=true").text)
+        seqs = [int(f["id"]) for f in frames]
+        assert seqs == sorted(seqs)
+        assert len(frames) == 3
+
+    def test_stream_empty_for_unknown_session(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        frames = _parse_sse_frames(client.get("/v1/sessions/sse-unknown/events?stream=true").text)
+        assert frames == []
+
+    def test_stream_since_filter(self, storage_root: Path) -> None:
+        seqs = _seed_many(storage_root, "sse-since", [
+            ("session.created", {}),
+            ("session.phase_change", {"before": "created", "after": "running"}),
+        ])
+        client = _make_client(storage_root)
+        frames = _parse_sse_frames(
+            client.get(f"/v1/sessions/sse-since/events?stream=true&since={seqs[0]}").text
+        )
+        assert len(frames) == 1
+        assert all(int(f["id"]) > seqs[0] for f in frames)
+
+    def test_stream_type_filter(self, storage_root: Path) -> None:
+        _seed_many(storage_root, "sse-tf", [
+            ("session.created", {}),
+            ("session.phase_change", {"before": "created", "after": "running"}),
+        ])
+        client = _make_client(storage_root)
+        frames = _parse_sse_frames(
+            client.get("/v1/sessions/sse-tf/events?stream=true&type=session.created").text
+        )
+        assert len(frames) == 1
+        assert all(f["event"] == "session.created" for f in frames)
+
+    def test_stream_last_event_id_resumes_from_watermark(self, storage_root: Path) -> None:
+        seqs = _seed_many(storage_root, "sse-lei", [
+            ("session.created", {}),
+            ("session.phase_change", {"before": "created", "after": "running"}),
+            ("error", {"msg": "oops"}),
+        ])
+        client = _make_client(storage_root)
+        frames = _parse_sse_frames(
+            client.get(
+                "/v1/sessions/sse-lei/events?stream=true",
+                headers={"last-event-id": str(seqs[0])},
+            ).text
+        )
+        assert len(frames) == 2
+        assert all(int(f["id"]) > seqs[0] for f in frames)
+
+    def test_stream_last_event_id_overrides_since(self, storage_root: Path) -> None:
+        seqs = _seed_many(storage_root, "sse-lei-override", [
+            ("session.created", {}),
+            ("session.phase_change", {"before": "created", "after": "running"}),
+        ])
+        client = _make_client(storage_root)
+        # since=-1 would return all events; Last-Event-ID=seqs[0] narrows to events after seqs[0]
+        frames = _parse_sse_frames(
+            client.get(
+                "/v1/sessions/sse-lei-override/events?stream=true&since=-1",
+                headers={"last-event-id": str(seqs[0])},
+            ).text
+        )
+        assert len(frames) == 1
+        assert all(int(f["id"]) > seqs[0] for f in frames)
+
+    def test_stream_failure_yields_error_event(self, storage_root: Path) -> None:
+        bad_file = storage_root / "sse-fail.ndjson"
+        bad_file.write_text("not-valid-json\n")
+        audit = FileAuditLog(storage_root)
+        client = _make_client(storage_root, audit)
+        frames = _parse_sse_frames(
+            client.get("/v1/sessions/sse-fail/events?stream=true").text
+        )
+        assert any(f.get("event") == "error" for f in frames)
+
+    def test_stream_failure_error_event_has_code(self, storage_root: Path) -> None:
+        bad_file = storage_root / "sse-fail-code.ndjson"
+        bad_file.write_text("not-valid-json\n")
+        audit = FileAuditLog(storage_root)
+        client = _make_client(storage_root, audit)
+        frames = _parse_sse_frames(
+            client.get("/v1/sessions/sse-fail-code/events?stream=true").text
+        )
+        err_frame = next(f for f in frames if f.get("event") == "error")
+        assert err_frame["data"]["code"] == "session_events_failed"
+
+    def test_stream_failure_writes_audit_log(self, storage_root: Path) -> None:
+        bad_file = storage_root / "sse-fail-audit.ndjson"
+        bad_file.write_text("not-valid-json\n")
+        audit = FileAuditLog(storage_root)
+        client = _make_client(storage_root, audit)
+        client.get("/v1/sessions/sse-fail-audit/events?stream=true")
+        records = _read_audit(storage_root)
+        assert any(r.get("event") == "session.events.stream.failed" for r in records)
+
+    def test_stream_failure_audit_has_session_id(self, storage_root: Path) -> None:
+        bad_file = storage_root / "sse-fail-sid.ndjson"
+        bad_file.write_text("not-valid-json\n")
+        audit = FileAuditLog(storage_root)
+        client = _make_client(storage_root, audit)
+        client.get("/v1/sessions/sse-fail-sid/events?stream=true")
+        records = _read_audit(storage_root)
+        rec = next(r for r in records if r.get("event") == "session.events.stream.failed")
+        assert rec["detail"]["session_id"] == "sse-fail-sid"
+
+    def test_stream_failure_audit_has_since(self, storage_root: Path) -> None:
+        bad_file = storage_root / "sse-fail-snc.ndjson"
+        bad_file.write_text("not-valid-json\n")
+        audit = FileAuditLog(storage_root)
+        client = _make_client(storage_root, audit)
+        client.get("/v1/sessions/sse-fail-snc/events?stream=true&since=7")
+        records = _read_audit(storage_root)
+        rec = next(r for r in records if r.get("event") == "session.events.stream.failed")
+        assert rec["detail"]["since"] == 7
+
+    def test_stream_otel_span_emitted(self, storage_root: Path) -> None:
+        from tests._otel_shared import otel_exporter as _otel_exporter
+        _otel_exporter.clear()
+        _seed(storage_root, "sse-otel", "session.created", {})
+        client = _make_client(storage_root)
+        client.get("/v1/sessions/sse-otel/events?stream=true")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "session.events.stream" in span_names
+
+
+# ---------------------------------------------------------------------------
 # Router wiring tests
 # ---------------------------------------------------------------------------
 

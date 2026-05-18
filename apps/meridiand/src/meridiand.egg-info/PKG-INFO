@@ -4,6 +4,7 @@ Version: 0.1.0
 Summary: Meridian system daemon
 Requires-Python: >=3.11
 Requires-Dist: fastapi>=0.110
+Requires-Dist: httpx>=0.27
 Requires-Dist: pydantic>=2.0
 Requires-Dist: uvicorn[standard]>=0.29
 Requires-Dist: pyyaml>=6.0
@@ -15,6 +16,7 @@ Requires-Dist: meridian-sdk-capabilities>=0.1.0
 Requires-Dist: meridian-storage-blob>=0.1.0
 Requires-Dist: meridian-storage-event-log>=0.1.0
 Requires-Dist: meridian-storage-reposit>=0.1.0
+Requires-Dist: meridian-sdk-provider>=0.1.0
 Requires-Dist: sqlite-vec>=0.1.6
 Requires-Dist: sqlean-py>=3.50.4
 Requires-Dist: jsonschema>=4.0

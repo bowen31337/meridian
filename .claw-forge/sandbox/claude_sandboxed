@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/sessions-event--system-property-test-suite-asserts-ever/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/sessions-event--api-get-v1-sessions-id-events-stream-tr/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
