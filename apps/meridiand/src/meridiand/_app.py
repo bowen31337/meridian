@@ -9,6 +9,7 @@ from core_errors import AuditLog, HandlerOptions, install_error_handler
 from fastapi import FastAPI
 from meridian_plugin_loader import PluginLoader
 
+from ._acp import AcpPeerClient, make_acp_router
 from ._checkpoint import make_checkpoint_router
 from ._ci_regression import make_ci_regression_router
 from ._kb import make_kb_router
@@ -24,6 +25,8 @@ def create_app(
     audit_log: AuditLog,
     plugin_loader: PluginLoader | None = None,
     storage_root: Path | None = None,
+    acp_targets: dict[str, str] | None = None,
+    acp_peer_client: AcpPeerClient | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -58,5 +61,13 @@ def create_app(
         )
         app.include_router(
             make_ci_regression_router(audit_log=audit_log, storage_root=storage_root)
+        )
+    if acp_targets is not None:
+        app.include_router(
+            make_acp_router(
+                audit_log=audit_log,
+                targets=acp_targets,
+                peer_client=acp_peer_client,
+            )
         )
     return app
