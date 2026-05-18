@@ -15,6 +15,7 @@ Requires-Dist: meridian-storage-blob>=0.1.0
 Requires-Dist: meridian-storage-event-log>=0.1.0
 Requires-Dist: sqlite-vec>=0.1.6
 Requires-Dist: sqlean-py>=3.50.4
+Requires-Dist: jsonschema>=4.0
 Provides-Extra: dev
 Requires-Dist: pytest>=8; extra == "dev"
 Requires-Dist: pytest-asyncio>=0.23; extra == "dev"
