@@ -31,6 +31,7 @@ from ._memory_stores import make_memory_stores_router
 from ._vaults import make_vaults_router
 from ._webhook_sender import run_webhook_sender_loop
 from ._skill_forge import run_skill_forge_loop
+from ._agents import make_agents_router
 from ._channels import make_channels_router
 from ._skill_activations import make_skill_activations_router
 from ._skills import make_skills_router
@@ -238,6 +239,9 @@ def create_app(
                 )
                 app.include_router(
                     make_skill_activations_router(audit_log=audit_log, storage_root=storage_root)
+                )
+                app.include_router(
+                    make_agents_router(audit_log=audit_log, storage_root=storage_root)
                 )
                 app.include_router(
                     make_channels_router(audit_log=audit_log, storage_root=storage_root)
