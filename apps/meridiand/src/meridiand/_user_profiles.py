@@ -19,6 +19,8 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from fastapi.responses import Response
 from pydantic import BaseModel
+from sdk_capabilities import CapabilityParseError
+from sdk_capabilities import parse as parse_capability
 
 
 def _now() -> str:
@@ -114,8 +116,27 @@ class UserProfileDeleteError(MeridianError):
         return 500
 
 
+class UserProfileUpdateError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="user_profile_update_failed",
+            message=message,
+            timestamp=timestamp,
+            cause=cause,
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
 # ---------------------------------------------------------------------------
-# Request model
+# Request models
 # ---------------------------------------------------------------------------
 
 
@@ -124,6 +145,12 @@ class UserProfileCreateRequest(BaseModel):
     display_name: str | None = None
     email: str | None = None
     metadata: dict[str, Any] | None = None
+
+
+class UserProfileUpdateRequest(BaseModel):
+    display_name: str | None = None
+    capabilities: list[str] | None = None
+    memories: list[str] | None = None
 
 
 def _validate_request(body: UserProfileCreateRequest) -> UserProfileInvalidRequestError | None:
@@ -182,6 +209,8 @@ def make_user_profiles_router(*, audit_log: AuditLog, storage_root: Path) -> API
                     "display_name": body.display_name,
                     "email": body.email,
                     "metadata": body.metadata,
+                    "capabilities": [],
+                    "memories": [],
                     "is_primary": is_primary,
                     "created_at": now,
                     "updated_at": now,
@@ -320,5 +349,93 @@ def make_user_profiles_router(*, audit_log: AuditLog, storage_root: Path) -> API
                 raise err2
 
         return Response(status_code=204)
+
+    @router.patch("/v1/user_profiles/{user_profile_id}", status_code=200)
+    async def update_user_profile(user_profile_id: str, body: UserProfileUpdateRequest) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "user_profile.update",
+            attributes={"user_profile.id": user_profile_id},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="user_profile.update.invocation",
+                    code="user_profile_update",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                profile_file = profiles_dir / f"{user_profile_id}.json"
+                if not profile_file.exists():
+                    raise UserProfileNotFoundError(
+                        user_profile_id=user_profile_id, timestamp=now
+                    )
+
+                profile = json.loads(profile_file.read_text())
+                fields_set = body.model_fields_set
+
+                if "display_name" in fields_set:
+                    profile["display_name"] = body.display_name
+
+                if "capabilities" in fields_set:
+                    caps = body.capabilities or []
+                    for cap in caps:
+                        try:
+                            parse_capability(cap)
+                        except CapabilityParseError as exc:
+                            raise UserProfileInvalidRequestError(
+                                message=f"Invalid capability '{cap}': {exc}",
+                                timestamp=now,
+                            ) from exc
+                    profile["capabilities"] = caps
+
+                if "memories" in fields_set:
+                    profile["memories"] = body.memories or []
+
+                profile["updated_at"] = now
+                profile_file.write_text(json.dumps(profile))
+
+            except (UserProfileNotFoundError, UserProfileInvalidRequestError) as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="user_profile.update.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "user_profile_id": user_profile_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = UserProfileUpdateError(
+                    message=f"Failed to update user profile: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="user_profile.update.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={
+                            "user_profile_id": user_profile_id,
+                            "message": err2.message,
+                        },
+                    )
+                )
+                raise err2
+
+        return JSONResponse(content=profile, status_code=200)
 
     return router

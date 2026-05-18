@@ -42,6 +42,25 @@ Tests cover:
   - OTel span set to ERROR status on DELETE failure.
   - Span carries user_profile.id attribute on DELETE.
   - DELETE route present with storage_root; absent without.
+  - PATCH /v1/user_profiles/{id} returns 200 with updated record.
+  - PATCH updates display_name when provided.
+  - PATCH updates capabilities when provided.
+  - PATCH updates memories when provided.
+  - PATCH only updates fields present in the request body.
+  - PATCH updates updated_at but not created_at.
+  - PATCH returns 404 with code "user_profile_not_found" for unknown id.
+  - PATCH returns 422 with code "user_profile_invalid_request" for invalid capability.
+  - PATCH persists changes to storage.
+  - PATCH with empty capabilities clears the capabilities list.
+  - PATCH with empty memories clears the memories list.
+  - PATCH failure writes audit log entry with event "user_profile.update.failed".
+  - PATCH audit entry level is "error" on failure.
+  - PATCH audit detail includes user_profile_id and message.
+  - OTel span "user_profile.update" emitted on success.
+  - OTel span "user_profile.update" emitted on failure.
+  - OTel span set to ERROR status on PATCH failure.
+  - Span carries user_profile.id attribute on PATCH.
+  - PATCH route present with storage_root; absent without.
 """
 
 from __future__ import annotations
@@ -685,4 +704,325 @@ class TestUserProfileDeleteRouteWiring:
         app = create_app(FileAuditLog(storage_root))
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.delete("/v1/user_profiles/user_any")
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# PATCH success
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileUpdateSuccess:
+    def test_patch_returns_200(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        resp = client.patch(f"/v1/user_profiles/{user_id}", json={"display_name": "Alice"})
+        assert resp.status_code == 200
+
+    def test_patch_updates_display_name(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        body = client.patch(f"/v1/user_profiles/{user_id}", json={"display_name": "Alice"}).json()
+        assert body["display_name"] == "Alice"
+
+    def test_patch_clears_display_name(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body(display_name="Alice")).json()["id"]
+        body = client.patch(f"/v1/user_profiles/{user_id}", json={"display_name": None}).json()
+        assert body["display_name"] is None
+
+    def test_patch_updates_capabilities(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        caps = ["fs.read[/workspace/**]", "net.fetch[api.example.com]"]
+        body = client.patch(f"/v1/user_profiles/{user_id}", json={"capabilities": caps}).json()
+        assert body["capabilities"] == caps
+
+    def test_patch_updates_memories(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        mems = ["Prefers dark mode", "Works in UTC+9"]
+        body = client.patch(f"/v1/user_profiles/{user_id}", json={"memories": mems}).json()
+        assert body["memories"] == mems
+
+    def test_patch_omitted_field_unchanged(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body(display_name="Alice")).json()["id"]
+        body = client.patch(f"/v1/user_profiles/{user_id}", json={"memories": ["hello"]}).json()
+        assert body["display_name"] == "Alice"
+
+    def test_patch_updates_updated_at(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        created = client.post("/v1/user_profiles", json=_body()).json()
+        body = client.patch(
+            f"/v1/user_profiles/{created['id']}", json={"display_name": "Bob"}
+        ).json()
+        assert body["updated_at"] >= created["updated_at"]
+
+    def test_patch_does_not_change_created_at(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        created = client.post("/v1/user_profiles", json=_body()).json()
+        body = client.patch(
+            f"/v1/user_profiles/{created['id']}", json={"display_name": "Bob"}
+        ).json()
+        assert body["created_at"] == created["created_at"]
+
+    def test_patch_response_includes_all_fields(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        body = client.patch(f"/v1/user_profiles/{user_id}", json={"display_name": "X"}).json()
+        for field in ("id", "username", "display_name", "capabilities", "memories",
+                      "is_primary", "created_at", "updated_at"):
+            assert field in body
+
+    def test_patch_empty_capabilities_clears_list(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        client.patch(f"/v1/user_profiles/{user_id}", json={"capabilities": ["exec.shell"]})
+        body = client.patch(f"/v1/user_profiles/{user_id}", json={"capabilities": []}).json()
+        assert body["capabilities"] == []
+
+    def test_patch_empty_memories_clears_list(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        client.patch(f"/v1/user_profiles/{user_id}", json={"memories": ["foo"]})
+        body = client.patch(f"/v1/user_profiles/{user_id}", json={"memories": []}).json()
+        assert body["memories"] == []
+
+
+# ---------------------------------------------------------------------------
+# PATCH persistence
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileUpdatePersistence:
+    def test_patch_writes_updated_profile_to_disk(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        client.patch(f"/v1/user_profiles/{user_id}", json={"display_name": "Persisted"})
+        resource = _profile_resource(storage_root, user_id)
+        assert resource["display_name"] == "Persisted"
+
+    def test_patch_persists_capabilities(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        caps = ["kb.read[docs]", "memory.write[user]"]
+        client.patch(f"/v1/user_profiles/{user_id}", json={"capabilities": caps})
+        resource = _profile_resource(storage_root, user_id)
+        assert resource["capabilities"] == caps
+
+    def test_patch_persists_memories(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        mems = ["Uses vim", "Prefers Python"]
+        client.patch(f"/v1/user_profiles/{user_id}", json={"memories": mems})
+        resource = _profile_resource(storage_root, user_id)
+        assert resource["memories"] == mems
+
+
+# ---------------------------------------------------------------------------
+# PATCH validation
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileUpdateValidation:
+    def test_invalid_capability_returns_422(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        resp = client.patch(
+            f"/v1/user_profiles/{user_id}", json={"capabilities": ["NOT VALID"]}
+        )
+        assert resp.status_code == 422
+
+    def test_invalid_capability_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        body = client.patch(
+            f"/v1/user_profiles/{user_id}", json={"capabilities": ["bad cap!"]}
+        ).json()
+        assert body["error"]["code"] == "user_profile_invalid_request"
+
+    def test_invalid_capability_error_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        body = client.patch(
+            f"/v1/user_profiles/{user_id}", json={"capabilities": ["bad!"]}
+        ).json()
+        assert len(body["error"]["message"]) > 0
+
+    def test_one_invalid_capability_in_list_returns_422(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        resp = client.patch(
+            f"/v1/user_profiles/{user_id}",
+            json={"capabilities": ["fs.read[*]", "INVALID ENTRY"]},
+        )
+        assert resp.status_code == 422
+
+    def test_invalid_capability_does_not_update_profile(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        client.patch(
+            f"/v1/user_profiles/{user_id}", json={"capabilities": ["INVALID"]}
+        )
+        resource = _profile_resource(storage_root, user_id)
+        assert resource["capabilities"] == []
+
+
+# ---------------------------------------------------------------------------
+# PATCH not found
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileUpdateNotFound:
+    def test_unknown_id_returns_404(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.patch("/v1/user_profiles/user_nonexistent", json={"display_name": "X"})
+        assert resp.status_code == 404
+
+    def test_not_found_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.patch(
+            "/v1/user_profiles/user_nonexistent", json={"display_name": "X"}
+        ).json()
+        assert body["error"]["code"] == "user_profile_not_found"
+
+    def test_not_found_error_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.patch(
+            "/v1/user_profiles/user_nonexistent", json={"display_name": "X"}
+        ).json()
+        assert len(body["error"]["message"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# PATCH audit log
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileUpdateAuditLog:
+    def test_not_found_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.patch("/v1/user_profiles/user_missing", json={"display_name": "X"})
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "user_profile.update.failed" for r in records)
+
+    def test_failure_audit_level_is_error(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.patch("/v1/user_profiles/user_missing", json={"display_name": "X"})
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "user_profile.update.failed"
+        )
+        assert record["level"] == "error"
+
+    def test_not_found_audit_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.patch("/v1/user_profiles/user_missing", json={"display_name": "X"})
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "user_profile.update.failed"
+        )
+        assert record["code"] == "user_profile_not_found"
+
+    def test_audit_detail_has_user_profile_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.patch("/v1/user_profiles/user_missing", json={"display_name": "X"})
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "user_profile.update.failed"
+        )
+        assert record["detail"]["user_profile_id"] == "user_missing"
+
+    def test_audit_detail_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.patch("/v1/user_profiles/user_missing", json={"display_name": "X"})
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "user_profile.update.failed"
+        )
+        assert len(record["detail"]["message"]) > 0
+
+    def test_invalid_capability_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        client.patch(f"/v1/user_profiles/{user_id}", json={"capabilities": ["BAD CAP"]})
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "user_profile.update.failed" for r in records)
+
+    def test_invalid_capability_audit_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        client.patch(f"/v1/user_profiles/{user_id}", json={"capabilities": ["BAD CAP"]})
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "user_profile.update.failed"
+        )
+        assert record["code"] == "user_profile_invalid_request"
+
+
+# ---------------------------------------------------------------------------
+# PATCH OTel spans
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileUpdateOtel:
+    def setup_method(self) -> None:
+        _otel_exporter.clear()
+
+    def _client(self, storage_root: Path) -> TestClient:
+        app = create_app(FileAuditLog(storage_root), storage_root=storage_root)
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_success_emits_update_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        _otel_exporter.clear()
+        client.patch(f"/v1/user_profiles/{user_id}", json={"display_name": "Alice"})
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "user_profile.update" in span_names
+
+    def test_failure_emits_update_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        client.patch("/v1/user_profiles/user_missing", json={"display_name": "X"})
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "user_profile.update" in span_names
+
+    def test_failure_span_has_error_status(self, storage_root: Path) -> None:
+        from opentelemetry.trace import StatusCode
+
+        client = self._client(storage_root)
+        client.patch("/v1/user_profiles/user_missing", json={"display_name": "X"})
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("user_profile.update")
+        assert span is not None
+        assert span.status.status_code == StatusCode.ERROR
+
+    def test_success_span_has_user_profile_id_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        _otel_exporter.clear()
+        client.patch(f"/v1/user_profiles/{user_id}", json={"display_name": "Alice"})
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("user_profile.update")
+        assert span is not None
+        assert span.attributes["user_profile.id"] == user_id
+
+
+# ---------------------------------------------------------------------------
+# PATCH route wiring
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileUpdateRouteWiring:
+    def test_patch_route_present_with_storage_root(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        resp = client.patch(f"/v1/user_profiles/{user_id}", json={"display_name": "X"})
+        assert resp.status_code != 404
+
+    def test_patch_route_absent_without_storage_root(self, storage_root: Path) -> None:
+        app = create_app(FileAuditLog(storage_root))
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.patch("/v1/user_profiles/user_any", json={"display_name": "X"})
         assert resp.status_code == 404

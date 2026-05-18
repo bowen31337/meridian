@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/user-profiles-p-api-delete-v1-user-profiles-id-removes/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/user-profiles-p-api-patch-v1-user-profiles-id-updates-d/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
