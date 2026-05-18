@@ -557,3 +557,279 @@ class TestAcpOutboundOtel:
         span = spans.get("acp.outbound")
         assert span is not None
         assert span.attributes["acp.target"] == "hermes"
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/x/acp/outbound (top-level, no session)
+# ---------------------------------------------------------------------------
+
+
+def _make_toplevel_body(
+    *,
+    target: str = "hermes",
+    capabilities: list[str] | None = None,
+    message: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "target": target,
+        "capabilities": (
+            capabilities if capabilities is not None else [f"acp.outbound[{target}]"]
+        ),
+        "message": message if message is not None else {"action": "ping"},
+    }
+
+
+class TestAcpOutboundTopLevelSuccess:
+    def test_returns_200_on_valid_call(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/acp/outbound", json=_make_toplevel_body())
+        assert resp.status_code == 200
+
+    def test_response_has_call_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/acp/outbound", json=_make_toplevel_body()).json()
+        assert "call_id" in body
+        assert isinstance(body["call_id"], str)
+        assert len(body["call_id"]) > 0
+
+    def test_response_has_target(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/acp/outbound", json=_make_toplevel_body()).json()
+        assert body["target"] == "hermes"
+
+    def test_response_status_is_delivered(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/acp/outbound", json=_make_toplevel_body()).json()
+        assert body["status"] == "delivered"
+
+    def test_response_includes_peer_response(self, storage_root: Path) -> None:
+        peer = FakeAcpPeerClient(responses={_HERMES_URL: {"ack": True}})
+        client = _make_client(storage_root, peer_client=peer)
+        body = client.post("/v1/x/acp/outbound", json=_make_toplevel_body()).json()
+        assert body["response"] == {"ack": True}
+
+    def test_response_has_no_session_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/acp/outbound", json=_make_toplevel_body()).json()
+        assert "session_id" not in body
+
+    def test_call_ids_are_unique(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        id1 = client.post("/v1/x/acp/outbound", json=_make_toplevel_body()).json()["call_id"]
+        id2 = client.post("/v1/x/acp/outbound", json=_make_toplevel_body()).json()["call_id"]
+        assert id1 != id2
+
+    def test_unrestricted_cap_covers_any_target(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post(
+            "/v1/x/acp/outbound",
+            json=_make_toplevel_body(target="hermes", capabilities=["acp.outbound"]),
+        )
+        assert resp.status_code == 200
+
+    def test_exact_target_cap_accepted(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post(
+            "/v1/x/acp/outbound",
+            json=_make_toplevel_body(target="openclaw", capabilities=["acp.outbound[openclaw]"]),
+        )
+        assert resp.status_code == 200
+
+
+class TestAcpOutboundTopLevelDenial:
+    def test_returns_403_when_no_acp_outbound_cap(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post(
+            "/v1/x/acp/outbound",
+            json=_make_toplevel_body(capabilities=["exec.shell", "fs.read"]),
+        )
+        assert resp.status_code == 403
+
+    def test_error_code_is_acp_outbound_denied(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post(
+            "/v1/x/acp/outbound",
+            json=_make_toplevel_body(capabilities=["exec.shell"]),
+        ).json()
+        assert body["error"]["code"] == "acp_outbound_denied"
+
+    def test_wrong_target_cap_rejected(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post(
+            "/v1/x/acp/outbound",
+            json=_make_toplevel_body(target="hermes", capabilities=["acp.outbound[openclaw]"]),
+        )
+        assert resp.status_code == 403
+
+    def test_empty_caps_denied(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post(
+            "/v1/x/acp/outbound",
+            json=_make_toplevel_body(capabilities=[]),
+        )
+        assert resp.status_code == 403
+
+    def test_returns_403_on_invalid_cap_string(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post(
+            "/v1/x/acp/outbound",
+            json=_make_toplevel_body(capabilities=["INVALID!!"]),
+        )
+        assert resp.status_code == 403
+
+    def test_returns_403_for_unregistered_target(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post(
+            "/v1/x/acp/outbound",
+            json=_make_toplevel_body(target="unknown", capabilities=["acp.outbound[unknown]"]),
+        )
+        assert resp.status_code == 403
+
+    def test_denial_writes_audit_log(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post(
+            "/v1/x/acp/outbound",
+            json=_make_toplevel_body(capabilities=["exec.shell"]),
+        )
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "acp.outbound.denied" for r in records)
+
+    def test_denial_audit_detail_has_target(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post(
+            "/v1/x/acp/outbound",
+            json=_make_toplevel_body(target="hermes", capabilities=["exec.shell"]),
+        )
+        record = next(r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.denied")
+        assert record["detail"]["target"] == "hermes"
+
+    def test_denial_audit_detail_has_call_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post(
+            "/v1/x/acp/outbound",
+            json=_make_toplevel_body(capabilities=["exec.shell"]),
+        )
+        record = next(r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.denied")
+        assert "call_id" in record["detail"]
+
+    def test_denial_audit_detail_has_no_session_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post(
+            "/v1/x/acp/outbound",
+            json=_make_toplevel_body(capabilities=["exec.shell"]),
+        )
+        record = next(r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.denied")
+        assert "session_id" not in record["detail"]
+
+
+class TestAcpOutboundTopLevelTransportFailure:
+    def test_returns_502_on_peer_error(self, storage_root: Path) -> None:
+        peer = FakeAcpPeerClient(error_urls={_HERMES_URL})
+        client = _make_client(storage_root, peer_client=peer)
+        resp = client.post("/v1/x/acp/outbound", json=_make_toplevel_body(target="hermes"))
+        assert resp.status_code == 502
+
+    def test_transport_error_code_is_acp_outbound_failed(self, storage_root: Path) -> None:
+        peer = FakeAcpPeerClient(error_urls={_HERMES_URL})
+        client = _make_client(storage_root, peer_client=peer)
+        body = client.post("/v1/x/acp/outbound", json=_make_toplevel_body(target="hermes")).json()
+        assert body["error"]["code"] == "acp_outbound_failed"
+
+    def test_transport_failure_writes_audit_log(self, storage_root: Path) -> None:
+        peer = FakeAcpPeerClient(error_urls={_HERMES_URL})
+        client = _make_client(storage_root, peer_client=peer)
+        client.post("/v1/x/acp/outbound", json=_make_toplevel_body(target="hermes"))
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "acp.outbound.failed" for r in records)
+
+    def test_transport_failure_audit_detail_has_call_id(self, storage_root: Path) -> None:
+        peer = FakeAcpPeerClient(error_urls={_HERMES_URL})
+        client = _make_client(storage_root, peer_client=peer)
+        client.post("/v1/x/acp/outbound", json=_make_toplevel_body(target="hermes"))
+        record = next(r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.failed")
+        assert "call_id" in record["detail"]
+
+
+class TestAcpOutboundTopLevelSchema:
+    def test_missing_target_returns_422(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post(
+            "/v1/x/acp/outbound",
+            json={"capabilities": ["acp.outbound[hermes]"], "message": {}},
+        )
+        assert resp.status_code == 422
+
+    def test_missing_capabilities_returns_422(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post(
+            "/v1/x/acp/outbound",
+            json={"target": "hermes", "message": {}},
+        )
+        assert resp.status_code == 422
+
+    def test_missing_message_returns_422(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post(
+            "/v1/x/acp/outbound",
+            json={"target": "hermes", "capabilities": ["acp.outbound[hermes]"]},
+        )
+        assert resp.status_code == 422
+
+
+class TestAcpOutboundTopLevelOtel:
+    def setup_method(self) -> None:
+        _otel_exporter.clear()
+
+    def _make_client(self, storage_root: Path, peer_client: FakeAcpPeerClient | None = None) -> TestClient:
+        audit = FileAuditLog(storage_root)
+        app = create_app(
+            audit,
+            acp_targets=_DEFAULT_TARGETS,
+            acp_peer_client=peer_client if peer_client is not None else FakeAcpPeerClient(),
+        )
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_success_emits_acp_outbound_span(self, storage_root: Path) -> None:
+        client = self._make_client(storage_root)
+        client.post("/v1/x/acp/outbound", json=_make_toplevel_body())
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "acp.outbound" in span_names
+
+    def test_denial_span_has_error_status(self, storage_root: Path) -> None:
+        from opentelemetry.trace import StatusCode
+
+        client = self._make_client(storage_root)
+        client.post(
+            "/v1/x/acp/outbound",
+            json=_make_toplevel_body(capabilities=["exec.shell"]),
+        )
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("acp.outbound")
+        assert span is not None
+        assert span.status.status_code == StatusCode.ERROR
+
+    def test_transport_failure_span_has_error_status(self, storage_root: Path) -> None:
+        from opentelemetry.trace import StatusCode
+
+        peer = FakeAcpPeerClient(error_urls={_HERMES_URL})
+        client = self._make_client(storage_root, peer_client=peer)
+        client.post("/v1/x/acp/outbound", json=_make_toplevel_body(target="hermes"))
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("acp.outbound")
+        assert span is not None
+        assert span.status.status_code == StatusCode.ERROR
+
+    def test_span_has_acp_target_attribute(self, storage_root: Path) -> None:
+        client = self._make_client(storage_root)
+        client.post("/v1/x/acp/outbound", json=_make_toplevel_body(target="hermes"))
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("acp.outbound")
+        assert span is not None
+        assert span.attributes["acp.target"] == "hermes"
+
+    def test_no_acp_targets_returns_404(self, storage_root: Path) -> None:
+        audit = FileAuditLog(storage_root)
+        app = create_app(audit)
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post("/v1/x/acp/outbound", json=_make_toplevel_body())
+        assert resp.status_code == 404

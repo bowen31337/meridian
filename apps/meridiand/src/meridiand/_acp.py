@@ -96,6 +96,12 @@ class AcpOutboundRequest(BaseModel):
     message: dict[str, Any]
 
 
+class AcpOutboundTopLevelRequest(BaseModel):
+    capabilities: list[str]
+    target: str
+    message: dict[str, Any]
+
+
 # ---------------------------------------------------------------------------
 # Router factory
 # ---------------------------------------------------------------------------
@@ -109,6 +115,130 @@ def make_acp_router(
 ) -> APIRouter:
     _client: AcpPeerClient = peer_client if peer_client is not None else HttpAcpPeerClient()
     router = APIRouter()
+
+    @router.post("/v1/x/acp/outbound")
+    async def acp_outbound_toplevel(body: AcpOutboundTopLevelRequest) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+        call_id = str(uuid.uuid4())
+        target = body.target
+
+        with tracer.start_as_current_span(
+            "acp.outbound",
+            attributes={
+                "acp.target": target,
+                "acp.call_id": call_id,
+            },
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="acp.outbound.invocation",
+                    code="acp_outbound",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                granted_caps = parse_set(body.capabilities)
+            except CapabilityParseError as exc:
+                err = AcpOutboundDeniedError(
+                    message=f"Invalid capability string: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="acp.outbound.denied",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "target": target,
+                            "call_id": call_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise err
+
+            required_cap = Capability(namespace="acp", name="outbound", param=target)
+            if not check_grant(frozenset({required_cap}), granted_caps):
+                err = AcpOutboundDeniedError(
+                    message=f"ACP outbound denied: does not hold acp.outbound[{target}]",
+                    timestamp=_now(),
+                )
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="acp.outbound.denied",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "target": target,
+                            "call_id": call_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise err
+
+            target_url = targets.get(target)
+            if target_url is None:
+                err = AcpOutboundDeniedError(
+                    message=f"ACP outbound denied: target {target!r} not registered",
+                    timestamp=_now(),
+                )
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="acp.outbound.denied",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "target": target,
+                            "call_id": call_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise err
+
+            try:
+                peer_response = await _client.call(target_url, body.message)
+            except Exception as exc:
+                err = AcpOutboundFailedError(
+                    message=f"ACP outbound call to {target!r} failed: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="acp.outbound.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "target": target,
+                            "call_id": call_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise err
+
+        return JSONResponse(
+            content={
+                "call_id": call_id,
+                "target": target,
+                "status": "delivered",
+                "response": peer_response,
+            }
+        )
 
     @router.post("/v1/x/sessions/{session_id}/acp/outbound")
     async def acp_outbound(session_id: str, body: AcpOutboundRequest) -> JSONResponse:
