@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import io
 import json
+import subprocess
+import tarfile
+import tempfile
+import urllib.request
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from core_errors import (
     AuditLog,
@@ -93,8 +98,53 @@ class SkillVersionsListError(MeridianError):
         return 500
 
 
+class SkillInstallError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="skill_install_failed", message=message, timestamp=timestamp, cause=cause
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
+class SkillInstallInvalidSourceError(MeridianError):
+    def __init__(self, *, message: str, timestamp: str) -> None:
+        super().__init__(
+            code="skill_install_invalid_source", message=message, timestamp=timestamp
+        )
+
+    def http_status(self) -> int:
+        return 422
+
+
+class SkillInstallSourceLoadError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="skill_install_source_load_failed",
+            message=message,
+            timestamp=timestamp,
+            cause=cause,
+        )
+
+    def http_status(self) -> int:
+        return 422
+
+
 # ---------------------------------------------------------------------------
-# Request model (agentskills.io schema)
+# Request models (agentskills.io schema)
 # ---------------------------------------------------------------------------
 
 
@@ -119,6 +169,10 @@ class SkillCreateRequest(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
+class SkillInstallRequest(BaseModel):
+    source: str
+
+
 def _validate_request(body: SkillCreateRequest) -> SkillInvalidRequestError | None:
     if not body.name.strip():
         return SkillInvalidRequestError(
@@ -139,14 +193,216 @@ def _validate_request(body: SkillCreateRequest) -> SkillInvalidRequestError | No
 
 
 # ---------------------------------------------------------------------------
+# Source type detection
+# ---------------------------------------------------------------------------
+
+
+def _detect_source_type(source: str, timestamp: str) -> str:
+    if source.startswith("file://"):
+        return "file"
+    if source.startswith("npm:"):
+        return "npm"
+    if source.startswith("git+") or source.startswith("git://"):
+        return "git"
+    if "agentskills.io" in source or source.startswith("agentskills://"):
+        return "registry"
+    raise SkillInstallInvalidSourceError(
+        message=(
+            f"Unrecognized source URL '{source}'. "
+            "Supported schemes: file://, npm:, git+, git://, agentskills://, "
+            "or a URL containing agentskills.io"
+        ),
+        timestamp=timestamp,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Source loaders
+# ---------------------------------------------------------------------------
+
+
+class SkillSourceLoader(Protocol):
+    def load(self, source_url: str) -> dict[str, Any]: ...
+
+
+class FileSkillLoader:
+    def load(self, source_url: str) -> dict[str, Any]:
+        path_str = source_url[7:]  # strip "file://"
+        path = Path(path_str)
+        manifest_path = path / "skill.json"
+        if not manifest_path.exists():
+            raise SkillInstallSourceLoadError(
+                message=f"skill.json not found at '{path}'",
+                timestamp=_now(),
+            )
+        try:
+            return json.loads(manifest_path.read_text())
+        except json.JSONDecodeError as exc:
+            raise SkillInstallSourceLoadError(
+                message=f"Invalid JSON in skill.json at '{path}': {exc}",
+                timestamp=_now(),
+                cause=exc,
+            ) from exc
+        except OSError as exc:
+            raise SkillInstallSourceLoadError(
+                message=f"Failed to read skill.json at '{path}': {exc}",
+                timestamp=_now(),
+                cause=exc,
+            ) from exc
+
+
+class NpmSkillLoader:
+    def load(self, source_url: str) -> dict[str, Any]:
+        spec = source_url[4:]  # strip "npm:"
+        if spec.startswith("@") and spec.count("@") > 1:
+            at_idx = spec.index("@", 1)
+            name = spec[:at_idx]
+            version = spec[at_idx + 1:]
+        elif not spec.startswith("@") and "@" in spec:
+            name, version = spec.rsplit("@", 1)
+        else:
+            name = spec
+            version = "latest"
+
+        try:
+            registry_url = f"https://registry.npmjs.org/{name}/{version}"
+            req = urllib.request.Request(registry_url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
+                pkg_meta = json.loads(resp.read())
+        except Exception as exc:
+            raise SkillInstallSourceLoadError(
+                message=f"Failed to fetch npm metadata for '{spec}': {exc}",
+                timestamp=_now(),
+                cause=exc,
+            ) from exc
+
+        if "meridian-skill" in pkg_meta:
+            return pkg_meta["meridian-skill"]
+
+        tarball_url = pkg_meta.get("dist", {}).get("tarball")
+        if not tarball_url:
+            raise SkillInstallSourceLoadError(
+                message=f"No tarball URL in npm metadata for '{spec}'",
+                timestamp=_now(),
+            )
+
+        try:
+            with urllib.request.urlopen(tarball_url, timeout=60) as resp:  # noqa: S310
+                data = resp.read()
+        except Exception as exc:
+            raise SkillInstallSourceLoadError(
+                message=f"Failed to download npm tarball for '{spec}': {exc}",
+                timestamp=_now(),
+                cause=exc,
+            ) from exc
+
+        try:
+            with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tf:
+                for member in tf.getmembers():
+                    if member.name.endswith("/skill.json") or member.name == "skill.json":
+                        f = tf.extractfile(member)
+                        if f is not None:
+                            return json.loads(f.read())
+        except Exception as exc:
+            raise SkillInstallSourceLoadError(
+                message=f"Failed to extract skill.json from npm tarball for '{spec}': {exc}",
+                timestamp=_now(),
+                cause=exc,
+            ) from exc
+
+        raise SkillInstallSourceLoadError(
+            message=f"skill.json not found in npm package '{spec}'",
+            timestamp=_now(),
+        )
+
+
+class GitSkillLoader:
+    def load(self, source_url: str) -> dict[str, Any]:
+        url = source_url[4:] if source_url.startswith("git+") else source_url
+        ref: str | None = None
+        if "#" in url:
+            url, ref = url.rsplit("#", 1)
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cmd = ["git", "clone", "--depth=1"]
+            if ref:
+                cmd += ["--branch", ref]
+            cmd += [url, tmp_dir]
+            try:
+                subprocess.run(cmd, check=True, capture_output=True, timeout=120)  # noqa: S603
+            except subprocess.CalledProcessError as exc:
+                stderr = exc.stderr.decode(errors="replace")
+                raise SkillInstallSourceLoadError(
+                    message=f"Failed to clone '{url}': {stderr}",
+                    timestamp=_now(),
+                    cause=exc,
+                ) from exc
+            except Exception as exc:
+                raise SkillInstallSourceLoadError(
+                    message=f"Failed to clone '{url}': {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                ) from exc
+
+            manifest_path = Path(tmp_dir) / "skill.json"
+            if not manifest_path.exists():
+                raise SkillInstallSourceLoadError(
+                    message=f"skill.json not found in repository '{url}'",
+                    timestamp=_now(),
+                )
+            try:
+                return json.loads(manifest_path.read_text())
+            except (json.JSONDecodeError, OSError) as exc:
+                raise SkillInstallSourceLoadError(
+                    message=f"Failed to read skill.json from '{url}': {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                ) from exc
+
+
+class RegistrySkillLoader:
+    def load(self, source_url: str) -> dict[str, Any]:
+        if source_url.startswith("agentskills://"):
+            skill_id = source_url[14:]
+            api_url = f"https://agentskills.io/api/v1/skills/{skill_id}"
+        else:
+            api_url = source_url
+
+        try:
+            req = urllib.request.Request(api_url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
+                return json.loads(resp.read())
+        except Exception as exc:
+            raise SkillInstallSourceLoadError(
+                message=f"Failed to fetch skill from registry '{source_url}': {exc}",
+                timestamp=_now(),
+                cause=exc,
+            ) from exc
+
+
+_DEFAULT_SOURCE_LOADERS: dict[str, Any] = {
+    "file": FileSkillLoader(),
+    "npm": NpmSkillLoader(),
+    "git": GitSkillLoader(),
+    "registry": RegistrySkillLoader(),
+}
+
+
+# ---------------------------------------------------------------------------
 # Router factory
 # ---------------------------------------------------------------------------
 
 
-def make_skills_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
+def make_skills_router(
+    *,
+    audit_log: AuditLog,
+    storage_root: Path,
+    source_loaders: dict[str, Any] | None = None,
+) -> APIRouter:
     router = APIRouter()
     skills_dir = storage_root / "skills"
     versions_dir = storage_root / "skill_versions"
+    _loaders: dict[str, Any] = {**_DEFAULT_SOURCE_LOADERS, **(source_loaders or {})}
 
     @router.post("/v1/skills", status_code=201)
     async def create_skill(body: SkillCreateRequest) -> JSONResponse:
@@ -187,6 +443,8 @@ def make_skills_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                     "tools": [t.model_dump() for t in body.tools],
                     "tests": [t.model_dump() for t in body.tests] if body.tests else [],
                     "created_at": now,
+                    "source_type": "api",
+                    "source_url": None,
                 }
                 (versions_dir / f"{version_id}.json").write_text(json.dumps(version_record))
 
@@ -233,6 +491,134 @@ def make_skills_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         detail={
                             "skill_id": skill_id,
                             "name": body.name,
+                            "message": err2.message,
+                        },
+                    )
+                )
+                raise err2
+
+        return JSONResponse(content=skill_record, status_code=201)
+
+    @router.post("/v1/skills/install", status_code=201)
+    async def install_skill(body: SkillInstallRequest) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+        skill_id = f"skill_{uuid.uuid4().hex}"
+        version_id = f"skillver_{uuid.uuid4().hex}"
+
+        with tracer.start_as_current_span(
+            "skill.install",
+            attributes={
+                "skill.id": skill_id,
+                "skill.install.source": body.source,
+            },
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="skill.install.invocation",
+                    code="skill_install",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                source_type = _detect_source_type(body.source, now)
+
+                loader = _loaders.get(source_type)
+                if loader is None:
+                    raise SkillInstallError(
+                        message=f"No loader configured for source type '{source_type}'",
+                        timestamp=now,
+                    )
+
+                try:
+                    manifest = loader.load(body.source)
+                except (SkillInstallSourceLoadError, SkillInstallInvalidSourceError):
+                    raise
+                except Exception as exc:
+                    raise SkillInstallError(
+                        message=f"Unexpected error loading skill from '{body.source}': {exc}",
+                        timestamp=now,
+                        cause=exc,
+                    ) from exc
+
+                try:
+                    req = SkillCreateRequest(**manifest)
+                except Exception as exc:
+                    raise SkillInstallSourceLoadError(
+                        message=f"Skill manifest from '{body.source}' has invalid structure: {exc}",
+                        timestamp=now,
+                        cause=exc,
+                    ) from exc
+
+                validation_err = _validate_request(req)
+                if validation_err is not None:
+                    raise validation_err
+
+                skills_dir.mkdir(parents=True, exist_ok=True)
+                versions_dir.mkdir(parents=True, exist_ok=True)
+
+                version_record: dict[str, Any] = {
+                    "id": version_id,
+                    "skill_id": skill_id,
+                    "version_number": 1,
+                    "instructions": req.instructions,
+                    "tools": [t.model_dump() for t in req.tools],
+                    "tests": [t.model_dump() for t in req.tests] if req.tests else [],
+                    "created_at": now,
+                    "source_type": source_type,
+                    "source_url": body.source,
+                }
+                (versions_dir / f"{version_id}.json").write_text(json.dumps(version_record))
+
+                skill_record: dict[str, Any] = {
+                    "id": skill_id,
+                    "name": req.name,
+                    "description": req.description,
+                    "created_at": now,
+                    "metadata": req.metadata,
+                    "version": version_record,
+                }
+                (skills_dir / f"{skill_id}.json").write_text(json.dumps(skill_record))
+
+            except (
+                SkillInstallInvalidSourceError,
+                SkillInstallSourceLoadError,
+                SkillInvalidRequestError,
+            ) as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="skill.install.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "skill_id": skill_id,
+                            "source": body.source,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = SkillInstallError(
+                    message=f"Failed to install skill: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="skill.install.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={
+                            "skill_id": skill_id,
+                            "source": body.source,
                             "message": err2.message,
                         },
                     )

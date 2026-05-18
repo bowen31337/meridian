@@ -8,6 +8,8 @@ Tests cover:
   - Response has name, description, created_at, metadata, version.
   - metadata is null when omitted; stored when provided.
   - tests is empty list when omitted; stored when provided.
+  - POST /v1/skills version has source_type "api".
+  - POST /v1/skills version has source_url None.
   - version has id with "skillver_" prefix.
   - version has skill_id matching the skill id.
   - version has version_number 1 on first creation.
@@ -63,17 +65,48 @@ Tests cover:
   - GET /v1/skills/{id}/versions total reflects full count independent of pagination.
   - GET /v1/skills/{id}/versions OTel span "skill.versions.list" emitted on success.
   - GET /v1/skills/{id}/versions span carries skill.id attribute.
+  - POST /v1/skills/install returns 201 on success.
+  - POST /v1/skills/install response has id, name, description, created_at, metadata, version.
+  - POST /v1/skills/install version record has source_type field.
+  - POST /v1/skills/install version record has source_url field.
+  - POST /v1/skills/install with file:// source reads skill.json from local directory.
+  - POST /v1/skills/install source_type is "file" for file:// source.
+  - POST /v1/skills/install source_type is "npm" for npm: source.
+  - POST /v1/skills/install source_type is "git" for git+ source.
+  - POST /v1/skills/install source_type is "registry" for agentskills:// source.
+  - POST /v1/skills/install source_type is "registry" for agentskills.io URL.
+  - POST /v1/skills/install source_url matches the original source string.
+  - POST /v1/skills/install persists version with provenance to disk.
+  - POST /v1/skills/install with invalid source returns 422 with code "skill_install_invalid_source".
+  - POST /v1/skills/install with missing skill.json returns 422 with code "skill_install_source_load_failed".
+  - POST /v1/skills/install with invalid JSON in skill.json returns 422.
+  - POST /v1/skills/install loader failure returns 422 with code "skill_install_source_load_failed".
+  - POST /v1/skills/install invalid source audit log event is "skill.install.failed".
+  - POST /v1/skills/install source load failure audit log event is "skill.install.failed".
+  - POST /v1/skills/install audit detail includes skill_id, source, message.
+  - POST /v1/skills/install audit entry level is "error" on failure.
+  - POST /v1/skills/install OTel span "skill.install" emitted on success.
+  - POST /v1/skills/install OTel span "skill.install" emitted on failure.
+  - POST /v1/skills/install OTel span set to ERROR on failure.
+  - POST /v1/skills/install span carries skill.id and skill.install.source attributes.
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
+from meridiand._skills import (
+    SkillInstallSourceLoadError,
+    make_skills_router,
+)
+from core_errors import HandlerOptions, install_error_handler
 
 from tests._otel_shared import otel_exporter as _otel_exporter
 
@@ -1131,3 +1164,441 @@ class TestSkillVersionsListOtel:
         span = spans.get("skill.versions.list")
         assert span is not None
         assert span.attributes["skill.id"] == skill["id"]
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/skills — provenance on direct API creation
+# ---------------------------------------------------------------------------
+
+
+class TestSkillCreateProvenance:
+    def test_version_has_source_type_api(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/skills", json=_body()).json()
+        assert body["version"]["source_type"] == "api"
+
+    def test_version_has_source_url_none(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/skills", json=_body()).json()
+        assert body["version"]["source_url"] is None
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/skills/install — helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_install_client(
+    storage_root: Path,
+    source_loaders: dict[str, Any] | None = None,
+) -> TestClient:
+    audit = FileAuditLog(storage_root)
+    router = make_skills_router(
+        audit_log=audit,
+        storage_root=storage_root,
+        source_loaders=source_loaders,
+    )
+    app = FastAPI()
+    install_error_handler(app, HandlerOptions(audit_log=audit))
+    app.include_router(router)
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def _write_skill_json(directory: Path, manifest: dict[str, Any] | None = None) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    default: dict[str, Any] = {
+        "name": "installed-skill",
+        "description": "A skill installed from a source",
+        "instructions": "Step 1: do the thing.",
+        "tools": [{"name": "bash", "description": "Run shell commands"}],
+    }
+    (directory / "skill.json").write_text(json.dumps(manifest or default))
+
+
+class _MockLoader:
+    def __init__(
+        self,
+        manifest: dict[str, Any] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self._manifest = manifest or {
+            "name": "mock-skill",
+            "description": "A mock skill",
+            "instructions": "Mock instructions.",
+            "tools": [{"name": "bash", "description": "Run shell commands"}],
+        }
+        self._error = error
+
+    def load(self, source_url: str) -> dict[str, Any]:
+        if self._error is not None:
+            raise self._error
+        return self._manifest
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/skills/install — success (file://)
+# ---------------------------------------------------------------------------
+
+
+class TestSkillInstallFileSuccess:
+    def test_returns_201(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        source_dir = storage_root / "source"
+        _write_skill_json(source_dir)
+        resp = client.post("/v1/skills/install", json={"source": f"file://{source_dir}"})
+        assert resp.status_code == 201
+
+    def test_response_has_id(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        source_dir = storage_root / "source"
+        _write_skill_json(source_dir)
+        body = client.post("/v1/skills/install", json={"source": f"file://{source_dir}"}).json()
+        assert body["id"].startswith("skill_")
+
+    def test_response_has_name(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        source_dir = storage_root / "source"
+        _write_skill_json(source_dir, {"name": "file-skill", "description": "d", "instructions": "i", "tools": [{"name": "bash"}]})
+        body = client.post("/v1/skills/install", json={"source": f"file://{source_dir}"}).json()
+        assert body["name"] == "file-skill"
+
+    def test_response_has_description(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        source_dir = storage_root / "source"
+        _write_skill_json(source_dir)
+        body = client.post("/v1/skills/install", json={"source": f"file://{source_dir}"}).json()
+        assert "description" in body
+
+    def test_response_has_created_at(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        source_dir = storage_root / "source"
+        _write_skill_json(source_dir)
+        body = client.post("/v1/skills/install", json={"source": f"file://{source_dir}"}).json()
+        assert isinstance(body["created_at"], str)
+        assert len(body["created_at"]) > 0
+
+    def test_response_has_version(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        source_dir = storage_root / "source"
+        _write_skill_json(source_dir)
+        body = client.post("/v1/skills/install", json={"source": f"file://{source_dir}"}).json()
+        assert isinstance(body["version"], dict)
+
+    def test_version_has_source_type_file(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        source_dir = storage_root / "source"
+        _write_skill_json(source_dir)
+        body = client.post("/v1/skills/install", json={"source": f"file://{source_dir}"}).json()
+        assert body["version"]["source_type"] == "file"
+
+    def test_version_has_source_url(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        source_dir = storage_root / "source"
+        _write_skill_json(source_dir)
+        source = f"file://{source_dir}"
+        body = client.post("/v1/skills/install", json={"source": source}).json()
+        assert body["version"]["source_url"] == source
+
+    def test_persisted_version_has_source_type(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        source_dir = storage_root / "source"
+        _write_skill_json(source_dir)
+        body = client.post("/v1/skills/install", json={"source": f"file://{source_dir}"}).json()
+        version = _version_resource(storage_root, body["version"]["id"])
+        assert version["source_type"] == "file"
+
+    def test_persisted_version_has_source_url(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        source_dir = storage_root / "source"
+        _write_skill_json(source_dir)
+        source = f"file://{source_dir}"
+        body = client.post("/v1/skills/install", json={"source": source}).json()
+        version = _version_resource(storage_root, body["version"]["id"])
+        assert version["source_url"] == source
+
+    def test_skill_json_written_to_storage(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        source_dir = storage_root / "source"
+        _write_skill_json(source_dir)
+        body = client.post("/v1/skills/install", json={"source": f"file://{source_dir}"}).json()
+        assert (storage_root / "skills" / f"{body['id']}.json").exists()
+
+    def test_version_json_written_to_storage(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        source_dir = storage_root / "source"
+        _write_skill_json(source_dir)
+        body = client.post("/v1/skills/install", json={"source": f"file://{source_dir}"}).json()
+        assert (storage_root / "skill_versions" / f"{body['version']['id']}.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/skills/install — source type detection via mock loaders
+# ---------------------------------------------------------------------------
+
+
+class TestSkillInstallSourceTypes:
+    def _client_with_mock(self, storage_root: Path, source_type: str) -> TestClient:
+        return _make_install_client(
+            storage_root,
+            source_loaders={source_type: _MockLoader()},
+        )
+
+    def test_npm_source_type_recorded(self, storage_root: Path) -> None:
+        client = self._client_with_mock(storage_root, "npm")
+        body = client.post("/v1/skills/install", json={"source": "npm:my-skill@1.0.0"}).json()
+        assert body["version"]["source_type"] == "npm"
+
+    def test_npm_source_url_recorded(self, storage_root: Path) -> None:
+        client = self._client_with_mock(storage_root, "npm")
+        source = "npm:my-skill@1.0.0"
+        body = client.post("/v1/skills/install", json={"source": source}).json()
+        assert body["version"]["source_url"] == source
+
+    def test_git_source_type_recorded(self, storage_root: Path) -> None:
+        client = self._client_with_mock(storage_root, "git")
+        body = client.post(
+            "/v1/skills/install",
+            json={"source": "git+https://github.com/example/skill.git"},
+        ).json()
+        assert body["version"]["source_type"] == "git"
+
+    def test_git_source_url_recorded(self, storage_root: Path) -> None:
+        client = self._client_with_mock(storage_root, "git")
+        source = "git+https://github.com/example/skill.git"
+        body = client.post("/v1/skills/install", json={"source": source}).json()
+        assert body["version"]["source_url"] == source
+
+    def test_registry_agentskills_scheme_source_type(self, storage_root: Path) -> None:
+        client = self._client_with_mock(storage_root, "registry")
+        body = client.post(
+            "/v1/skills/install",
+            json={"source": "agentskills://my-skill"},
+        ).json()
+        assert body["version"]["source_type"] == "registry"
+
+    def test_registry_agentskills_io_url_source_type(self, storage_root: Path) -> None:
+        client = self._client_with_mock(storage_root, "registry")
+        body = client.post(
+            "/v1/skills/install",
+            json={"source": "https://agentskills.io/skills/my-skill"},
+        ).json()
+        assert body["version"]["source_type"] == "registry"
+
+    def test_registry_source_url_recorded(self, storage_root: Path) -> None:
+        client = self._client_with_mock(storage_root, "registry")
+        source = "agentskills://my-skill"
+        body = client.post("/v1/skills/install", json={"source": source}).json()
+        assert body["version"]["source_url"] == source
+
+    def test_mock_npm_returns_201(self, storage_root: Path) -> None:
+        client = self._client_with_mock(storage_root, "npm")
+        resp = client.post("/v1/skills/install", json={"source": "npm:my-skill@2.0.0"})
+        assert resp.status_code == 201
+
+    def test_mock_git_returns_201(self, storage_root: Path) -> None:
+        client = self._client_with_mock(storage_root, "git")
+        resp = client.post(
+            "/v1/skills/install",
+            json={"source": "git+https://github.com/example/skill.git"},
+        )
+        assert resp.status_code == 201
+
+    def test_mock_registry_returns_201(self, storage_root: Path) -> None:
+        client = self._client_with_mock(storage_root, "registry")
+        resp = client.post("/v1/skills/install", json={"source": "agentskills://my-skill"})
+        assert resp.status_code == 201
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/skills/install — validation errors
+# ---------------------------------------------------------------------------
+
+
+class TestSkillInstallErrors:
+    def test_invalid_source_returns_422(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        resp = client.post("/v1/skills/install", json={"source": "ftp://unsupported"})
+        assert resp.status_code == 422
+
+    def test_invalid_source_error_code(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        body = client.post("/v1/skills/install", json={"source": "ftp://unsupported"}).json()
+        assert body["error"]["code"] == "skill_install_invalid_source"
+
+    def test_invalid_source_error_has_message(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        body = client.post("/v1/skills/install", json={"source": "bad-source"}).json()
+        assert "message" in body["error"]
+        assert len(body["error"]["message"]) > 0
+
+    def test_missing_skill_json_returns_422(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        empty_dir = storage_root / "empty"
+        empty_dir.mkdir()
+        resp = client.post("/v1/skills/install", json={"source": f"file://{empty_dir}"})
+        assert resp.status_code == 422
+
+    def test_missing_skill_json_error_code(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        empty_dir = storage_root / "empty"
+        empty_dir.mkdir()
+        body = client.post("/v1/skills/install", json={"source": f"file://{empty_dir}"}).json()
+        assert body["error"]["code"] == "skill_install_source_load_failed"
+
+    def test_invalid_json_in_skill_json_returns_422(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        source_dir = storage_root / "bad_json"
+        source_dir.mkdir()
+        (source_dir / "skill.json").write_text("not valid json {{{")
+        resp = client.post("/v1/skills/install", json={"source": f"file://{source_dir}"})
+        assert resp.status_code == 422
+
+    def test_loader_failure_returns_422(self, storage_root: Path) -> None:
+        err = SkillInstallSourceLoadError(
+            message="mock loader failure",
+            timestamp="2026-01-01T00:00:00+00:00",
+        )
+        client = _make_install_client(
+            storage_root,
+            source_loaders={"npm": _MockLoader(error=err)},
+        )
+        resp = client.post("/v1/skills/install", json={"source": "npm:bad-pkg"})
+        assert resp.status_code == 422
+
+    def test_loader_failure_error_code(self, storage_root: Path) -> None:
+        err = SkillInstallSourceLoadError(
+            message="mock loader failure",
+            timestamp="2026-01-01T00:00:00+00:00",
+        )
+        client = _make_install_client(
+            storage_root,
+            source_loaders={"npm": _MockLoader(error=err)},
+        )
+        body = client.post("/v1/skills/install", json={"source": "npm:bad-pkg"}).json()
+        assert body["error"]["code"] == "skill_install_source_load_failed"
+
+    def test_not_written_on_invalid_source(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        client.post("/v1/skills/install", json={"source": "bad://source"})
+        skills_dir = storage_root / "skills"
+        files = list(skills_dir.glob("*.json")) if skills_dir.exists() else []
+        assert files == []
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/skills/install — audit log
+# ---------------------------------------------------------------------------
+
+
+class TestSkillInstallAuditLog:
+    def test_invalid_source_writes_audit(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        client.post("/v1/skills/install", json={"source": "bad://source"})
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "skill.install.failed" for r in records)
+
+    def test_source_load_failure_writes_audit(self, storage_root: Path) -> None:
+        err = SkillInstallSourceLoadError(
+            message="mock failure",
+            timestamp="2026-01-01T00:00:00+00:00",
+        )
+        client = _make_install_client(
+            storage_root,
+            source_loaders={"npm": _MockLoader(error=err)},
+        )
+        client.post("/v1/skills/install", json={"source": "npm:bad-pkg"})
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "skill.install.failed" for r in records)
+
+    def test_audit_level_is_error(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        client.post("/v1/skills/install", json={"source": "bad://source"})
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.install.failed"
+        )
+        assert record["level"] == "error"
+
+    def test_audit_detail_has_skill_id(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        client.post("/v1/skills/install", json={"source": "bad://source"})
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.install.failed"
+        )
+        assert record["detail"]["skill_id"].startswith("skill_")
+
+    def test_audit_detail_has_source(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        client.post("/v1/skills/install", json={"source": "bad://source"})
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.install.failed"
+        )
+        assert record["detail"]["source"] == "bad://source"
+
+    def test_audit_detail_has_message(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        client.post("/v1/skills/install", json={"source": "bad://source"})
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.install.failed"
+        )
+        assert "message" in record["detail"]
+        assert len(record["detail"]["message"]) > 0
+
+    def test_audit_code_on_invalid_source(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root)
+        client.post("/v1/skills/install", json={"source": "bad://source"})
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.install.failed"
+        )
+        assert record["code"] == "skill_install_invalid_source"
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/skills/install — OTel spans
+# ---------------------------------------------------------------------------
+
+
+class TestSkillInstallOtel:
+    def setup_method(self) -> None:
+        _otel_exporter.clear()
+
+    def _client(self, storage_root: Path, source_loaders: dict | None = None) -> TestClient:
+        return _make_install_client(storage_root, source_loaders=source_loaders)
+
+    def test_success_emits_skill_install_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root, source_loaders={"npm": _MockLoader()})
+        client.post("/v1/skills/install", json={"source": "npm:my-skill@1.0.0"})
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "skill.install" in span_names
+
+    def test_failure_emits_skill_install_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        client.post("/v1/skills/install", json={"source": "bad://source"})
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "skill.install" in span_names
+
+    def test_failure_span_has_error_status(self, storage_root: Path) -> None:
+        from opentelemetry.trace import StatusCode
+
+        client = self._client(storage_root)
+        client.post("/v1/skills/install", json={"source": "bad://source"})
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("skill.install")
+        assert span is not None
+        assert span.status.status_code == StatusCode.ERROR
+
+    def test_span_has_skill_id_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root, source_loaders={"npm": _MockLoader()})
+        client.post("/v1/skills/install", json={"source": "npm:my-skill@1.0.0"})
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("skill.install")
+        assert span is not None
+        assert span.attributes["skill.id"].startswith("skill_")
+
+    def test_span_has_install_source_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root, source_loaders={"npm": _MockLoader()})
+        source = "npm:my-skill@1.0.0"
+        client.post("/v1/skills/install", json={"source": source})
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("skill.install")
+        assert span is not None
+        assert span.attributes["skill.install.source"] == source
