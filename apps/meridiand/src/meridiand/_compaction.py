@@ -60,6 +60,32 @@ class CompactionSessionNotFoundError(MeridianError):
         return 404
 
 
+class RestoreError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="restore_failed", message=message, timestamp=timestamp, cause=cause
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
+class RestoreSessionNotArchivedError(MeridianError):
+    def __init__(self, *, message: str, timestamp: str) -> None:
+        super().__init__(
+            code="restore_session_not_archived", message=message, timestamp=timestamp
+        )
+
+    def http_status(self) -> int:
+        return 404
+
+
 # ---------------------------------------------------------------------------
 # AutoCompactor
 # ---------------------------------------------------------------------------
@@ -163,6 +189,71 @@ class AutoCompactor:
         (compaction_dir / "manifest.json").write_text(json.dumps(manifest))
 
         return manifest
+
+    async def restore_session(self, session_id: str) -> dict[str, Any]:
+        """
+        Restore a previously archived session:
+          1. Read the compaction manifest to find the archive blob key.
+          2. Decompress and recover all pre-compaction events.
+          3. Append any events written to the live file after compaction.
+          4. Write the full event log back to the live partition file.
+          5. Delete the archive blob and manifest.
+        """
+        now = _now()
+        manifest_path = self._root / "compaction" / session_id / "manifest.json"
+        if not manifest_path.exists():
+            raise RestoreSessionNotArchivedError(
+                message=f"No archive found for session {session_id!r}",
+                timestamp=now,
+            )
+
+        manifest = json.loads(manifest_path.read_text())
+        archive_key = manifest["archive_key"]
+        summary_event_count: int = manifest.get("summary_event_count", 0)
+
+        compressed = await self._blob.get(archive_key)
+        archive_text = gzip.decompress(compressed).decode()
+        archive_lines = [l for l in archive_text.splitlines() if l.strip()]
+
+        live_files = self.find_event_files(session_id)
+        new_events: list[str] = []
+        if live_files:
+            live_lines: list[str] = []
+            for f in live_files:
+                live_lines.extend(l for l in f.read_text().splitlines() if l.strip())
+            new_events = live_lines[summary_event_count:]
+
+        restored_lines = archive_lines + new_events
+
+        if live_files:
+            target = live_files[-1]
+            for f in live_files[:-1]:
+                f.unlink(missing_ok=True)
+        else:
+            now_dt = datetime.now(UTC)
+            target = (
+                self._root
+                / "events"
+                / str(now_dt.year)
+                / f"{now_dt.month:02d}"
+                / f"{now_dt.day:02d}"
+                / f"{session_id}.ndjson"
+            )
+            target.parent.mkdir(parents=True, exist_ok=True)
+
+        target.write_text("\n".join(restored_lines) + ("\n" if restored_lines else ""))
+
+        await self._blob.delete(archive_key)
+        manifest_path.unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            (self._root / "compaction" / session_id).rmdir()
+
+        return {
+            "session_id": session_id,
+            "restored_at": now,
+            "restored_event_count": len(restored_lines),
+            "archive_key": archive_key,
+        }
 
     async def run(self) -> list[dict[str, Any]]:
         """Scan for idle sessions and compact each one. Returns list of manifests."""
@@ -316,6 +407,134 @@ def make_compaction_router(
                 raise err2
 
         return JSONResponse(content=manifest, status_code=200)
+
+    @router.post("/v1/x/sessions/{session_id}/archive", status_code=200)
+    async def archive_session(session_id: str) -> JSONResponse:
+        now = _now()
+        run_id = f"archive_{uuid.uuid4().hex}"
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "sessions.archive_session",
+            attributes={
+                "sessions.session_id": session_id,
+                "sessions.run_id": run_id,
+            },
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="sessions.archive_session.invocation",
+                    code="archive_session",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                manifest = await compactor.compact_session(session_id)
+            except CompactionSessionNotFoundError as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="sessions.archive_session.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "session_id": session_id,
+                            "run_id": run_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise
+            except Exception as exc:
+                err2 = CompactionError(
+                    message=f"Failed to archive session {session_id!r}: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="sessions.archive_session.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={
+                            "session_id": session_id,
+                            "run_id": run_id,
+                            "message": err2.message,
+                        },
+                    )
+                )
+                raise err2
+
+        return JSONResponse(content=manifest, status_code=200)
+
+    @router.post("/v1/x/sessions/{session_id}/restore", status_code=200)
+    async def restore_session(session_id: str) -> JSONResponse:
+        now = _now()
+        run_id = f"restore_{uuid.uuid4().hex}"
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "sessions.restore_session",
+            attributes={
+                "sessions.session_id": session_id,
+                "sessions.run_id": run_id,
+            },
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="sessions.restore_session.invocation",
+                    code="restore_session",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                result = await compactor.restore_session(session_id)
+            except RestoreSessionNotArchivedError as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="sessions.restore_session.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "session_id": session_id,
+                            "run_id": run_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise
+            except Exception as exc:
+                err2 = RestoreError(
+                    message=f"Failed to restore session {session_id!r}: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="sessions.restore_session.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={
+                            "session_id": session_id,
+                            "run_id": run_id,
+                            "message": err2.message,
+                        },
+                    )
+                )
+                raise err2
+
+        return JSONResponse(content=result, status_code=200)
 
     @router.get("/v1/x/compaction/policy", status_code=200)
     async def get_policy() -> JSONResponse:

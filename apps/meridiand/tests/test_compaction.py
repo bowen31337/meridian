@@ -532,3 +532,272 @@ class TestCompactionRouteWiring:
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.get("/v1/x/compaction/policy")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/x/sessions/{session_id}/archive
+# ---------------------------------------------------------------------------
+
+
+class TestSessionArchive:
+    def test_returns_200(self, storage_root: Path) -> None:
+        f = _write_event_file(storage_root, "arc_001")
+        _set_old_mtime(f)
+        resp = _make_client(storage_root).post("/v1/x/sessions/arc_001/archive")
+        assert resp.status_code == 200
+
+    def test_response_has_session_id(self, storage_root: Path) -> None:
+        f = _write_event_file(storage_root, "arc_002")
+        _set_old_mtime(f)
+        body = _make_client(storage_root).post("/v1/x/sessions/arc_002/archive").json()
+        assert body["session_id"] == "arc_002"
+
+    def test_response_has_archive_key(self, storage_root: Path) -> None:
+        f = _write_event_file(storage_root, "arc_003")
+        _set_old_mtime(f)
+        body = _make_client(storage_root).post("/v1/x/sessions/arc_003/archive").json()
+        assert body["archive_key"].startswith("compaction/arc_003/")
+        assert body["archive_key"].endswith(".ndjson.gz")
+
+    def test_archive_file_exists_in_blob_store(self, storage_root: Path) -> None:
+        f = _write_event_file(storage_root, "arc_004")
+        _set_old_mtime(f)
+        body = _make_client(storage_root).post("/v1/x/sessions/arc_004/archive").json()
+        assert (storage_root / body["archive_key"]).exists()
+
+    def test_archive_is_valid_gzip(self, storage_root: Path) -> None:
+        f = _write_event_file(storage_root, "arc_005")
+        _set_old_mtime(f)
+        body = _make_client(storage_root).post("/v1/x/sessions/arc_005/archive").json()
+        data = gzip.decompress((storage_root / body["archive_key"]).read_bytes())
+        assert len(data) > 0
+
+    def test_live_file_replaced_with_tail(self, storage_root: Path) -> None:
+        policy = CompactionConfig(tail_events=2)
+        events = [{"seq": i, "ts": "T", "type": "x", "data": {}} for i in range(5)]
+        f = _write_event_file(storage_root, "arc_006", events=events)
+        _set_old_mtime(f)
+        _make_client(storage_root, compaction=policy).post("/v1/x/sessions/arc_006/archive")
+        remaining = [l for l in f.read_text().splitlines() if l.strip()]
+        assert len(remaining) == 2
+
+    def test_missing_session_returns_404(self, storage_root: Path) -> None:
+        resp = _make_client(storage_root).post("/v1/x/sessions/no_such/archive")
+        assert resp.status_code == 404
+
+    def test_missing_session_error_code(self, storage_root: Path) -> None:
+        body = _make_client(storage_root).post("/v1/x/sessions/no_such/archive").json()
+        assert body["error"]["code"] == "compaction_session_not_found"
+
+    def test_failure_writes_audit_log(self, storage_root: Path) -> None:
+        _make_client(storage_root).post("/v1/x/sessions/ghost/archive")
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "sessions.archive_session.failed" for r in records)
+
+    def test_failure_audit_level_is_error(self, storage_root: Path) -> None:
+        _make_client(storage_root).post("/v1/x/sessions/ghost/archive")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "sessions.archive_session.failed"
+        )
+        assert record["level"] == "error"
+
+    def test_failure_audit_code(self, storage_root: Path) -> None:
+        _make_client(storage_root).post("/v1/x/sessions/ghost/archive")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "sessions.archive_session.failed"
+        )
+        assert record["code"] == "compaction_session_not_found"
+
+    def test_failure_audit_detail_has_session_id(self, storage_root: Path) -> None:
+        _make_client(storage_root).post("/v1/x/sessions/ghost/archive")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "sessions.archive_session.failed"
+        )
+        assert record["detail"]["session_id"] == "ghost"
+
+    def test_failure_audit_detail_has_run_id(self, storage_root: Path) -> None:
+        _make_client(storage_root).post("/v1/x/sessions/ghost/archive")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "sessions.archive_session.failed"
+        )
+        assert record["detail"]["run_id"].startswith("archive_")
+
+    def test_failure_audit_detail_has_message(self, storage_root: Path) -> None:
+        _make_client(storage_root).post("/v1/x/sessions/ghost/archive")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "sessions.archive_session.failed"
+        )
+        assert len(record["detail"]["message"]) > 0
+
+    def test_otel_span_emitted_on_success(self, storage_root: Path) -> None:
+        _otel_exporter.clear()
+        f = _write_event_file(storage_root, "arc_otel_01")
+        _set_old_mtime(f)
+        _make_client(storage_root).post("/v1/x/sessions/arc_otel_01/archive")
+        names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "sessions.archive_session" in names
+
+    def test_otel_span_emitted_on_failure(self, storage_root: Path) -> None:
+        _otel_exporter.clear()
+        _make_client(storage_root).post("/v1/x/sessions/no_such/archive")
+        names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "sessions.archive_session" in names
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/x/sessions/{session_id}/restore
+# ---------------------------------------------------------------------------
+
+
+class TestSessionRestore:
+    def _archive_session(self, storage_root: Path, session_id: str, events: list[dict] | None = None) -> dict:
+        f = _write_event_file(storage_root, session_id, events=events)
+        _set_old_mtime(f)
+        return _make_client(storage_root).post(f"/v1/x/sessions/{session_id}/archive").json()
+
+    def test_returns_200(self, storage_root: Path) -> None:
+        self._archive_session(storage_root, "rst_001")
+        resp = _make_client(storage_root).post("/v1/x/sessions/rst_001/restore")
+        assert resp.status_code == 200
+
+    def test_response_has_session_id(self, storage_root: Path) -> None:
+        self._archive_session(storage_root, "rst_002")
+        body = _make_client(storage_root).post("/v1/x/sessions/rst_002/restore").json()
+        assert body["session_id"] == "rst_002"
+
+    def test_response_has_restored_at(self, storage_root: Path) -> None:
+        self._archive_session(storage_root, "rst_003")
+        body = _make_client(storage_root).post("/v1/x/sessions/rst_003/restore").json()
+        assert isinstance(body["restored_at"], str) and len(body["restored_at"]) > 0
+
+    def test_response_has_restored_event_count(self, storage_root: Path) -> None:
+        events = [{"seq": i, "ts": "T", "type": "x", "data": {}} for i in range(5)]
+        self._archive_session(storage_root, "rst_004", events=events)
+        body = _make_client(storage_root).post("/v1/x/sessions/rst_004/restore").json()
+        assert body["restored_event_count"] == 5
+
+    def test_response_has_archive_key(self, storage_root: Path) -> None:
+        self._archive_session(storage_root, "rst_005")
+        body = _make_client(storage_root).post("/v1/x/sessions/rst_005/restore").json()
+        assert body["archive_key"].startswith("compaction/rst_005/")
+
+    def test_live_file_restored_with_full_events(self, storage_root: Path) -> None:
+        policy = CompactionConfig(tail_events=2)
+        events = [{"seq": i, "ts": "T", "type": "x", "data": {}} for i in range(5)]
+        f = _write_event_file(storage_root, "rst_006", events=events)
+        _set_old_mtime(f)
+        _make_client(storage_root, compaction=policy).post("/v1/x/sessions/rst_006/archive")
+        _make_client(storage_root, compaction=policy).post("/v1/x/sessions/rst_006/restore")
+        lines = [l for l in f.read_text().splitlines() if l.strip()]
+        assert len(lines) == 5
+
+    def test_restored_events_match_originals(self, storage_root: Path) -> None:
+        events = [{"seq": i, "ts": "T", "type": "msg", "data": {"n": i}} for i in range(4)]
+        f = _write_event_file(storage_root, "rst_007", events=events)
+        _set_old_mtime(f)
+        _make_client(storage_root).post("/v1/x/sessions/rst_007/archive")
+        _make_client(storage_root).post("/v1/x/sessions/rst_007/restore")
+        lines = [l for l in f.read_text().splitlines() if l.strip()]
+        seqs = [json.loads(l)["seq"] for l in lines]
+        assert seqs == list(range(4))
+
+    def test_archive_blob_deleted_after_restore(self, storage_root: Path) -> None:
+        archive_body = self._archive_session(storage_root, "rst_008")
+        archive_path = storage_root / archive_body["archive_key"]
+        assert archive_path.exists()
+        _make_client(storage_root).post("/v1/x/sessions/rst_008/restore")
+        assert not archive_path.exists()
+
+    def test_manifest_deleted_after_restore(self, storage_root: Path) -> None:
+        self._archive_session(storage_root, "rst_009")
+        manifest_path = storage_root / "compaction" / "rst_009" / "manifest.json"
+        assert manifest_path.exists()
+        _make_client(storage_root).post("/v1/x/sessions/rst_009/restore")
+        assert not manifest_path.exists()
+
+    def test_missing_archive_returns_404(self, storage_root: Path) -> None:
+        resp = _make_client(storage_root).post("/v1/x/sessions/never_archived/restore")
+        assert resp.status_code == 404
+
+    def test_missing_archive_error_code(self, storage_root: Path) -> None:
+        body = _make_client(storage_root).post("/v1/x/sessions/never_archived/restore").json()
+        assert body["error"]["code"] == "restore_session_not_archived"
+
+    def test_failure_writes_audit_log(self, storage_root: Path) -> None:
+        _make_client(storage_root).post("/v1/x/sessions/ghost/restore")
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "sessions.restore_session.failed" for r in records)
+
+    def test_failure_audit_level_is_error(self, storage_root: Path) -> None:
+        _make_client(storage_root).post("/v1/x/sessions/ghost/restore")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "sessions.restore_session.failed"
+        )
+        assert record["level"] == "error"
+
+    def test_failure_audit_code(self, storage_root: Path) -> None:
+        _make_client(storage_root).post("/v1/x/sessions/ghost/restore")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "sessions.restore_session.failed"
+        )
+        assert record["code"] == "restore_session_not_archived"
+
+    def test_failure_audit_detail_has_session_id(self, storage_root: Path) -> None:
+        _make_client(storage_root).post("/v1/x/sessions/ghost/restore")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "sessions.restore_session.failed"
+        )
+        assert record["detail"]["session_id"] == "ghost"
+
+    def test_failure_audit_detail_has_run_id(self, storage_root: Path) -> None:
+        _make_client(storage_root).post("/v1/x/sessions/ghost/restore")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "sessions.restore_session.failed"
+        )
+        assert record["detail"]["run_id"].startswith("restore_")
+
+    def test_failure_audit_detail_has_message(self, storage_root: Path) -> None:
+        _make_client(storage_root).post("/v1/x/sessions/ghost/restore")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "sessions.restore_session.failed"
+        )
+        assert len(record["detail"]["message"]) > 0
+
+    def test_otel_span_emitted_on_success(self, storage_root: Path) -> None:
+        _otel_exporter.clear()
+        self._archive_session(storage_root, "rst_otel_01")
+        _otel_exporter.clear()
+        _make_client(storage_root).post("/v1/x/sessions/rst_otel_01/restore")
+        names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "sessions.restore_session" in names
+
+    def test_otel_span_emitted_on_failure(self, storage_root: Path) -> None:
+        _otel_exporter.clear()
+        _make_client(storage_root).post("/v1/x/sessions/no_such/restore")
+        names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "sessions.restore_session" in names
+
+    def test_restore_preserves_post_compaction_events(self, storage_root: Path) -> None:
+        policy = CompactionConfig(tail_events=2)
+        events = [{"seq": i, "ts": "T", "type": "x", "data": {}} for i in range(5)]
+        f = _write_event_file(storage_root, "rst_new_01", events=events)
+        _set_old_mtime(f)
+        _make_client(storage_root, compaction=policy).post("/v1/x/sessions/rst_new_01/archive")
+        # Simulate new events appended after compaction
+        with f.open("a") as fh:
+            fh.write(json.dumps({"seq": 5, "ts": "T", "type": "x", "data": {}}) + "\n")
+        _make_client(storage_root, compaction=policy).post("/v1/x/sessions/rst_new_01/restore")
+        lines = [l for l in f.read_text().splitlines() if l.strip()]
+        assert len(lines) == 6
+        seqs = [json.loads(l)["seq"] for l in lines]
+        assert seqs == list(range(6))
