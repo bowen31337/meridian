@@ -22,6 +22,15 @@ def record_invocation_event(span: Span, event: StructuredEvent) -> None:
     span.add_event("event_log.invocation", attrs)
 
 
+def record_fsync_event(span: Span, event: StructuredEvent) -> None:
+    """Attaches a structured "event_log.fsync.invocation" event to the active span."""
+    attrs: dict[str, str | int | float | bool] = {}
+    for k, v in vars(event).items():
+        if isinstance(v, (str, int, float, bool)):
+            attrs[k] = v
+    span.add_event("event_log.fsync.invocation", attrs)
+
+
 def record_event_log_failure(span: Span, failure: EventLogFailure) -> None:
     """Records a failure on the span: sets status to ERROR, adds an "event_log.error" event,
     and records the underlying exception if present."""

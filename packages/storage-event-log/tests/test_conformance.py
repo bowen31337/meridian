@@ -1,5 +1,5 @@
 """
-Event-log conformance suite.
+Event-log conformance suite.  Also covers FsyncPolicy behaviour.
 
 Covers EventLogRuntime (via a StubEventLogWriter) and LocalEventLogWriter
 (via tmp_path):
@@ -27,10 +27,11 @@ Covers EventLogRuntime (via a StubEventLogWriter) and LocalEventLogWriter
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 from opentelemetry.trace import StatusCode
@@ -40,6 +41,7 @@ from storage_event_log import (
     EventLogOptions,
     EventLogRuntime,
     EventLogWriter,
+    FsyncPolicy,
     LocalEventLogWriter,
 )
 
@@ -396,3 +398,216 @@ class TestLocalEventLogWriter:
         ndjson_files = list(tmp_path.rglob("*.ndjson"))
         record = json.loads(ndjson_files[0].read_text().strip())
         assert record["data"] == payload
+
+
+# ---------------------------------------------------------------------------
+# FsyncPolicy — defaults
+# ---------------------------------------------------------------------------
+
+
+class TestFsyncPolicyDefaults:
+    def test_default_every_n_events(self) -> None:
+        assert FsyncPolicy().every_n_events == 100
+
+    def test_default_every_ms(self) -> None:
+        assert FsyncPolicy().every_ms == 100
+
+    def test_custom_values(self) -> None:
+        p = FsyncPolicy(every_n_events=5, every_ms=200)
+        assert p.every_n_events == 5
+        assert p.every_ms == 200
+
+
+# ---------------------------------------------------------------------------
+# FsyncPolicy — fsync triggered by event count
+# ---------------------------------------------------------------------------
+
+
+class TestFsyncByEventCount:
+    async def test_fsync_called_on_nth_event(self, tmp_path: Path) -> None:
+        writer = LocalEventLogWriter(tmp_path, fsync_policy=FsyncPolicy(every_n_events=3, every_ms=99999))
+        with patch("storage_event_log._local.os.fsync") as mock_fsync:
+            await writer.append("s1", "session.created", {})
+            await writer.append("s1", "message.added", {})
+            assert mock_fsync.call_count == 0
+            await writer.append("s1", "message.added", {})
+            assert mock_fsync.call_count == 1
+
+    async def test_fsync_counter_resets_after_trigger(self, tmp_path: Path) -> None:
+        writer = LocalEventLogWriter(tmp_path, fsync_policy=FsyncPolicy(every_n_events=2, every_ms=99999))
+        with patch("storage_event_log._local.os.fsync") as mock_fsync:
+            await writer.append("s1", "session.created", {})
+            await writer.append("s1", "message.added", {})
+            assert mock_fsync.call_count == 1
+            await writer.append("s1", "message.added", {})
+            assert mock_fsync.call_count == 1  # no second fsync yet
+            await writer.append("s1", "message.added", {})
+            assert mock_fsync.call_count == 2  # second fsync after another N events
+
+    async def test_no_fsync_below_threshold(self, tmp_path: Path) -> None:
+        writer = LocalEventLogWriter(tmp_path, fsync_policy=FsyncPolicy(every_n_events=100, every_ms=99999))
+        with patch("storage_event_log._local.os.fsync") as mock_fsync:
+            await writer.append("s1", "session.created", {})
+            await writer.append("s1", "message.added", {})
+            assert mock_fsync.call_count == 0
+
+
+# ---------------------------------------------------------------------------
+# FsyncPolicy — fsync triggered by elapsed time
+# ---------------------------------------------------------------------------
+
+
+class TestFsyncByTime:
+    async def test_fsync_triggered_after_elapsed_ms(self, tmp_path: Path) -> None:
+        writer = LocalEventLogWriter(tmp_path, fsync_policy=FsyncPolicy(every_n_events=99999, every_ms=50))
+        # Simulate that enough time has already elapsed since the writer was created
+        writer._last_fsync_mono -= 1.0  # 1000ms ago
+        with patch("storage_event_log._local.os.fsync") as mock_fsync:
+            await writer.append("s1", "session.created", {})
+            assert mock_fsync.call_count == 1
+
+    async def test_no_fsync_within_time_window(self, tmp_path: Path) -> None:
+        writer = LocalEventLogWriter(tmp_path, fsync_policy=FsyncPolicy(every_n_events=99999, every_ms=99999))
+        with patch("storage_event_log._local.os.fsync") as mock_fsync:
+            await writer.append("s1", "session.created", {})
+            assert mock_fsync.call_count == 0
+
+    async def test_time_counter_resets_after_fsync(self, tmp_path: Path) -> None:
+        writer = LocalEventLogWriter(tmp_path, fsync_policy=FsyncPolicy(every_n_events=99999, every_ms=50))
+        writer._last_fsync_mono -= 1.0  # trigger on first write
+        with patch("storage_event_log._local.os.fsync") as mock_fsync:
+            await writer.append("s1", "session.created", {})
+            assert mock_fsync.call_count == 1
+            # After reset, _last_fsync_mono is now, so no immediate second fsync
+            await writer.append("s1", "message.added", {})
+            assert mock_fsync.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# FsyncPolicy — OTel span emitted on fsync
+# ---------------------------------------------------------------------------
+
+
+class TestFsyncOtel:
+    async def test_fsync_span_name(self, tmp_path: Path) -> None:
+        from .conftest import MockTracer
+
+        mock_tracer = MockTracer()
+        writer = LocalEventLogWriter(tmp_path, fsync_policy=FsyncPolicy(every_n_events=1, every_ms=99999))
+        with patch("storage_event_log._local.os.fsync"):
+            with patch("storage_event_log._local.get_tracer", return_value=mock_tracer):
+                await writer.append("s1", "session.created", {})
+        assert mock_tracer.span.name == "event_log.fsync"
+
+    async def test_fsync_span_session_id_attribute(self, tmp_path: Path) -> None:
+        from .conftest import MockTracer
+
+        mock_tracer = MockTracer()
+        writer = LocalEventLogWriter(tmp_path, fsync_policy=FsyncPolicy(every_n_events=1, every_ms=99999))
+        with patch("storage_event_log._local.os.fsync"):
+            with patch("storage_event_log._local.get_tracer", return_value=mock_tracer):
+                await writer.append("my-session", "session.created", {})
+        assert mock_tracer.span.attributes["event_log.session_id"] == "my-session"
+
+    async def test_fsync_structured_event_attached(self, tmp_path: Path) -> None:
+        from .conftest import MockTracer
+
+        mock_tracer = MockTracer()
+        writer = LocalEventLogWriter(tmp_path, fsync_policy=FsyncPolicy(every_n_events=1, every_ms=99999))
+        with patch("storage_event_log._local.os.fsync"):
+            with patch("storage_event_log._local.get_tracer", return_value=mock_tracer):
+                await writer.append("s1", "session.created", {})
+        event_names = [e[0] for e in mock_tracer.span.events]
+        assert "event_log.fsync.invocation" in event_names
+
+    async def test_fsync_structured_event_operation(self, tmp_path: Path) -> None:
+        from .conftest import MockTracer
+
+        mock_tracer = MockTracer()
+        writer = LocalEventLogWriter(tmp_path, fsync_policy=FsyncPolicy(every_n_events=1, every_ms=99999))
+        with patch("storage_event_log._local.os.fsync"):
+            with patch("storage_event_log._local.get_tracer", return_value=mock_tracer):
+                await writer.append("s1", "session.created", {})
+        inv = next(e for e in mock_tracer.span.events if e[0] == "event_log.fsync.invocation")
+        assert inv[1]["operation"] == "fsync"
+
+    async def test_no_fsync_span_when_threshold_not_reached(self, tmp_path: Path) -> None:
+        from .conftest import MockTracer
+
+        mock_tracer = MockTracer()
+        writer = LocalEventLogWriter(tmp_path, fsync_policy=FsyncPolicy(every_n_events=100, every_ms=99999))
+        with patch("storage_event_log._local.get_tracer", return_value=mock_tracer):
+            await writer.append("s1", "session.created", {})
+        # Span name is "" when no fsync span was started
+        assert mock_tracer.span.name == ""
+
+
+# ---------------------------------------------------------------------------
+# FsyncPolicy — failure handling
+# ---------------------------------------------------------------------------
+
+
+class TestFsyncFailure:
+    async def test_fsync_failure_raises_event_log_failure(self, tmp_path: Path) -> None:
+        writer = LocalEventLogWriter(tmp_path, fsync_policy=FsyncPolicy(every_n_events=1, every_ms=99999))
+        with patch("storage_event_log._local.os.fsync", side_effect=OSError("disk error")):
+            with pytest.raises(EventLogFailure) as exc_info:
+                await writer.append("s1", "session.created", {})
+        assert exc_info.value.code == "EVENT_LOG_FSYNC_FAILED"
+
+    async def test_fsync_failure_cause_preserved(self, tmp_path: Path) -> None:
+        orig = OSError("disk error")
+        writer = LocalEventLogWriter(tmp_path, fsync_policy=FsyncPolicy(every_n_events=1, every_ms=99999))
+        with patch("storage_event_log._local.os.fsync", side_effect=orig):
+            with pytest.raises(EventLogFailure) as exc_info:
+                await writer.append("s1", "session.created", {})
+        assert exc_info.value.cause is orig
+
+    async def test_fsync_failure_span_marked_error(self, tmp_path: Path) -> None:
+        from .conftest import MockTracer
+
+        mock_tracer = MockTracer()
+        writer = LocalEventLogWriter(tmp_path, fsync_policy=FsyncPolicy(every_n_events=1, every_ms=99999))
+        with patch("storage_event_log._local.os.fsync", side_effect=OSError("disk error")):
+            with patch("storage_event_log._local.get_tracer", return_value=mock_tracer):
+                with pytest.raises(EventLogFailure):
+                    await writer.append("s1", "session.created", {})
+        assert mock_tracer.span.status.status_code == StatusCode.ERROR
+
+    async def test_fsync_failure_span_ended(self, tmp_path: Path) -> None:
+        from .conftest import MockTracer
+
+        mock_tracer = MockTracer()
+        writer = LocalEventLogWriter(tmp_path, fsync_policy=FsyncPolicy(every_n_events=1, every_ms=99999))
+        with patch("storage_event_log._local.os.fsync", side_effect=OSError("disk error")):
+            with patch("storage_event_log._local.get_tracer", return_value=mock_tracer):
+                with pytest.raises(EventLogFailure):
+                    await writer.append("s1", "session.created", {})
+        assert mock_tracer.span.ended
+
+    async def test_fsync_failure_audited_via_runtime(self, tmp_path: Path) -> None:
+        """EventLogRuntime must catch fsync failures and write an audit entry."""
+        writer = LocalEventLogWriter(tmp_path, fsync_policy=FsyncPolicy(every_n_events=1, every_ms=99999))
+        rt = EventLogRuntime(writer)
+        audit = CapturingAuditLog()
+        opts = EventLogOptions(audit_log=audit)
+        with patch("storage_event_log._local.os.fsync", side_effect=OSError("disk error")):
+            with pytest.raises(EventLogFailure) as exc_info:
+                await rt.append("s1", "session.created", {}, options=opts)
+        assert exc_info.value.code == "EVENT_LOG_FSYNC_FAILED"
+        assert len(audit.entries) == 1
+        entry: AuditLogEntry = audit.entries[0]
+        assert entry.level == "error"
+        assert entry.event == "event_log.append.failed"
+
+    async def test_data_still_written_before_fsync_failure(self, tmp_path: Path) -> None:
+        """The NDJSON line must be on disk even when fsync subsequently fails."""
+        writer = LocalEventLogWriter(tmp_path, fsync_policy=FsyncPolicy(every_n_events=1, every_ms=99999))
+        with patch("storage_event_log._local.os.fsync", side_effect=OSError("disk error")):
+            with pytest.raises(EventLogFailure):
+                await writer.append("sess1", "session.created", {"k": "v"})
+        ndjson_files = list(tmp_path.rglob("*.ndjson"))
+        assert len(ndjson_files) == 1
+        record = json.loads(ndjson_files[0].read_text().strip())
+        assert record["seq"] == 0
+        assert record["data"] == {"k": "v"}

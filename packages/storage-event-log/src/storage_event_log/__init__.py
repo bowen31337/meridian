@@ -12,11 +12,12 @@ from ._local import LocalEventLogWriter
 from ._runtime import EventLogOptions, EventLogRuntime
 
 # Telemetry
-from ._telemetry import get_tracer, record_event_log_failure, record_invocation_event
+from ._telemetry import get_tracer, record_event_log_failure, record_fsync_event, record_invocation_event
 from ._types import (
     AuditLogEntry,
     EventLogFailure,
     EventType,
+    FsyncPolicy,
     SessionEvent,
     StructuredEvent,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "AuditLogEntry",
     "EventLogFailure",
     "EventType",
+    "FsyncPolicy",
     "SessionEvent",
     "StructuredEvent",
     # Contract
@@ -41,6 +43,7 @@ __all__ = [
     # Telemetry
     "get_tracer",
     "record_event_log_failure",
+    "record_fsync_event",
     "record_invocation_event",
     # Runtime
     "EventLogOptions",

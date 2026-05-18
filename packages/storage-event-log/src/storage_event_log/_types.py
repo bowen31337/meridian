@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 EventType = Literal[
@@ -75,6 +75,20 @@ class SessionEvent:
     type: EventType
     data: dict[str, Any]
     thread_id: str | None = None
+
+
+@dataclass
+class FsyncPolicy:
+    """
+    Policy for when LocalEventLogWriter issues an fsync.
+
+    A flush is triggered when either condition is met first:
+      - ``every_n_events`` events have been written since the last fsync.
+      - ``every_ms`` milliseconds have elapsed since the last fsync.
+    """
+
+    every_n_events: int = field(default=100)
+    every_ms: int = field(default=100)
 
 
 @dataclass(frozen=True)
