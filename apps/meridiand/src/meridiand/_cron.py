@@ -18,6 +18,7 @@ from core_errors import (
 )
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 
@@ -66,6 +67,34 @@ class CronInvalidRequestError(MeridianError):
 
     def http_status(self) -> int:
         return 422
+
+
+class CronNotFoundError(MeridianError):
+    def __init__(self, *, cron_id: str, timestamp: str) -> None:
+        super().__init__(
+            code="cron_not_found",
+            message=f"Cron resource '{cron_id}' not found",
+            timestamp=timestamp,
+        )
+
+    def http_status(self) -> int:
+        return 404
+
+
+class CronDeleteError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="cron_delete_failed", message=message, timestamp=timestamp, cause=cause
+        )
+
+    def http_status(self) -> int:
+        return 500
 
 
 # ---------------------------------------------------------------------------
@@ -215,5 +244,62 @@ def make_cron_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                 raise err2
 
         return JSONResponse(content=resource, status_code=201)
+
+    @router.delete("/v1/x/cron/{cron_id}", status_code=204)
+    async def delete_cron(cron_id: str) -> Response:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "cron.delete",
+            attributes={"cron.id": cron_id},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="cron.delete.invocation",
+                    code="cron_delete",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                cron_file = cron_dir / f"{cron_id}.json"
+                if not cron_file.exists():
+                    raise CronNotFoundError(cron_id=cron_id, timestamp=now)
+                cron_file.unlink()
+
+            except CronNotFoundError as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="cron.delete.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={"cron_id": cron_id, "message": err.message},
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = CronDeleteError(
+                    message=f"Failed to delete cron resource: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="cron.delete.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={"cron_id": cron_id, "message": err2.message},
+                    )
+                )
+                raise err2
+
+        return Response(status_code=204)
 
     return router
