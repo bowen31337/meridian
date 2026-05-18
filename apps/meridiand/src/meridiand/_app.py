@@ -26,6 +26,7 @@ from ._compaction import make_compaction_router, run_compaction_loop
 from ._config import CompactionConfig, CronSchedulerConfig, CorsConfig, SkillForgeConfig, WebhookSenderConfig
 from ._cron import make_cron_router
 from ._cron_scheduler import run_cron_scheduler_loop
+from ._memory_stores import make_memory_stores_router
 from ._webhook_sender import run_webhook_sender_loop
 from ._skill_forge import run_skill_forge_loop
 from ._channels import make_channels_router
@@ -237,6 +238,9 @@ def create_app(
                 )
                 app.include_router(
                     make_user_profiles_router(audit_log=audit_log, storage_root=storage_root)
+                )
+                app.include_router(
+                    make_memory_stores_router(audit_log=audit_log, storage_root=storage_root)
                 )
                 if compaction is not None:
                     app.include_router(
