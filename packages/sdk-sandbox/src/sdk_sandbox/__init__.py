@@ -1,6 +1,15 @@
 # Types
 # Audit log
 from ._audit import AuditLog, NoopAuditLog
+
+# Dispatchers
+from ._dispatchers import (
+    ContainerDispatcher,
+    HttpDispatcher,
+    InProcessDispatcher,
+    McpDispatcher,
+    SubprocessDispatcher,
+)
 from .fake import FakeSandboxAdapter, write_sandbox_fixture
 
 # Contract
@@ -54,6 +63,12 @@ __all__ = [
     "ToolHandler",
     # Contract
     "ToolDispatcher",
+    # Dispatchers
+    "ContainerDispatcher",
+    "HttpDispatcher",
+    "InProcessDispatcher",
+    "McpDispatcher",
+    "SubprocessDispatcher",
     # Audit
     "AuditLog",
     "NoopAuditLog",
