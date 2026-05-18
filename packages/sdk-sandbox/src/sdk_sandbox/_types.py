@@ -33,10 +33,12 @@ class SubprocessHandler:
 
 @dataclass(frozen=True)
 class McpHandler:
-    """Tool hosted on an MCP server."""
+    """Tool hosted on an MCP server (HTTP or stdio transport)."""
 
-    server_url: str = ""
-    tool_name: str = ""
+    server_url: str = ""  # HTTP transport: POST endpoint URL
+    tool_name: str = ""   # MCP tool name to invoke
+    transport: Literal["http", "stdio"] = "http"
+    command: tuple[str, ...] = ()  # stdio transport: argv to spawn the MCP server
     kind: Literal["mcp"] = field(default="mcp", init=False)
 
 

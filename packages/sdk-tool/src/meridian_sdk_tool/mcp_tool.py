@@ -15,7 +15,7 @@ will route calls to the MCP server automatically.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from ._types import Capability, McpHandler, ToolDefinition
 
@@ -23,7 +23,7 @@ from ._types import Capability, McpHandler, ToolDefinition
 def mcp_tool(
     name: str,
     description: str,
-    server_url: str,
+    server_url: str = "",
     mcp_tool_name: str | None = None,
     input_schema: dict[str, Any] | None = None,
     output_schema: dict[str, Any] | None = None,
@@ -31,6 +31,8 @@ def mcp_tool(
     required_environment: str | None = None,
     timeout_ms: int = 30_000,
     memory_cap_mb: int | None = None,
+    transport: Literal["http", "stdio"] = "http",
+    command: list[str] | None = None,
 ) -> ToolDefinition:
     """Return a :class:`~meridian_sdk_tool._types.ToolDefinition` backed by an MCP server.
 
@@ -38,6 +40,7 @@ def mcp_tool(
         name: Meridian-level tool name (what the agent calls).
         description: Human-readable description for the model.
         server_url: Base URL of the MCP server (e.g. ``http://localhost:3000``).
+            Required when *transport* is ``"http"``; ignored for ``"stdio"``.
         mcp_tool_name: The tool name as advertised by the MCP server.
             Defaults to *name* if omitted.
         input_schema: JSON Schema for args.  If omitted, the Sandbox fetches
@@ -48,6 +51,11 @@ def mcp_tool(
         required_environment: Environment backend constraint (e.g. ``"docker"``).
         timeout_ms: Per-call timeout in milliseconds.
         memory_cap_mb: Memory cap passed to the environment backend.
+        transport: ``"http"`` (default) or ``"stdio"``.  Selects the MCP
+            transport used by the Sandbox dispatcher.
+        command: Argv list for the MCP stdio server process (e.g.
+            ``["python", "my_server.py"]``).  Required when *transport* is
+            ``"stdio"``; ignored for ``"http"``.
     """
     return ToolDefinition(
         name=name,
@@ -61,5 +69,7 @@ def mcp_tool(
         handler=McpHandler(
             server_url=server_url,
             tool_name=mcp_tool_name or name,
+            transport=transport,
+            command=command or [],
         ),
     )

@@ -74,8 +74,10 @@ class McpHandler(BaseModel):
     """Tool is served by an MCP server; the Sandbox proxy routes the call."""
 
     kind: Literal["mcp"] = "mcp"
-    server_url: str
+    server_url: str = ""  # HTTP transport: POST endpoint URL
     tool_name: str
+    transport: Literal["http", "stdio"] = "http"
+    command: list[str] = Field(default_factory=list)  # stdio transport: argv to spawn
 
 
 class HttpHandler(BaseModel):

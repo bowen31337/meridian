@@ -24,11 +24,16 @@ http:
     POST {url}  body={"args": {...}, "context": {...}}
     200         body={"result": ...}  |  {"error": {"code": ..., "message": ...}}
 
-mcp (JSON-RPC 2.0):
+mcp/http (JSON-RPC 2.0 over HTTP):
     POST {server_url}  body={"jsonrpc":"2.0","id":"...","method":"tools/call",
                              "params":{"name":"...","arguments":{...}}}
     200               body={"jsonrpc":"2.0","id":"...","result":{"content":[...],"isError":false}}
                          | {"jsonrpc":"2.0","id":"...","error":{"code":...,"message":"..."}}
+
+mcp/stdio (JSON-RPC 2.0 over newline-delimited stdin/stdout):
+    Spawns command argv as subprocess.
+    Performs MCP initialize / notifications/initialized handshake, then sends
+    tools/call and reads the response.  Each message is one JSON line.
 """
 
 from __future__ import annotations
@@ -420,11 +425,14 @@ class SubprocessDispatcher(ToolDispatcher):
 
 class McpDispatcher(ToolDispatcher):
     """
-    Dispatcher for tools hosted on an MCP server (JSON-RPC 2.0 over HTTP).
+    Dispatcher for tools hosted on an MCP server (JSON-RPC 2.0).
 
-    Calls McpHandler.server_url via POST with a JSON-RPC 2.0 tools/call
-    request.  Requires ``httpx``; install with
-    ``pip install 'meridian-sdk-sandbox[http]'``.
+    Supports two transports selected by McpHandler.transport:
+      - "http": POST to McpHandler.server_url.  Requires ``httpx``;
+        install with ``pip install 'meridian-sdk-sandbox[http]'``.
+      - "stdio": Spawn McpHandler.command as a subprocess and communicate
+        via newline-delimited JSON-RPC 2.0.  Performs the MCP
+        initialize / notifications/initialized handshake before each call.
 
     MCP content blocks are collapsed to plain text in SandboxResult.content.
     """
@@ -442,6 +450,53 @@ class McpDispatcher(ToolDispatcher):
         self._timeout_s = timeout_s
         self._audit_log: AuditLog = audit_log if audit_log is not None else NoopAuditLog()
 
+    def _normalize_mcp_result(
+        self,
+        span: Any,
+        data: dict[str, Any],
+        tool_name: str,
+        session_id: str,
+        now: str,
+        start: float,
+    ) -> SandboxResult:
+        """Normalize a JSON-RPC tools/call response to SandboxResult."""
+        if "error" in data:
+            err = data["error"]
+            message = err.get("message", "MCP JSON-RPC error")
+            code = str(err.get("code", "mcp_rpc_error"))
+            return _error_result(
+                span,
+                self._audit_log,
+                audit_event="mcp.rpc.error",
+                code=code,
+                message=message,
+                tool_name=tool_name,
+                session_id=session_id,
+                now=now,
+            )
+
+        result: dict[str, Any] = data.get("result", {})
+        is_error = result.get("isError", False)
+        content_blocks: list[dict[str, Any]] = result.get("content", [])
+        text = "\n".join(
+            b.get("text", "") for b in content_blocks if b.get("type") == "text"
+        )
+        content: Any = text if text else result
+
+        if is_error:
+            return _error_result(
+                span,
+                self._audit_log,
+                audit_event="mcp.tool.error",
+                code="mcp_tool_error",
+                message=text or "MCP tool returned isError=true",
+                tool_name=tool_name,
+                session_id=session_id,
+                now=now,
+            )
+
+        return SandboxResult(content=content, duration_ms=_ms_since(start))
+
     async def dispatch(
         self,
         tool: ToolDefinition,
@@ -454,15 +509,17 @@ class McpDispatcher(ToolDispatcher):
         tracer = get_tracer()
         handler: McpHandler = tool.handler
 
-        with tracer.start_as_current_span(
-            "mcp.dispatch",
-            attributes={
-                "tool.name": tool.name,
-                "session.id": context.session_id,
-                "mcp.server_url": handler.server_url,
-                "mcp.tool_name": handler.tool_name,
-            },
-        ) as span:
+        span_attrs: dict[str, Any] = {
+            "tool.name": tool.name,
+            "session.id": context.session_id,
+            "mcp.server_url": handler.server_url,
+            "mcp.tool_name": handler.tool_name,
+            "mcp.transport": handler.transport,
+        }
+        if handler.transport == "stdio":
+            span_attrs["mcp.command"] = " ".join(handler.command)
+
+        with tracer.start_as_current_span("mcp.dispatch", attributes=span_attrs) as span:
             span.add_event(
                 "mcp.dispatch",
                 {
@@ -470,10 +527,73 @@ class McpDispatcher(ToolDispatcher):
                     "session.id": context.session_id,
                     "mcp.server_url": handler.server_url,
                     "mcp.tool_name": handler.tool_name,
+                    "mcp.transport": handler.transport,
                     "timestamp": now,
                 },
             )
 
+            # ------------------------------------------------------------------
+            # stdio transport
+            # ------------------------------------------------------------------
+            if handler.transport == "stdio":
+                from ._mcp_client import stdio_tools_call
+
+                if not handler.command:
+                    return _error_result(
+                        span,
+                        self._audit_log,
+                        audit_event="mcp.stdio.no_command",
+                        code="mcp_stdio_no_command",
+                        message=(
+                            "stdio McpHandler has an empty command; "
+                            "set McpHandler.command to the argv for the MCP server"
+                        ),
+                        tool_name=tool.name,
+                        session_id=context.session_id,
+                        now=now,
+                    )
+
+                start = time.monotonic()
+                try:
+                    data = await stdio_tools_call(
+                        handler.command,
+                        handler.tool_name,
+                        input,
+                        self._timeout_s,
+                    )
+                except FileNotFoundError:
+                    cmd_str = handler.command[0] if handler.command else ""
+                    return _error_result(
+                        span,
+                        self._audit_log,
+                        audit_event="mcp.stdio.command_not_found",
+                        code="mcp_stdio_command_not_found",
+                        message=f"MCP stdio command not found: {cmd_str!r}",
+                        tool_name=tool.name,
+                        session_id=context.session_id,
+                        now=now,
+                        detail={"command": list(handler.command)},
+                    )
+                except Exception as exc:
+                    return _error_result(
+                        span,
+                        self._audit_log,
+                        audit_event="mcp.stdio.request_failed",
+                        code="mcp_stdio_request_failed",
+                        message=str(exc),
+                        tool_name=tool.name,
+                        session_id=context.session_id,
+                        now=now,
+                        detail={"command": list(handler.command)},
+                    )
+
+                return self._normalize_mcp_result(
+                    span, data, tool.name, context.session_id, now, start
+                )
+
+            # ------------------------------------------------------------------
+            # HTTP transport (original path)
+            # ------------------------------------------------------------------
             if not _HTTPX_AVAILABLE:
                 return _error_result(
                     span,
@@ -523,42 +643,9 @@ class McpDispatcher(ToolDispatcher):
                     detail={"server_url": handler.server_url},
                 )
 
-            if "error" in data:
-                err = data["error"]
-                message = err.get("message", "MCP JSON-RPC error")
-                code = str(err.get("code", "mcp_rpc_error"))
-                return _error_result(
-                    span,
-                    self._audit_log,
-                    audit_event="mcp.rpc.error",
-                    code=code,
-                    message=message,
-                    tool_name=tool.name,
-                    session_id=context.session_id,
-                    now=now,
-                )
-
-            result: dict[str, Any] = data.get("result", {})
-            is_error = result.get("isError", False)
-            content_blocks: list[dict[str, Any]] = result.get("content", [])
-            text = "\n".join(
-                b.get("text", "") for b in content_blocks if b.get("type") == "text"
+            return self._normalize_mcp_result(
+                span, data, tool.name, context.session_id, now, start
             )
-            content: Any = text if text else result
-
-            if is_error:
-                return _error_result(
-                    span,
-                    self._audit_log,
-                    audit_event="mcp.tool.error",
-                    code="mcp_tool_error",
-                    message=text or "MCP tool returned isError=true",
-                    tool_name=tool.name,
-                    session_id=context.session_id,
-                    now=now,
-                )
-
-            return SandboxResult(content=content, duration_ms=_ms_since(start))
 
 
 # ---------------------------------------------------------------------------
