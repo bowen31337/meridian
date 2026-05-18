@@ -6,6 +6,9 @@ from ._audit import AuditLog, NoopAuditLog
 from ._contract import EventHandler
 from ._indexer import BackgroundIndexer
 
+# Phase projection
+from ._phase import PhaseProjection, PhaseProjectionOptions, PhaseProjectionRuntime
+
 # Core components
 from ._reader import LocalEventLogReader
 from ._reader_runtime import ReaderOptions, ReaderRuntime
@@ -19,6 +22,7 @@ from ._telemetry import (
     get_tracer,
     record_indexer_failure,
     record_invocation_event,
+    record_phase_failure,
     record_reader_failure,
 )
 from ._types import AuditLogEntry, EventSeq, IndexerFailure, StructuredEvent
@@ -38,6 +42,10 @@ __all__ = [
     "LocalEventLogReader",
     "SQLiteProjectionStore",
     "BackgroundIndexer",
+    # Phase projection
+    "PhaseProjection",
+    "PhaseProjectionOptions",
+    "PhaseProjectionRuntime",
     # Audit
     "AuditLog",
     "NoopAuditLog",
@@ -45,6 +53,7 @@ __all__ = [
     "get_tracer",
     "record_indexer_failure",
     "record_invocation_event",
+    "record_phase_failure",
     "record_reader_failure",
     # Runtime
     "IndexerOptions",

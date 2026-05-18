@@ -169,3 +169,38 @@ class StubReader:
             raise self._raises
         for event in self._events:
             yield event
+
+
+# ---------------------------------------------------------------------------
+# Phase projection stubs
+# ---------------------------------------------------------------------------
+
+
+class StubPhaseProjection:
+    """PhaseProjection substitute for PhaseProjectionRuntime tests."""
+
+    def __init__(
+        self,
+        *,
+        raises: Exception | None = None,
+        returns: str = "created",
+    ) -> None:
+        self._raises = raises
+        self._returns = returns
+
+    def current_phase(self, session_id: str) -> str:
+        if self._raises:
+            raise self._raises
+        return self._returns
+
+
+@pytest.fixture()
+def mock_phase_tracer(monkeypatch: pytest.MonkeyPatch) -> MockTracer:
+    tracer = MockTracer()
+    monkeypatch.setattr("storage_reposit._phase.get_tracer", lambda: tracer)
+    return tracer
+
+
+@pytest.fixture()
+def mock_phase_span(mock_phase_tracer: MockTracer) -> MockSpan:
+    return mock_phase_tracer.span

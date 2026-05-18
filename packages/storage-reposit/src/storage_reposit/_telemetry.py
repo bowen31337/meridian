@@ -52,3 +52,19 @@ def record_reader_failure(span: Span, failure: IndexerFailure) -> None:
     )
     if failure.cause is not None:
         span.record_exception(failure.cause)
+
+
+def record_phase_failure(span: Span, failure: IndexerFailure) -> None:
+    """Records a failure on the span: sets status to ERROR, adds a "phase.error" event,
+    and records the underlying exception if present."""
+    span.set_status(Status(StatusCode.ERROR, failure.message))
+    span.add_event(
+        "phase.error",
+        {
+            "phase.session_id": failure.session_id,
+            "error.code": failure.code,
+            "error.message": failure.message,
+        },
+    )
+    if failure.cause is not None:
+        span.record_exception(failure.cause)

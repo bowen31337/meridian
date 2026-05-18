@@ -54,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
         services.audit_log,
         plugin_loader=services.plugin_loader,
         storage_root=config.storage_root,
+        event_log=services.event_log,
     )
 
     bind = config.bind
