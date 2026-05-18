@@ -18,7 +18,15 @@ from .canvas import canvas_op_tool
 from .grep import grep_tool
 from .kb_search import kb_search_tool
 from .spawn import spawn_tool
+from .write import write_tool
 
-ALL_TOOLS = [canvas_op_tool, grep_tool, kb_search_tool, spawn_tool]
+ALL_TOOLS = [canvas_op_tool, grep_tool, kb_search_tool, spawn_tool, write_tool]
 
-__all__ = ["canvas_op_tool", "grep_tool", "kb_search_tool", "spawn_tool", "ALL_TOOLS"]
+__all__ = [
+    "canvas_op_tool",
+    "grep_tool",
+    "kb_search_tool",
+    "spawn_tool",
+    "write_tool",
+    "ALL_TOOLS",
+]
