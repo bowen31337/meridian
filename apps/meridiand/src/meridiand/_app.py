@@ -22,6 +22,7 @@ from ._acp_compliance import make_acp_compliance_router
 from ._cancel import make_cancel_router
 from ._checkpoint import make_checkpoint_router
 from ._ci_regression import make_ci_regression_router
+from ._skill_forge_soak import make_skill_forge_soak_router
 from ._compaction import make_compaction_router, run_compaction_loop
 from ._config import AuthConfig, CompactionConfig, CronSchedulerConfig, CorsConfig, SkillForgeConfig, WebhookSenderConfig
 from ._cron import make_cron_router
@@ -240,6 +241,9 @@ def create_app(
                 )
                 app.include_router(
                     make_ci_regression_router(audit_log=audit_log, storage_root=storage_root)
+                )
+                app.include_router(
+                    make_skill_forge_soak_router(audit_log=audit_log, storage_root=storage_root)
                 )
                 app.include_router(
                     make_cron_router(audit_log=audit_log, storage_root=storage_root)
