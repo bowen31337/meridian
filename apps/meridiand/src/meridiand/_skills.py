@@ -15,7 +15,7 @@ from core_errors import (
     record_error,
     record_invocation_event,
 )
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -59,6 +59,38 @@ class SkillVersionNotFoundError(MeridianError):
 
     def http_status(self) -> int:
         return 404
+
+
+class SkillListError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="skill_list_failed", message=message, timestamp=timestamp, cause=cause
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
+class SkillVersionsListError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="skill_versions_list_failed", message=message, timestamp=timestamp, cause=cause
+        )
+
+    def http_status(self) -> int:
+        return 500
 
 
 # ---------------------------------------------------------------------------
@@ -286,5 +318,113 @@ def make_skills_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                 raise err2
 
         return JSONResponse(content=version_record, status_code=200)
+
+    @router.get("/v1/skills")
+    async def list_skills(
+        limit: int = Query(default=20),
+        offset: int = Query(default=0),
+    ) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span("skill.list") as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="skill.list.invocation",
+                    code="skill_list",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                all_skills: list[dict[str, Any]] = []
+                if skills_dir.exists():
+                    for path in skills_dir.glob("*.json"):
+                        all_skills.append(json.loads(path.read_text()))
+
+                all_skills.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+                total = len(all_skills)
+                page = all_skills[offset : offset + limit]
+
+            except Exception as exc:
+                err = SkillListError(
+                    message=f"Failed to list skills: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="skill.list.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={"message": err.message},
+                    )
+                )
+                raise err
+
+        return JSONResponse(
+            content={"items": page, "total": total, "limit": limit, "offset": offset},
+            status_code=200,
+        )
+
+    @router.get("/v1/skills/{skill_id}/versions")
+    async def list_skill_versions(
+        skill_id: str,
+        limit: int = Query(default=20),
+        offset: int = Query(default=0),
+    ) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "skill.versions.list",
+            attributes={"skill.id": skill_id},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="skill.versions.list.invocation",
+                    code="skill_versions_list",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                all_versions: list[dict[str, Any]] = []
+                if versions_dir.exists():
+                    for path in versions_dir.glob("*.json"):
+                        record = json.loads(path.read_text())
+                        if record.get("skill_id") == skill_id:
+                            all_versions.append(record)
+
+                all_versions.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+                total = len(all_versions)
+                page = all_versions[offset : offset + limit]
+
+            except Exception as exc:
+                err = SkillVersionsListError(
+                    message=f"Failed to list skill versions: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="skill.versions.list.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={"skill_id": skill_id, "message": err.message},
+                    )
+                )
+                raise err
+
+        return JSONResponse(
+            content={"items": page, "total": total, "limit": limit, "offset": offset},
+            status_code=200,
+        )
 
     return router
