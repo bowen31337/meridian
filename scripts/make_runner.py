@@ -80,8 +80,14 @@ _TEST_STEPS: list[_Step] = [
     ),
 ]
 
-# Populated when packages/schemas (OpenAPI source-of-truth) exists.
-_CODEGEN_STEPS: list[_Step] = []
+_CODEGEN_STEPS: list[_Step] = [
+    (
+        "codegen:openapi",
+        ["uv", "run", "python", "scripts/export_openapi.py"],
+        None,
+        "fix openapi export errors shown above",
+    ),
+]
 
 _STEPS: dict[str, list[_Step]] = {
     "lint": _LINT_STEPS,
