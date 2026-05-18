@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/user-profiles-p-api-post-v1-user-profiles-creates-a-use/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/cli-tui-system-auto-compaction-policy-sessions-idle-30/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -20,7 +22,8 @@ from ._acp_compliance import make_acp_compliance_router
 from ._cancel import make_cancel_router
 from ._checkpoint import make_checkpoint_router
 from ._ci_regression import make_ci_regression_router
-from ._config import CorsConfig
+from ._compaction import make_compaction_router, run_compaction_loop
+from ._config import CompactionConfig, CorsConfig
 from ._cron import make_cron_router
 from ._skills import make_skills_router
 from ._user_profiles import make_user_profiles_router
@@ -54,6 +57,7 @@ def create_app(
     acp_inbound_handler: AcpInboundHandler | None = None,
     cors: CorsConfig | None = None,
     model_router: ModelRouter | None = None,
+    compaction: CompactionConfig | None = None,
 ) -> FastAPI:
     """
     Application factory for the meridiand HTTP API.
@@ -88,8 +92,24 @@ def create_app(
                             err.message,
                             extra={"plugin.name": err.plugin_name, "error.code": err.code},
                         )
+
+                compaction_task: asyncio.Task[None] | None = None
+                if (
+                    storage_root is not None
+                    and compaction is not None
+                    and compaction.enabled
+                ):
+                    compaction_task = asyncio.create_task(
+                        run_compaction_loop(storage_root, compaction, audit_log)
+                    )
+
                 _LOG.info("meridiand ready")
                 yield
+
+                if compaction_task is not None:
+                    compaction_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await compaction_task
 
             app = FastAPI(title="meridiand", lifespan=_lifespan)
 
@@ -153,6 +173,14 @@ def create_app(
                 app.include_router(
                     make_user_profiles_router(audit_log=audit_log, storage_root=storage_root)
                 )
+                if compaction is not None:
+                    app.include_router(
+                        make_compaction_router(
+                            audit_log=audit_log,
+                            storage_root=storage_root,
+                            policy=compaction,
+                        )
+                    )
                 if event_log is not None:
                     app.include_router(
                         make_phase_router(

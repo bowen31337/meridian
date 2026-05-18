@@ -70,6 +70,16 @@ class CorsConfig(BaseModel):
     allow_credentials: bool = False
 
 
+class CompactionConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    enabled: bool = True
+    idle_days: int = 30
+    summary_strategy: str = "tail"
+    tail_events: int = 50
+    retention_days: int | None = None
+
+
 class MeridianConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -78,6 +88,7 @@ class MeridianConfig(BaseModel):
     bind: BindConfig = Field(default_factory=BindConfig)
     log_level: str = "info"
     cors: CorsConfig = Field(default_factory=CorsConfig)
+    compaction: CompactionConfig = Field(default_factory=CompactionConfig)
 
     @field_validator("storage_root", mode="before")
     @classmethod
