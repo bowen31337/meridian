@@ -14,6 +14,7 @@ from ._acp import AcpPeerClient, make_acp_router
 from ._cancel import make_cancel_router
 from ._checkpoint import make_checkpoint_router
 from ._ci_regression import make_ci_regression_router
+from ._events import make_events_router
 from ._handoff import make_handoff_router
 from ._kb import make_kb_router
 from ._parallel_runs import make_parallel_runs_router
@@ -56,6 +57,7 @@ def create_app(
     app = FastAPI(title="meridiand", lifespan=_lifespan)
     install_error_handler(app, HandlerOptions(audit_log=audit_log))
     if storage_root is not None:
+        app.include_router(make_events_router(audit_log=audit_log, storage_root=storage_root))
         app.include_router(make_replay_router(audit_log=audit_log, storage_root=storage_root))
         app.include_router(make_checkpoint_router(audit_log=audit_log, storage_root=storage_root))
         app.include_router(make_resume_router(audit_log=audit_log, storage_root=storage_root))

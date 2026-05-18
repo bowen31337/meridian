@@ -775,24 +775,32 @@ name = "meridian-sdk-sandbox"
 version = "0.1.0"
 source = { editable = "packages/sdk-sandbox" }
 dependencies = [
+    { name = "jsonschema" },
     { name = "opentelemetry-api" },
 ]
 
 [package.optional-dependencies]
 dev = [
+    { name = "httpx" },
     { name = "opentelemetry-sdk" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
 ]
+http = [
+    { name = "httpx" },
+]
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
+    { name = "httpx", marker = "extra == 'http'", specifier = ">=0.27" },
+    { name = "jsonschema", specifier = ">=4.0" },
     { name = "opentelemetry-api", specifier = ">=1.24" },
     { name = "opentelemetry-sdk", marker = "extra == 'dev'", specifier = ">=1.24" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["http", "dev"]
 
 [[package]]
 name = "meridian-sdk-tool"
@@ -992,6 +1000,7 @@ dependencies = [
     { name = "meridian-sdk-capabilities" },
     { name = "meridian-storage-blob" },
     { name = "meridian-storage-event-log" },
+    { name = "meridian-storage-reposit" },
     { name = "opentelemetry-api" },
     { name = "pyyaml" },
     { name = "sqlean-py" },
@@ -1018,6 +1027,7 @@ requires-dist = [
     { name = "meridian-sdk-capabilities", editable = "packages/sdk-capabilities" },
     { name = "meridian-storage-blob", editable = "packages/storage-blob" },
     { name = "meridian-storage-event-log", editable = "packages/storage-event-log" },
+    { name = "meridian-storage-reposit", editable = "packages/storage-reposit" },
     { name = "opentelemetry-api", specifier = ">=1.24" },
     { name = "opentelemetry-sdk", marker = "extra == 'dev'", specifier = ">=1.24" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
