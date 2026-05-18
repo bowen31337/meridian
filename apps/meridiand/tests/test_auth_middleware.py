@@ -22,7 +22,7 @@ Tests cover:
   - Span carries auth.check.allowed event on success.
   - Span carries auth.check.rejected event on rejection.
   - AuthMiddleware is registered in create_app.
-  - AuthMiddleware is the outermost middleware in create_app.
+  - AuthMiddleware is the second outermost middleware in create_app (ErrorEnvelopeMiddleware is outermost).
 """
 
 from __future__ import annotations
@@ -365,10 +365,11 @@ class TestMiddlewareRegistration:
         app = create_app(NoopAuditLog())
         assert any(m.cls is AuthMiddleware for m in app.user_middleware)
 
-    def test_auth_middleware_is_outermost(self) -> None:
+    def test_auth_middleware_is_second_outermost(self) -> None:
         app = create_app(NoopAuditLog())
-        # user_middleware[0] is the outermost (last added via add_middleware).
-        assert app.user_middleware[0].cls is AuthMiddleware
+        # user_middleware[0] is ErrorEnvelopeMiddleware (outermost).
+        # user_middleware[1] is AuthMiddleware (second outermost).
+        assert app.user_middleware[1].cls is AuthMiddleware
 
     def test_auth_config_bearer_token_passed_to_middleware(self) -> None:
         auth = AuthConfig(bearer_token="my-token")

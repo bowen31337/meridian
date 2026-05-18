@@ -49,6 +49,7 @@ from ._resume import make_resume_router
 from ._wake import make_wake_router
 from ._auth_middleware import AuthMiddleware
 from ._cursor_middleware import CursorPaginationMiddleware
+from ._error_envelope_middleware import ErrorEnvelopeMiddleware
 from ._idempotency_middleware import IdempotencyKeyMiddleware
 from ._openapi_export import make_openapi_export_router
 from ._spawn import make_spawn_router
@@ -197,6 +198,7 @@ def create_app(
                     allow_credentials=cors.allow_credentials,
                 )
             app.add_middleware(AuthMiddleware, audit_log=audit_log, bearer_token=bearer_token)
+            app.add_middleware(ErrorEnvelopeMiddleware, audit_log=audit_log)
 
             install_error_handler(app, HandlerOptions(audit_log=audit_log))
 
