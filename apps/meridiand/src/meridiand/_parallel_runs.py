@@ -19,7 +19,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from ._replay import FakeModelAdapter, FakeSandboxAdapter, _run_harness
+from ._replay import FakeModelAdapter, FakeSandboxAdapter, UsageDelta, _run_harness
 
 
 def _now() -> str:
@@ -71,6 +71,45 @@ class ParallelRunsRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Budget accumulator
+# ---------------------------------------------------------------------------
+
+
+class _BudgetAccumulator:
+    """
+    Accumulates usage.delta events emitted by descendant workers and signals a
+    breach via an asyncio.Event when the parent's hard budget is crossed.
+
+    Each usage.delta counts as one model call.  Workers check cancel_event at
+    the top of every harness loop iteration so breach propagation is synchronous
+    — the breaching delta sets the event, and every other worker raises
+    CancelledError at its very next model-call boundary.
+    """
+
+    def __init__(self, budget_model_calls: int | None) -> None:
+        self._budget = budget_model_calls
+        self._model_calls = 0
+        self._cancel_event: asyncio.Event = asyncio.Event()
+
+    def record(self, delta: UsageDelta) -> None:  # noqa: ARG002 — tokens reserved for future cost accounting
+        self._model_calls += 1
+        if self._budget is not None and self._model_calls > self._budget:
+            self._cancel_event.set()
+
+    @property
+    def exceeded(self) -> bool:
+        return self._budget is not None and self._model_calls > self._budget
+
+    @property
+    def total_model_calls(self) -> int:
+        return self._model_calls
+
+    @property
+    def cancel_event(self) -> asyncio.Event:
+        return self._cancel_event
+
+
+# ---------------------------------------------------------------------------
 # Parallel execution helper
 # ---------------------------------------------------------------------------
 
@@ -83,14 +122,19 @@ async def _run_children_parallel(
     """
     Run all children concurrently. Returns (child_results, status, total_model_calls, total_tool_calls).
 
-    When budget_model_calls is set and the running total crosses it after processing
-    a batch of completed tasks, all remaining tasks are cancelled synchronously.
+    Each child emits usage.delta events via on_usage_delta callbacks that roll up into a
+    shared _BudgetAccumulator.  When the accumulated total crosses budget_model_calls the
+    accumulator sets a shared cancel_event; every worker checks that event at the top of
+    each harness loop iteration and raises CancelledError before its next model call.
+
+    After each asyncio.wait batch the caller also cancels any remaining pending tasks
+    synchronously so workers that haven't started yet are also stopped immediately.
     """
     if not children:
         return [], "completed", 0, 0
 
+    budget_acc = _BudgetAccumulator(budget_model_calls)
     child_results: list[dict[str, Any] | None] = [None] * len(children)
-    total_model_calls = 0
     total_tool_calls = 0
     final_status = "completed"
 
@@ -98,7 +142,16 @@ async def _run_children_parallel(
         fixture_dir = storage_root / "fixtures" / spec.fixture_session_id
         model_adapter = FakeModelAdapter(fixture_dir / "model_responses.ndjson")
         sandbox_adapter = FakeSandboxAdapter(fixture_dir / "tool_responses.ndjson")
-        model_calls, tool_calls = await _run_harness(model_adapter, sandbox_adapter)
+
+        def on_delta(delta: UsageDelta) -> None:
+            budget_acc.record(delta)
+
+        model_calls, tool_calls = await _run_harness(
+            model_adapter,
+            sandbox_adapter,
+            on_usage_delta=on_delta,
+            cancel_event=budget_acc.cancel_event,
+        )
         return idx, {
             "fixture_session_id": spec.fixture_session_id,
             "model_call_count": model_calls,
@@ -120,14 +173,13 @@ async def _run_children_parallel(
             try:
                 idx, result = await task
                 child_results[idx] = result
-                total_model_calls += result["model_call_count"]
                 total_tool_calls += result["tool_call_count"]
             except asyncio.CancelledError:
                 pass
 
-        # Check budget after processing the entire batch of completed tasks
-        if budget_model_calls is not None and total_model_calls > budget_model_calls:
-            # Cancel all remaining tasks synchronously
+        # After each batch, cancel any remaining tasks if budget was breached via usage.delta
+        # events (which may have been emitted by workers that just completed or mid-run).
+        if budget_acc.exceeded:
             for t in pending:
                 t.cancel()
             if pending:
@@ -144,7 +196,7 @@ async def _run_children_parallel(
             final_status = "budget_exceeded"
             break
 
-    # Fill in any nulls from cancelled tasks
+    # Fill in any nulls from tasks cancelled mid-execution via cancel_event
     for i, r in enumerate(child_results):
         if r is None:
             child_results[i] = {
@@ -154,7 +206,7 @@ async def _run_children_parallel(
                 "status": "cancelled",
             }
 
-    return child_results, final_status, total_model_calls, total_tool_calls  # type: ignore[return-value]
+    return child_results, final_status, budget_acc.total_model_calls, total_tool_calls  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------

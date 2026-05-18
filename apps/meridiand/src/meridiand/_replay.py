@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -24,9 +26,18 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+@dataclass
+class UsageDelta:
+    """One usage increment emitted by the harness after each model call completes."""
+
+    input_tokens: int
+    output_tokens: int
+
+
 __all__ = [
     "FakeModelAdapter",
     "FakeSandboxAdapter",
+    "UsageDelta",
     "_run_harness",
     "_run_harness_capturing",
     "_find_divergence",
@@ -124,12 +135,23 @@ class FakeSandboxAdapter:
 async def _run_harness(
     model_adapter: FakeModelAdapter,
     sandbox_adapter: FakeSandboxAdapter,
+    on_usage_delta: Callable[[UsageDelta], None] | None = None,
+    cancel_event: asyncio.Event | None = None,
 ) -> tuple[int, int]:
-    """Run the agent harness loop with fake adapters. Returns (model_calls, tool_calls)."""
+    """Run the agent harness loop with fake adapters. Returns (model_calls, tool_calls).
+
+    After each model call completes, calls on_usage_delta with synthetic token counts so
+    the parent can accumulate usage.delta events in real time.  Checks cancel_event at the
+    top of every loop iteration so a sibling's budget breach can stop this worker before its
+    next model call.
+    """
     model_calls = 0
     tool_calls = 0
 
     while True:
+        if cancel_event is not None and cancel_event.is_set():
+            raise asyncio.CancelledError
+
         model_calls += 1
         tool_use_blocks: list[dict[str, Any]] = []
         current_tool: dict[str, Any] | None = None
@@ -148,6 +170,9 @@ async def _run_harness(
                 current_tool["input_json"] += event.get("partial_json", "")
             elif etype == "message_stop":
                 stop_reason = event.get("stop_reason") or "end_turn"
+
+        if on_usage_delta is not None:
+            on_usage_delta(UsageDelta(input_tokens=100, output_tokens=50))
 
         if not tool_use_blocks or stop_reason != "tool_use":
             break
