@@ -48,6 +48,7 @@ from ._replay import make_replay_router
 from ._resume import make_resume_router
 from ._wake import make_wake_router
 from ._cursor_middleware import CursorPaginationMiddleware
+from ._idempotency_middleware import IdempotencyKeyMiddleware
 from ._openapi_export import make_openapi_export_router
 from ._spawn import make_spawn_router
 from ._telemetry import get_tracer, record_create_event, record_factory_failure
@@ -180,6 +181,7 @@ def create_app(
             app = FastAPI(title="meridiand", lifespan=_lifespan)
 
             # GZip is always enabled; minimum_size=1000 avoids compressing tiny payloads.
+            app.add_middleware(IdempotencyKeyMiddleware, audit_log=audit_log)
             app.add_middleware(GZipMiddleware, minimum_size=1000)
             app.add_middleware(CursorPaginationMiddleware, audit_log=audit_log)
             if cors_enabled:
