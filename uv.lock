@@ -985,6 +985,7 @@ version = "0.1.0"
 source = { editable = "apps/meridiand" }
 dependencies = [
     { name = "fastapi" },
+    { name = "jsonschema" },
     { name = "meridian-core-errors" },
     { name = "meridian-kb-indexer" },
     { name = "meridian-plugin-loader" },
@@ -1010,6 +1011,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.110" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
+    { name = "jsonschema", specifier = ">=4.0" },
     { name = "meridian-core-errors", editable = "packages/core-errors" },
     { name = "meridian-kb-indexer", editable = "packages/knowledge-base-indexer" },
     { name = "meridian-plugin-loader", editable = "packages/plugin-loader" },
