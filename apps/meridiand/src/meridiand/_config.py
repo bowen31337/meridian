@@ -80,6 +80,16 @@ class CompactionConfig(BaseModel):
     retention_days: int | None = None
 
 
+class CronSchedulerConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    # What to do with fires missed during daemon downtime.
+    # "catch_up": fire once per missed interval slot.
+    # "skip":     advance schedule past missed slots without firing.
+    missed_fires_policy: str = "skip"
+    check_interval_seconds: float = 5.0
+
+
 class MeridianConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -89,6 +99,7 @@ class MeridianConfig(BaseModel):
     log_level: str = "info"
     cors: CorsConfig = Field(default_factory=CorsConfig)
     compaction: CompactionConfig = Field(default_factory=CompactionConfig)
+    cron: CronSchedulerConfig = Field(default_factory=CronSchedulerConfig)
 
     @field_validator("storage_root", mode="before")
     @classmethod

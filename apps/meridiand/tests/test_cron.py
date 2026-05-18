@@ -706,3 +706,132 @@ class TestCronDeleteRouteWiring:
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.delete("/v1/x/cron/cron_any")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# next_fire_at field
+# ---------------------------------------------------------------------------
+
+
+class TestCronNextFireAt:
+    def test_interval_response_has_next_fire_at(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/cron", json=_body("interval", interval="5m")).json()
+        assert "next_fire_at" in body
+        assert body["next_fire_at"] is not None
+
+    def test_interval_next_fire_at_is_iso8601(self, storage_root: Path) -> None:
+        from datetime import datetime
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/cron", json=_body("interval", interval="5m")).json()
+        # Should parse as ISO-8601 without raising.
+        dt = datetime.fromisoformat(body["next_fire_at"])
+        assert dt is not None
+
+    def test_interval_next_fire_at_is_in_future(self, storage_root: Path) -> None:
+        from datetime import UTC, datetime
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/cron", json=_body("interval", interval="5m")).json()
+        dt = datetime.fromisoformat(body["next_fire_at"])
+        assert dt > datetime.now(UTC)
+
+    def test_timestamp_next_fire_at_equals_timestamp(self, storage_root: Path) -> None:
+        ts = "2030-01-01T00:00:00Z"
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/cron", json=_body("timestamp", timestamp=ts)).json()
+        assert body["next_fire_at"] == ts
+
+    def test_channel_event_next_fire_at_is_null(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/cron", json=_body("channel_event")).json()
+        assert body["next_fire_at"] is None
+
+    def test_file_change_next_fire_at_is_null(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/cron", json=_body("file_change")).json()
+        assert body["next_fire_at"] is None
+
+    def test_webhook_next_fire_at_is_null(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/cron", json=_body("webhook")).json()
+        assert body["next_fire_at"] is None
+
+    def test_memory_anniversary_next_fire_at_is_null(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/cron", json=_body("memory_anniversary")).json()
+        assert body["next_fire_at"] is None
+
+    def test_interval_next_fire_at_persisted(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        cron_id = client.post("/v1/x/cron", json=_body("interval", interval="5m")).json()["id"]
+        resource = _cron_resource(storage_root, cron_id)
+        assert resource["next_fire_at"] is not None
+
+    def test_invalid_interval_duration_returns_422(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/cron", json=_body("interval", interval="notaduration"))
+        assert resp.status_code == 422
+
+    def test_invalid_interval_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/cron", json=_body("interval", interval="notaduration")).json()
+        assert body["error"]["code"] == "cron_invalid_request"
+
+
+# ---------------------------------------------------------------------------
+# missed_fires_policy field
+# ---------------------------------------------------------------------------
+
+
+class TestCronMissedFiresPolicy:
+    def test_default_policy_is_skip(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/cron", json=_body()).json()
+        assert body["missed_fires_policy"] == "skip"
+
+    def test_catch_up_policy_stored(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post(
+            "/v1/x/cron", json=_body(missed_fires_policy="catch_up")
+        ).json()
+        assert body["missed_fires_policy"] == "catch_up"
+
+    def test_skip_policy_stored(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post(
+            "/v1/x/cron", json=_body(missed_fires_policy="skip")
+        ).json()
+        assert body["missed_fires_policy"] == "skip"
+
+    def test_missed_fires_policy_persisted(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        cron_id = client.post(
+            "/v1/x/cron", json=_body(missed_fires_policy="catch_up")
+        ).json()["id"]
+        resource = _cron_resource(storage_root, cron_id)
+        assert resource["missed_fires_policy"] == "catch_up"
+
+
+# ---------------------------------------------------------------------------
+# capabilities field
+# ---------------------------------------------------------------------------
+
+
+class TestCronCapabilities:
+    def test_default_capabilities_is_empty_list(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/cron", json=_body()).json()
+        assert body["capabilities"] == []
+
+    def test_capabilities_stored_when_provided(self, storage_root: Path) -> None:
+        caps = ["agent.read", "agent.write"]
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/cron", json=_body(capabilities=caps)).json()
+        assert body["capabilities"] == caps
+
+    def test_capabilities_persisted(self, storage_root: Path) -> None:
+        caps = ["agent.network"]
+        client = _make_client(storage_root)
+        cron_id = client.post("/v1/x/cron", json=_body(capabilities=caps)).json()["id"]
+        resource = _cron_resource(storage_root, cron_id)
+        assert resource["capabilities"] == caps

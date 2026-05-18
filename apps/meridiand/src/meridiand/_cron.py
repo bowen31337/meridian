@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from core_errors import (
     AuditLog,
@@ -24,6 +25,30 @@ from pydantic import BaseModel
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# Duration parsing
+# ---------------------------------------------------------------------------
+
+_DURATION_RE = re.compile(
+    r"^(?:(?P<days>\d+)d)?(?:(?P<hours>\d+)h)?(?:(?P<minutes>\d+)m)?(?:(?P<seconds>\d+)s)?$"
+)
+
+
+def _parse_duration(s: str) -> timedelta:
+    """Parse a duration string like '5m', '1h', '2d', '1h30m' to timedelta."""
+    stripped = s.strip()
+    if not stripped:
+        raise ValueError(f"Duration string is empty")
+    m = _DURATION_RE.match(stripped)
+    if not m or not any(m.group(k) for k in ("days", "hours", "minutes", "seconds")):
+        raise ValueError(f"Invalid duration: {s!r} (expected e.g. '5m', '1h', '2d')")
+    parts = {k: int(v) for k, v in m.groupdict(default="0").items()}
+    td = timedelta(**parts)
+    if td.total_seconds() <= 0:
+        raise ValueError(f"Duration must be positive: {s!r}")
+    return td
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +146,11 @@ class CronCreateRequest(BaseModel):
     # days_before: how many days before the anniversary date to fire
     days_before: int | None = None
     metadata: dict[str, Any] | None = None
+    # Scheduler durability: what to do with fires missed during daemon downtime.
+    # "catch_up" fires once per missed interval; "skip" skips the missed period.
+    missed_fires_policy: Literal["catch_up", "skip"] = "skip"
+    # Agent capabilities inherited by cron-triggered sessions; never escalated.
+    capabilities: list[str] = []
 
 
 # Required fields per trigger type
@@ -192,6 +222,20 @@ def make_cron_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                 if validation_err is not None:
                     raise validation_err
 
+                # Compute next_fire_at for time-based triggers.
+                next_fire_at: str | None = None
+                if body.trigger_type == TriggerType.timestamp:
+                    next_fire_at = body.timestamp
+                elif body.trigger_type == TriggerType.interval:
+                    try:
+                        delta = _parse_duration(body.interval)  # type: ignore[arg-type]
+                        next_fire_at = (datetime.now(UTC) + delta).isoformat()
+                    except ValueError as exc:
+                        raise CronInvalidRequestError(
+                            message=f"Invalid interval duration {body.interval!r}: {exc}",
+                            timestamp=_now(),
+                        )
+
                 cron_dir.mkdir(parents=True, exist_ok=True)
                 resource: dict[str, Any] = {
                     "id": cron_id,
@@ -200,6 +244,9 @@ def make_cron_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                     "name": body.name,
                     "status": "active",
                     "created_at": now,
+                    "next_fire_at": next_fire_at,
+                    "missed_fires_policy": body.missed_fires_policy,
+                    "capabilities": body.capabilities,
                     "timestamp": body.timestamp,
                     "interval": body.interval,
                     "channel_id": body.channel_id,

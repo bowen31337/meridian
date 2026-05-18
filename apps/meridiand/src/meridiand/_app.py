@@ -23,8 +23,9 @@ from ._cancel import make_cancel_router
 from ._checkpoint import make_checkpoint_router
 from ._ci_regression import make_ci_regression_router
 from ._compaction import make_compaction_router, run_compaction_loop
-from ._config import CompactionConfig, CorsConfig
+from ._config import CompactionConfig, CronSchedulerConfig, CorsConfig
 from ._cron import make_cron_router
+from ._cron_scheduler import run_cron_scheduler_loop
 from ._skills import make_skills_router
 from ._user_profiles import make_user_profiles_router
 from ._webhooks import make_webhooks_router
@@ -58,6 +59,7 @@ def create_app(
     cors: CorsConfig | None = None,
     model_router: ModelRouter | None = None,
     compaction: CompactionConfig | None = None,
+    cron_scheduler: CronSchedulerConfig | None = None,
 ) -> FastAPI:
     """
     Application factory for the meridiand HTTP API.
@@ -103,6 +105,18 @@ def create_app(
                         run_compaction_loop(storage_root, compaction, audit_log)
                     )
 
+                cron_scheduler_task: asyncio.Task[None] | None = None
+                if storage_root is not None:
+                    _cron_cfg = cron_scheduler or CronSchedulerConfig()
+                    cron_scheduler_task = asyncio.create_task(
+                        run_cron_scheduler_loop(
+                            storage_root,
+                            audit_log,
+                            missed_fires_policy=_cron_cfg.missed_fires_policy,
+                            check_interval_seconds=_cron_cfg.check_interval_seconds,
+                        )
+                    )
+
                 _LOG.info("meridiand ready")
                 yield
 
@@ -110,6 +124,11 @@ def create_app(
                     compaction_task.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
                         await compaction_task
+
+                if cron_scheduler_task is not None:
+                    cron_scheduler_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await cron_scheduler_task
 
             app = FastAPI(title="meridiand", lifespan=_lifespan)
 
