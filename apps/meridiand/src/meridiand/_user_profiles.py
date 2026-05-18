@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
-import uuid
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -16,11 +16,9 @@ from core_errors import (
     record_invocation_event,
 )
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
-from sdk_capabilities import CapabilityParseError
-from sdk_capabilities import parse as parse_capability
+from sdk_capabilities import CapabilityParseError, parse as parse_capability
 
 
 def _now() -> str:
@@ -273,7 +271,7 @@ def make_user_profiles_router(*, audit_log: AuditLog, storage_root: Path) -> API
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=profile_record, status_code=201)
 
@@ -365,12 +363,14 @@ def make_user_profiles_router(*, audit_log: AuditLog, storage_root: Path) -> API
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return Response(status_code=204)
 
     @router.patch("/v1/user_profiles/{user_profile_id}", status_code=200)
-    async def update_user_profile(user_profile_id: str, body: UserProfileUpdateRequest) -> JSONResponse:
+    async def update_user_profile(
+        user_profile_id: str, body: UserProfileUpdateRequest
+    ) -> JSONResponse:
         now = _now()
         tracer = get_tracer()
 
@@ -453,7 +453,7 @@ def make_user_profiles_router(*, audit_log: AuditLog, storage_root: Path) -> API
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=profile, status_code=200)
 
@@ -520,7 +520,7 @@ def make_user_profiles_router(*, audit_log: AuditLog, storage_root: Path) -> API
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=profile, status_code=200)
 
