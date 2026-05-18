@@ -46,7 +46,7 @@ class TestLoadConfig:
     def test_default_bind_port(self, tmp_path: Path) -> None:
         cfg = tmp_path / "config.yaml"
         cfg.write_text(f"storage_root: {tmp_path / 'storage'}\n")
-        assert load_config(cfg).bind.port == 7432
+        assert load_config(cfg).bind.port == 8888
 
     def test_default_log_level(self, tmp_path: Path) -> None:
         cfg = tmp_path / "config.yaml"
@@ -275,7 +275,8 @@ class TestMain:
         mock_run.assert_called_once()
 
     def test_tcp_bind_kwargs_passed_to_uvicorn(self, tmp_path: Path) -> None:
-        cfg = self._write_cfg(tmp_path, bind={"host": "0.0.0.0", "port": 9000})
+        # socket: null explicitly disables socket binding so TCP kwargs are forwarded.
+        cfg = self._write_cfg(tmp_path, bind={"host": "0.0.0.0", "port": 9000, "socket": None})
         with patch("meridiand.__main__.uvicorn.run") as mock_run:
             main(["--config", str(cfg)])
         _, kwargs = mock_run.call_args
@@ -284,11 +285,12 @@ class TestMain:
         assert "uds" not in kwargs
 
     def test_unix_socket_kwargs_passed_to_uvicorn(self, tmp_path: Path) -> None:
-        cfg = self._write_cfg(tmp_path, bind={"socket": "/run/meridiand.sock"})
+        socket_path = str(tmp_path / "meridiand.sock")
+        cfg = self._write_cfg(tmp_path, bind={"socket": socket_path})
         with patch("meridiand.__main__.uvicorn.run") as mock_run:
             main(["--config", str(cfg)])
         _, kwargs = mock_run.call_args
-        assert kwargs["uds"] == "/run/meridiand.sock"
+        assert kwargs["uds"] == socket_path
         assert "host" not in kwargs
         assert "port" not in kwargs
 

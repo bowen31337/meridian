@@ -32,6 +32,7 @@ from meridiand._config import (
     BindConfig,
     ConfigLoadError,
     CorsConfig,
+    DEFAULT_SOCKET_PATH,
     MERIDIAN_CONFIG_VERSION,
     MeridianConfig,
     load_config,
@@ -101,11 +102,23 @@ class TestMeridianConfigModel:
 
     def test_default_bind_port(self, tmp_path: Path) -> None:
         m = MeridianConfig(storage_root=tmp_path)
-        assert m.bind.port == 7432
+        assert m.bind.port == 8888
 
-    def test_default_bind_socket_none(self, tmp_path: Path) -> None:
+    def test_default_bind_socket_is_default_path(self, tmp_path: Path) -> None:
         m = MeridianConfig(storage_root=tmp_path)
+        assert m.bind.socket == str(DEFAULT_SOCKET_PATH)
+
+    def test_bind_socket_none_disables_socket(self, tmp_path: Path) -> None:
+        m = MeridianConfig.model_validate(
+            {"storage_root": str(tmp_path), "bind": {"socket": None}}
+        )
         assert m.bind.socket is None
+
+    def test_bind_socket_expanduser(self, tmp_path: Path) -> None:
+        m = MeridianConfig.model_validate(
+            {"storage_root": str(tmp_path), "bind": {"socket": "~/custom.sock"}}
+        )
+        assert not m.bind.socket.startswith("~")
 
     def test_default_log_level(self, tmp_path: Path) -> None:
         m = MeridianConfig(storage_root=tmp_path)

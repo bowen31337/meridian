@@ -17,6 +17,7 @@ from core_errors import (
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 DEFAULT_CONFIG_PATH = Path.home() / ".meridian" / "config.yaml"
+DEFAULT_SOCKET_PATH = Path.home() / ".meridian" / "meridiand.sock"
 MERIDIAN_CONFIG_VERSION = 1
 
 _DEFAULT_CORS_METHODS = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
@@ -57,8 +58,15 @@ class BindConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     host: str = "127.0.0.1"
-    port: int = 7432
-    socket: str | None = None
+    port: int = 8888
+    socket: str | None = str(DEFAULT_SOCKET_PATH)
+
+    @field_validator("socket", mode="before")
+    @classmethod
+    def _expand_socket(cls, v: object) -> str | None:
+        if v is None:
+            return None
+        return str(Path(str(v)).expanduser())
 
 
 class CorsConfig(BaseModel):

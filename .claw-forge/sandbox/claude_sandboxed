@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/agents-resource-api-post-v1-agents-creates-an-agent-and/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/http-api-auth-system-daemon-binds-to-unix-domain-socket/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

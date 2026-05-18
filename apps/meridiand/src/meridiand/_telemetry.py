@@ -39,3 +39,34 @@ def record_factory_failure(span: Span, error: Exception) -> None:
         },
     )
     span.record_exception(error)
+
+
+def record_daemon_start_event(
+    span: Span,
+    *,
+    bind_mode: str,
+    bind_socket: str,
+    bind_host: str,
+    bind_port: int,
+) -> None:
+    span.add_event(
+        "daemon.start",
+        {
+            "daemon.bind_mode": bind_mode,
+            "daemon.socket": bind_socket,
+            "daemon.host": bind_host,
+            "daemon.port": bind_port,
+        },
+    )
+
+
+def record_daemon_failure(span: Span, error: Exception) -> None:
+    span.set_status(Status(StatusCode.ERROR, str(error)))
+    span.add_event(
+        "daemon.start.error",
+        {
+            "error.type": type(error).__name__,
+            "error.message": str(error),
+        },
+    )
+    span.record_exception(error)
