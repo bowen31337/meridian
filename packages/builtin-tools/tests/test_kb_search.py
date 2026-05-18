@@ -15,10 +15,25 @@ from meridian_builtin_tools.kb_search import (
     _INPUT_SCHEMA,
     _OUTPUT_SCHEMA,
     _glob_matches,
+    _hash_embed,
     _resolve_db_path,
+    _rrf_fuse,
     _scope_matches,
     kb_search_tool,
 )
+
+try:
+    import sqlite3 as _sqlite3_check
+    import sqlite_vec as _sqlite_vec  # type: ignore[import-not-found]
+
+    _con_check = _sqlite3_check.connect(":memory:")
+    _has_load_ext = hasattr(_con_check, "enable_load_extension")
+    _con_check.close()
+    del _con_check, _sqlite3_check
+    _SQLITE_VEC_AVAILABLE = _has_load_ext
+except ImportError:
+    _sqlite_vec = None  # type: ignore[assignment]
+    _SQLITE_VEC_AVAILABLE = False
 from meridian_sdk_tool import ToolContext
 
 _CTX = ToolContext(workspace="/workspace", session_id="sess_kb_test")
@@ -580,3 +595,225 @@ async def test_db_path_from_env_var(
     result = await kb_search_tool.execute({"query": "authenticate"}, _CTX)
     assert not result.is_error
     assert result.result["total"] > 0
+
+
+# ---------------------------------------------------------------------------
+# _hash_embed unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_hash_embed_returns_bytes() -> None:
+    data = _hash_embed("hello world")
+    assert isinstance(data, bytes)
+
+
+def test_hash_embed_correct_length() -> None:
+    import struct
+
+    data = _hash_embed("hello world")
+    # 128 float32 values × 4 bytes each
+    assert len(data) == struct.calcsize("128f")
+
+
+def test_hash_embed_empty_string_returns_zero_vector() -> None:
+    import struct
+
+    data = _hash_embed("")
+    vec = struct.unpack("128f", data)
+    assert all(v == 0.0 for v in vec)
+
+
+def test_hash_embed_same_text_is_deterministic() -> None:
+    assert _hash_embed("authenticate") == _hash_embed("authenticate")
+
+
+def test_hash_embed_different_texts_differ() -> None:
+    assert _hash_embed("authenticate") != _hash_embed("logout")
+
+
+# ---------------------------------------------------------------------------
+# _rrf_fuse unit tests
+# ---------------------------------------------------------------------------
+
+
+def _make_chunk(file_path: str, start: int = 1, end: int = 5) -> dict[str, Any]:
+    return {
+        "file_path": file_path,
+        "kind": "text",
+        "content": "content",
+        "start_line": start,
+        "end_line": end,
+        "score": 0.0,
+        "symbol_name": None,
+        "symbol_kind": None,
+        "heading_text": None,
+        "language": None,
+    }
+
+
+def test_rrf_fuse_single_list_preserves_order() -> None:
+    chunks = [_make_chunk(f"file{i}.py", i) for i in range(5)]
+    result = _rrf_fuse([chunks], limit=5)
+    assert [r["file_path"] for r in result] == [c["file_path"] for c in chunks]
+
+
+def test_rrf_fuse_assigns_positive_scores() -> None:
+    a = [_make_chunk("a.py", 1), _make_chunk("b.py", 2)]
+    b = [_make_chunk("b.py", 2), _make_chunk("a.py", 1)]
+    result = _rrf_fuse([a, b], limit=5)
+    assert all(r["score"] > 0 for r in result)
+
+
+def test_rrf_fuse_chunk_in_both_lists_scores_higher() -> None:
+    shared = _make_chunk("shared.py", 1)
+    unique_a = _make_chunk("only_a.py", 2)
+    unique_b = _make_chunk("only_b.py", 3)
+    a = [shared, unique_a]
+    b = [shared, unique_b]
+    result = _rrf_fuse([a, b], limit=5)
+    shared_score = next(r["score"] for r in result if r["file_path"] == "shared.py")
+    for r in result:
+        if r["file_path"] != "shared.py":
+            assert shared_score > r["score"]
+
+
+def test_rrf_fuse_respects_limit() -> None:
+    chunks = [_make_chunk(f"f{i}.py", i) for i in range(10)]
+    result = _rrf_fuse([chunks], limit=3)
+    assert len(result) <= 3
+
+
+def test_rrf_fuse_empty_lists_returns_empty() -> None:
+    assert _rrf_fuse([[], []], limit=5) == []
+
+
+# ---------------------------------------------------------------------------
+# Vector table absent → graceful BM25-only fallback
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_no_vec_table_falls_back_to_bm25(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FTS5-only DB (no kb_chunks_vec) must still return BM25 results."""
+    db = tmp_path / "kb.sqlite"
+    _make_test_db(db, _SAMPLE_CHUNKS)
+    monkeypatch.setenv("MERIDIAN_KB_PATH", str(db))
+
+    result = await kb_search_tool.execute({"query": "authenticate"}, _CTX)
+    assert not result.is_error
+    assert result.result["total"] > 0
+
+
+@pytest.mark.anyio
+async def test_no_vec_table_scores_are_positive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db = tmp_path / "kb.sqlite"
+    _make_test_db(db, _SAMPLE_CHUNKS)
+    monkeypatch.setenv("MERIDIAN_KB_PATH", str(db))
+
+    result = await kb_search_tool.execute({"query": "authenticate"}, _CTX)
+    assert not result.is_error
+    for item in result.result["results"]:
+        assert item["score"] >= 0
+
+
+# ---------------------------------------------------------------------------
+# Hybrid search (sqlite-vec required)
+# ---------------------------------------------------------------------------
+
+
+def _make_test_db_with_vec(
+    path: Path, chunks: list[dict[str, Any]] | None = None
+) -> None:
+    """Create a KB database with both kb_chunks (FTS5) and kb_chunks_vec (vec0)."""
+    con = sqlite3.connect(str(path))
+    con.enable_load_extension(True)
+    _sqlite_vec.load(con)
+    con.enable_load_extension(False)
+    con.execute(
+        """CREATE VIRTUAL TABLE kb_chunks USING fts5(
+            file_path UNINDEXED,
+            kind UNINDEXED,
+            content,
+            start_line UNINDEXED,
+            end_line UNINDEXED,
+            symbol_name UNINDEXED,
+            symbol_kind UNINDEXED,
+            heading_text UNINDEXED,
+            language UNINDEXED,
+            tokenize='unicode61'
+        )"""
+    )
+    con.execute("CREATE VIRTUAL TABLE kb_chunks_vec USING vec0(embedding FLOAT[128])")
+    for chunk in chunks or []:
+        con.execute(
+            "INSERT INTO kb_chunks VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                chunk["file_path"],
+                chunk.get("kind", "text"),
+                chunk["content"],
+                chunk.get("start_line", 1),
+                chunk.get("end_line", 1),
+                chunk.get("symbol_name"),
+                chunk.get("symbol_kind"),
+                chunk.get("heading_text"),
+                chunk.get("language"),
+            ),
+        )
+        rowid = con.execute("SELECT last_insert_rowid()").fetchone()[0]
+        embed = _hash_embed(chunk["content"])
+        con.execute(
+            "INSERT INTO kb_chunks_vec(rowid, embedding) VALUES (?, ?)",
+            (rowid, embed),
+        )
+    con.commit()
+    con.close()
+
+
+@pytest.mark.skipif(not _SQLITE_VEC_AVAILABLE, reason="sqlite-vec not installed")
+@pytest.mark.anyio
+async def test_hybrid_returns_results(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db = tmp_path / "kb.sqlite"
+    _make_test_db_with_vec(db, _SAMPLE_CHUNKS)
+    monkeypatch.setenv("MERIDIAN_KB_PATH", str(db))
+
+    result = await kb_search_tool.execute({"query": "authenticate"}, _CTX)
+    assert not result.is_error
+    assert result.result["total"] > 0
+
+
+@pytest.mark.skipif(not _SQLITE_VEC_AVAILABLE, reason="sqlite-vec not installed")
+@pytest.mark.anyio
+async def test_hybrid_scores_are_positive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db = tmp_path / "kb.sqlite"
+    _make_test_db_with_vec(db, _SAMPLE_CHUNKS)
+    monkeypatch.setenv("MERIDIAN_KB_PATH", str(db))
+
+    result = await kb_search_tool.execute({"query": "authenticate"}, _CTX)
+    assert not result.is_error
+    for item in result.result["results"]:
+        assert item["score"] > 0
+
+
+@pytest.mark.skipif(not _SQLITE_VEC_AVAILABLE, reason="sqlite-vec not installed")
+@pytest.mark.anyio
+async def test_hybrid_scope_filter_works(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db = tmp_path / "kb.sqlite"
+    _make_test_db_with_vec(db, _SAMPLE_CHUNKS)
+    monkeypatch.setenv("MERIDIAN_KB_PATH", str(db))
+
+    result = await kb_search_tool.execute(
+        {"query": "authenticate", "scope": "src/**/*.py"}, _CTX
+    )
+    assert not result.is_error
+    for item in result.result["results"]:
+        assert item["file_path"].endswith(".py")

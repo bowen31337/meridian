@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/multi-agent-acp-system-typed-handoff-parent-declares-ou/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/built-in-tools-system-kb-search-built-in-tool-queries-t/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
