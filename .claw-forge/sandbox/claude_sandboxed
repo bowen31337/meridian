@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/cli-tui-system-command-meridiantui-launches-an-interact/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/cli-tui-system-command-meridianrun-streams-session-even/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
