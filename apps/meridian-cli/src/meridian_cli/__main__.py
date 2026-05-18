@@ -15,6 +15,7 @@ from .hooks import hooks
 from .memory_stores import memory_stores
 from .sessions import sessions
 from .skills import skills
+from .tui import meridiantui
 from .user_profiles import user_profiles
 from .vaults import vaults
 from .webhooks import webhooks
@@ -64,6 +65,7 @@ cli.add_command(webhooks)
 cli.add_command(files)
 cli.add_command(hooks)
 cli.add_command(cron)
+cli.add_command(meridiantui)
 
 
 @cli.command()
