@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/sandbox-tool-di-system-subprocess-container-protocol-st/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/harness-run-loo-system-stateless-harness-wake-session-i/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

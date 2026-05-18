@@ -45,6 +45,7 @@ from ._parallel_runs import make_parallel_runs_router
 from ._phase import make_phase_router
 from ._replay import make_replay_router
 from ._resume import make_resume_router
+from ._wake import make_wake_router
 from ._spawn import make_spawn_router
 from ._telemetry import get_tracer, record_create_event, record_factory_failure
 
@@ -204,6 +205,9 @@ def create_app(
                 )
                 app.include_router(
                     make_resume_router(audit_log=audit_log, storage_root=storage_root)
+                )
+                app.include_router(
+                    make_wake_router(audit_log=audit_log, storage_root=storage_root)
                 )
                 app.include_router(
                     make_kb_router(audit_log=audit_log, storage_root=storage_root)
