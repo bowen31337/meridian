@@ -7,7 +7,7 @@ from storage_blob._local import LocalBlobStore
 from storage_event_log._local import LocalEventLogWriter
 
 from ._audit import FileAuditLog
-from ._config import DaemonConfig
+from ._config import MeridianConfig
 
 
 @dataclass
@@ -18,7 +18,7 @@ class Services:
     plugin_loader: PluginLoader
 
 
-def init_services(config: DaemonConfig) -> Services:
+def init_services(config: MeridianConfig) -> Services:
     root = config.storage_root
     root.mkdir(parents=True, exist_ok=True)
     audit_log = FileAuditLog(root)

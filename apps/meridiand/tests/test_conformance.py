@@ -25,7 +25,7 @@ from fastapi.testclient import TestClient
 from meridiand.__main__ import main
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
-from meridiand._config import load_config
+from meridiand._config import ConfigLoadError, load_config
 
 # ---------------------------------------------------------------------------
 # load_config
@@ -94,17 +94,17 @@ class TestLoadConfig:
     def test_missing_storage_root_raises(self, tmp_path: Path) -> None:
         cfg = tmp_path / "config.yaml"
         cfg.write_text("log_level: info\n")
-        with pytest.raises(ValueError, match="storage_root"):
+        with pytest.raises(ConfigLoadError, match="storage_root"):
             load_config(cfg)
 
     def test_non_mapping_yaml_raises(self, tmp_path: Path) -> None:
         cfg = tmp_path / "config.yaml"
         cfg.write_text("- item\n")
-        with pytest.raises(ValueError, match="not a YAML mapping"):
+        with pytest.raises(ConfigLoadError, match="not a YAML mapping"):
             load_config(cfg)
 
     def test_missing_file_raises(self, tmp_path: Path) -> None:
-        with pytest.raises(FileNotFoundError):
+        with pytest.raises(ConfigLoadError):
             load_config(tmp_path / "missing.yaml")
 
     def test_storage_root_expanduser(self, tmp_path: Path) -> None:

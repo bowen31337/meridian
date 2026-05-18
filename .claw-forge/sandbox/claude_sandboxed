@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/storage-reposit-system-sqlite-wal-backend-implementatio/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/yaml-configurat-system-pydantic-v2-meridianconfig-model/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
