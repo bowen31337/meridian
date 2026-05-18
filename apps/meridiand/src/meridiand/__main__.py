@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import contextlib
 import logging
 import sys
@@ -9,6 +10,7 @@ from pathlib import Path
 
 import uvicorn
 from core_errors import AuditLogEntry, StructuredEvent, record_invocation_event
+from storage_repository import RepositoryFailure, SqliteRepositoryDriver
 
 from ._app import create_app
 from ._config import DEFAULT_CONFIG_PATH, load_config
@@ -20,6 +22,14 @@ _LOG = logging.getLogger("meridiand")
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+async def _run_db_migrations(db_path: Path) -> None:
+    driver = await SqliteRepositoryDriver.open(db_path)
+    try:
+        await driver.migrate()
+    finally:
+        await driver.close()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -50,6 +60,35 @@ def main(argv: list[str] | None = None) -> int:
         level=config.log_level.upper(),
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
+
+    try:
+        asyncio.run(_run_db_migrations(config.storage_root / "meridian.db"))
+    except RepositoryFailure as exc:
+        with contextlib.suppress(Exception):
+            services.audit_log.write(
+                AuditLogEntry(
+                    level="error",
+                    event="meridiand.migration_failed",
+                    code=exc.code,
+                    timestamp=exc.timestamp,
+                    detail={"message": exc.message},
+                )
+            )
+        print(f"meridiand: migration failed: {exc.message}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        with contextlib.suppress(Exception):
+            services.audit_log.write(
+                AuditLogEntry(
+                    level="error",
+                    event="meridiand.migration_failed",
+                    code="migration_error",
+                    timestamp=_now(),
+                    detail={"message": str(exc)},
+                )
+            )
+        print(f"meridiand: migration error: {exc}", file=sys.stderr)
+        return 1
 
     app = create_app(
         services.audit_log,

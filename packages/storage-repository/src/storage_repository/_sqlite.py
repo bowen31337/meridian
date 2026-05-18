@@ -39,7 +39,7 @@ from ._contract import (
     VaultRepository,
     WebhookRepository,
 )
-from ._migrations import MIGRATIONS
+from ._migrations import SCHEMA_VERSION, load_migration_files
 from ._runtime import RepositoryDriver
 from ._telemetry import get_tracer, record_invocation_event, record_repo_failure
 from ._types import (
@@ -83,10 +83,16 @@ Row = tuple[Any, ...]
 
 
 def _load_sqlite_vec(db: sqlite3.Connection) -> None:
-    """Load the sqlite-vec extension into a raw sqlite3 connection."""
+    """Load the sqlite-vec extension; no-op when extension loading is unsupported."""
+    if not hasattr(db, "enable_load_extension"):
+        return
     db.enable_load_extension(True)
-    sqlite_vec.load(db)
-    db.enable_load_extension(False)
+    try:
+        sqlite_vec.load(db)
+    except Exception:
+        pass
+    finally:
+        db.enable_load_extension(False)
 
 
 # ---------------------------------------------------------------------------
@@ -1076,8 +1082,10 @@ class SqliteRepositoryDriver(RepositoryDriver):
         await driver.close()
     """
 
-    def __init__(self, conn: aiosqlite.Connection, audit_log: AuditLog) -> None:
+    def __init__(self, conn: aiosqlite.Connection, audit_log: AuditLog, db_path: str = "") -> None:
         self._conn = conn
+        self._db_path = db_path
+        self._audit = audit_log
         self._agents = _SqliteAgentRepo(conn)
         self._sessions = _SqliteSessionRepo(conn)
         self._threads = _SqliteThreadRepo(conn)
@@ -1126,8 +1134,8 @@ class SqliteRepositoryDriver(RepositoryDriver):
                 await conn.execute("PRAGMA busy_timeout=5000")
                 await conn.execute("PRAGMA synchronous=NORMAL")
                 await conn.execute("PRAGMA foreign_keys=ON")
-                await conn.run_sync(_load_sqlite_vec)
-                return cls(conn, _audit)
+                await conn._execute(_load_sqlite_vec, conn._conn)
+                return cls(conn, _audit, path_str)
             except Exception as exc:
                 if conn is not None:
                     await conn.close()
@@ -1203,10 +1211,126 @@ class SqliteRepositoryDriver(RepositoryDriver):
         return self._webhooks
 
     async def migrate(self) -> None:
-        """Execute all DDL migration statements idempotently."""
-        for stmt in MIGRATIONS:
-            await self._conn.execute(stmt)
-        await self._conn.commit()
+        """Apply pending SQL migrations from db/migrations/*.sql in order.
+
+        Creates a schema_migrations tracking table on first run.  Raises
+        RepositoryFailure with code SCHEMA_VERSION_AHEAD if the recorded DB
+        version exceeds the binary's supported SCHEMA_VERSION.
+        """
+        now = datetime.now(UTC).isoformat()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "sqlite.migrate",
+            attributes={
+                "db.system": "sqlite",
+                "db.path": self._db_path,
+                "schema.version.supported": SCHEMA_VERSION,
+            },
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="sqlite.invocation",
+                    entity_type="sqlite_driver",
+                    entity_id=self._db_path,
+                    operation="migrate",
+                    timestamp=now,
+                ),
+            )
+            try:
+                await self._conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS schema_migrations (
+                        version    INTEGER PRIMARY KEY,
+                        filename   TEXT    NOT NULL,
+                        applied_at TEXT    NOT NULL
+                    )
+                    """
+                )
+                await self._conn.commit()
+
+                async with self._conn.execute(
+                    "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
+                ) as cur:
+                    row = await cur.fetchone()
+                db_version: int = row[0] if row else 0
+
+                if db_version > SCHEMA_VERSION:
+                    raise RepositoryFailure(
+                        code="SCHEMA_VERSION_AHEAD",
+                        message=(
+                            f"Schema version on disk ({db_version}) exceeds "
+                            f"binary's supported version ({SCHEMA_VERSION}). "
+                            "Upgrade the binary before starting the daemon."
+                        ),
+                        entity_type="sqlite_driver",
+                        entity_id=self._db_path,
+                        operation="migrate",
+                        timestamp=now,
+                    )
+
+                pending = [
+                    (v, fname, sql)
+                    for v, fname, sql in load_migration_files()
+                    if v > db_version
+                ]
+                for version, filename, sql in pending:
+                    stmts = [s.strip() for s in sql.split(";") if s.strip()]
+                    for stmt in stmts:
+                        try:
+                            await self._conn.execute(stmt)
+                        except Exception as stmt_exc:
+                            if "no such module" in str(stmt_exc).lower():
+                                continue
+                            raise
+                    await self._conn.execute(
+                        "INSERT INTO schema_migrations (version, filename, applied_at)"
+                        " VALUES (?, ?, ?)",
+                        (version, filename, datetime.now(UTC).isoformat()),
+                    )
+                    await self._conn.commit()
+
+                span.set_attribute("schema.version.db", db_version)
+                span.set_attribute("schema.version.applied_count", len(pending))
+
+            except RepositoryFailure as failure:
+                record_repo_failure(span, failure)
+                self._audit.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="sqlite.driver.migrate.failed",
+                        entity_type=failure.entity_type,
+                        entity_id=failure.entity_id,
+                        operation=failure.operation,
+                        timestamp=failure.timestamp,
+                        detail={"code": failure.code, "message": failure.message},
+                    )
+                )
+                raise
+            except Exception as exc:
+                failure = RepositoryFailure(
+                    code="SQLITE_MIGRATE_FAILED",
+                    message=str(exc),
+                    entity_type="sqlite_driver",
+                    entity_id=self._db_path,
+                    operation="migrate",
+                    timestamp=now,
+                    cause=exc,
+                )
+                record_repo_failure(span, failure)
+                self._audit.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="sqlite.driver.migrate.failed",
+                        entity_type="sqlite_driver",
+                        entity_id=self._db_path,
+                        operation="migrate",
+                        timestamp=now,
+                        detail={"code": failure.code, "message": failure.message},
+                    )
+                )
+                raise failure from exc
 
     async def close(self) -> None:
         """Close the underlying aiosqlite connection."""

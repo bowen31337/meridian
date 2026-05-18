@@ -184,6 +184,7 @@ def make_user_profile(id: str = "u1") -> UserProfile:
         display_name="Alice",
         email="alice@example.com",
         metadata=None,
+        is_primary=False,
         created_at=now,
         updated_at=now,
     )
@@ -538,6 +539,95 @@ class TestSqliteMigrate:
     async def test_migrate_is_idempotent(self, sqlite_driver: SqliteRepositoryDriver) -> None:
         await sqlite_driver.migrate()  # second run must not raise
         await sqlite_driver.migrate()  # third run must not raise
+
+    async def test_migrate_records_all_versions(self, sqlite_driver: SqliteRepositoryDriver) -> None:
+        from storage_repository._migrations import SCHEMA_VERSION
+
+        async with sqlite_driver._conn.execute(
+            "SELECT COUNT(*) FROM schema_migrations"
+        ) as cur:
+            row = await cur.fetchone()
+        assert row[0] == SCHEMA_VERSION
+
+    async def test_migrate_emits_span(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from .conftest import MockTracer
+
+        tracer = MockTracer()
+        monkeypatch.setattr("storage_repository._sqlite.get_tracer", lambda: tracer)
+        driver = await SqliteRepositoryDriver.open(":memory:")
+        await driver.migrate()
+        await driver.close()
+        assert tracer.span.name == "sqlite.migrate"
+
+    async def test_migrate_attaches_invocation_event(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from .conftest import MockTracer
+
+        tracer = MockTracer()
+        monkeypatch.setattr("storage_repository._sqlite.get_tracer", lambda: tracer)
+        driver = await SqliteRepositoryDriver.open(":memory:")
+        await driver.migrate()
+        await driver.close()
+        event_names = [e[0] for e in tracer.span.events]
+        assert "repo.invocation" in event_names
+
+    async def test_schema_version_ahead_raises(self) -> None:
+        driver = await SqliteRepositoryDriver.open(":memory:")
+        try:
+            await driver.migrate()
+            # Inject a fake migration with a version beyond SCHEMA_VERSION
+            await driver._conn.execute(
+                "INSERT INTO schema_migrations (version, filename, applied_at)"
+                " VALUES (9999, 'future.sql', '2099-01-01T00:00:00+00:00')"
+            )
+            await driver._conn.commit()
+            with pytest.raises(RepositoryFailure) as exc_info:
+                await driver.migrate()
+            assert exc_info.value.code == "SCHEMA_VERSION_AHEAD"
+        finally:
+            await driver.close()
+
+    async def test_schema_version_ahead_writes_audit_log(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from .conftest import MockTracer
+
+        tracer = MockTracer()
+        monkeypatch.setattr("storage_repository._sqlite.get_tracer", lambda: tracer)
+        audit = CapturingAuditLog()
+        driver = await SqliteRepositoryDriver.open(":memory:", audit_log=audit)
+        try:
+            await driver.migrate()
+            await driver._conn.execute(
+                "INSERT INTO schema_migrations (version, filename, applied_at)"
+                " VALUES (9999, 'future.sql', '2099-01-01T00:00:00+00:00')"
+            )
+            await driver._conn.commit()
+            with pytest.raises(RepositoryFailure):
+                await driver.migrate()
+            assert any(e.event == "sqlite.driver.migrate.failed" for e in audit.entries)
+        finally:
+            await driver.close()
+
+    async def test_schema_version_ahead_marks_span_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from .conftest import MockTracer
+
+        tracer = MockTracer()
+        monkeypatch.setattr("storage_repository._sqlite.get_tracer", lambda: tracer)
+        driver = await SqliteRepositoryDriver.open(":memory:")
+        try:
+            await driver.migrate()
+            await driver._conn.execute(
+                "INSERT INTO schema_migrations (version, filename, applied_at)"
+                " VALUES (9999, 'future.sql', '2099-01-01T00:00:00+00:00')"
+            )
+            await driver._conn.commit()
+            with pytest.raises(RepositoryFailure):
+                await driver.migrate()
+            assert tracer.span.status.status_code == StatusCode.ERROR
+        finally:
+            await driver.close()
 
 
 class TestSqliteAgent:
@@ -897,6 +987,7 @@ class TestSqliteUserProfile:
                     display_name=None,
                     email=None,
                     metadata=None,
+                    is_primary=False,
                     created_at=now,
                     updated_at=now,
                 )

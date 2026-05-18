@@ -31,6 +31,9 @@ class MockSpan:
     def add_event(self, name: str, attributes: dict[str, Any] | None = None) -> None:
         self.events.append((name, attributes or {}))
 
+    def set_attribute(self, key: str, value: Any) -> None:
+        self.attributes[key] = value
+
     def set_status(self, status: Any) -> None:
         self.status = status
 

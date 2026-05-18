@@ -19,7 +19,7 @@ from ._contract import (
 )
 
 # Migrations
-from ._migrations import MIGRATIONS
+from ._migrations import SCHEMA_VERSION, load_migration_files
 
 # Runtime
 from ._runtime import RepositoryDriver, RepositoryOptions, RepositoryRuntime
@@ -116,7 +116,8 @@ __all__ = [
     "record_invocation_event",
     "record_repo_failure",
     # Migrations
-    "MIGRATIONS",
+    "SCHEMA_VERSION",
+    "load_migration_files",
     # Runtime
     "RepositoryDriver",
     "RepositoryOptions",

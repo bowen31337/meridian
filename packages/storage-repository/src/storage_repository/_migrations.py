@@ -1,194 +1,29 @@
 """
-Shared DDL migrations in lowest-common SQL dialect (SQLite >= 3.24 / Postgres 9.5+).
+File-based SQL migration loader for the storage-repository package.
 
-All tables use TEXT primary keys (UUID strings), TEXT for timestamps (ISO 8601),
-and TEXT for JSON columns.  Every statement is idempotent (IF NOT EXISTS).
+Migration files live in db/migrations/ alongside this package and are named
+NNNN_description.sql where NNNN is a 4-digit zero-padded version number.
+Each file may contain one or more statements separated by semicolons.
 
-Run these in order before any repository operations.
+SCHEMA_VERSION is the highest version number bundled with this release.
+The migration runner in SqliteRepositoryDriver.migrate() refuses to open a
+database whose recorded schema version exceeds SCHEMA_VERSION.
 """
 
 from __future__ import annotations
 
-MIGRATIONS: list[str] = [
-    # ------------------------------------------------------------------
-    # agents
-    # ------------------------------------------------------------------
-    """
-    CREATE TABLE IF NOT EXISTS agents (
-        id           TEXT PRIMARY KEY,
-        kind         TEXT NOT NULL,
-        name         TEXT NOT NULL,
-        config       TEXT NOT NULL DEFAULT '{}',
-        capabilities TEXT NOT NULL DEFAULT '[]',
-        created_at   TEXT NOT NULL,
-        updated_at   TEXT NOT NULL
-    )
-    """,
-    # ------------------------------------------------------------------
-    # sessions
-    # ------------------------------------------------------------------
-    """
-    CREATE TABLE IF NOT EXISTS sessions (
-        id         TEXT PRIMARY KEY,
-        agent_id   TEXT NOT NULL,
-        status     TEXT NOT NULL DEFAULT 'active',
-        metadata   TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    )
-    """,
-    "CREATE INDEX IF NOT EXISTS sessions_agent_id ON sessions (agent_id)",
-    # ------------------------------------------------------------------
-    # threads
-    # ------------------------------------------------------------------
-    """
-    CREATE TABLE IF NOT EXISTS threads (
-        id         TEXT PRIMARY KEY,
-        session_id TEXT NOT NULL,
-        title      TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    )
-    """,
-    "CREATE INDEX IF NOT EXISTS threads_session_id ON threads (session_id)",
-    # ------------------------------------------------------------------
-    # messages
-    # ------------------------------------------------------------------
-    """
-    CREATE TABLE IF NOT EXISTS messages (
-        id         TEXT PRIMARY KEY,
-        thread_id  TEXT NOT NULL,
-        session_id TEXT NOT NULL,
-        role       TEXT NOT NULL,
-        content    TEXT NOT NULL DEFAULT '[]',
-        sequence   INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL
-    )
-    """,
-    "CREATE INDEX IF NOT EXISTS messages_thread_id  ON messages (thread_id)",
-    "CREATE INDEX IF NOT EXISTS messages_session_id ON messages (session_id)",
-    # ------------------------------------------------------------------
-    # tool_calls
-    # ------------------------------------------------------------------
-    """
-    CREATE TABLE IF NOT EXISTS tool_calls (
-        id         TEXT PRIMARY KEY,
-        message_id TEXT NOT NULL,
-        session_id TEXT NOT NULL,
-        tool_name  TEXT NOT NULL,
-        input      TEXT NOT NULL DEFAULT '{}',
-        output     TEXT,
-        status     TEXT NOT NULL DEFAULT 'pending',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    )
-    """,
-    "CREATE INDEX IF NOT EXISTS tool_calls_message_id  ON tool_calls (message_id)",
-    "CREATE INDEX IF NOT EXISTS tool_calls_session_id  ON tool_calls (session_id)",
-    # ------------------------------------------------------------------
-    # skills
-    # ------------------------------------------------------------------
-    """
-    CREATE TABLE IF NOT EXISTS skills (
-        id           TEXT PRIMARY KEY,
-        name         TEXT NOT NULL UNIQUE,
-        description  TEXT NOT NULL DEFAULT '',
-        capabilities TEXT NOT NULL DEFAULT '[]',
-        config       TEXT NOT NULL DEFAULT '{}',
-        created_at   TEXT NOT NULL,
-        updated_at   TEXT NOT NULL
-    )
-    """,
-    # ------------------------------------------------------------------
-    # environments
-    # ------------------------------------------------------------------
-    """
-    CREATE TABLE IF NOT EXISTS environments (
-        id         TEXT PRIMARY KEY,
-        kind       TEXT NOT NULL,
-        status     TEXT NOT NULL DEFAULT 'provisioned',
-        config     TEXT NOT NULL DEFAULT '{}',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    )
-    """,
-    # ------------------------------------------------------------------
-    # memory_entries
-    # ------------------------------------------------------------------
-    """
-    CREATE TABLE IF NOT EXISTS memory_entries (
-        id         TEXT PRIMARY KEY,
-        scope      TEXT NOT NULL,
-        key        TEXT NOT NULL,
-        value      TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        UNIQUE (scope, key)
-    )
-    """,
-    "CREATE INDEX IF NOT EXISTS memory_entries_scope ON memory_entries (scope)",
-    # ------------------------------------------------------------------
-    # vault_entries  (metadata only — no secret values)
-    # ------------------------------------------------------------------
-    """
-    CREATE TABLE IF NOT EXISTS vault_entries (
-        id          TEXT PRIMARY KEY,
-        name        TEXT NOT NULL UNIQUE,
-        description TEXT,
-        created_at  TEXT NOT NULL,
-        updated_at  TEXT NOT NULL
-    )
-    """,
-    # ------------------------------------------------------------------
-    # user_profiles
-    # ------------------------------------------------------------------
-    """
-    CREATE TABLE IF NOT EXISTS user_profiles (
-        id           TEXT PRIMARY KEY,
-        username     TEXT NOT NULL UNIQUE,
-        display_name TEXT,
-        email        TEXT,
-        metadata     TEXT,
-        is_primary   INTEGER NOT NULL DEFAULT 0,
-        created_at   TEXT NOT NULL,
-        updated_at   TEXT NOT NULL
-    )
-    """,
-    # ------------------------------------------------------------------
-    # channels
-    # ------------------------------------------------------------------
-    """
-    CREATE TABLE IF NOT EXISTS channels (
-        id         TEXT PRIMARY KEY,
-        kind       TEXT NOT NULL,
-        name       TEXT NOT NULL,
-        config     TEXT NOT NULL DEFAULT '{}',
-        status     TEXT NOT NULL DEFAULT 'active',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    )
-    """,
-    # ------------------------------------------------------------------
-    # webhooks
-    # ------------------------------------------------------------------
-    """
-    CREATE TABLE IF NOT EXISTS webhooks (
-        id         TEXT PRIMARY KEY,
-        url        TEXT NOT NULL,
-        events     TEXT NOT NULL DEFAULT '[]',
-        secret_ref TEXT,
-        status     TEXT NOT NULL DEFAULT 'active',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    )
-    """,
-    # ------------------------------------------------------------------
-    # memory_entries_vec  (sqlite-vec vec0 virtual table)
-    #
-    # Companion to memory_entries.  Stores one float32[128] embedding per
-    # entry, keyed by the same integer rowid as the parent row.  Requires
-    # the sqlite-vec extension to be loaded before this statement executes.
-    # ------------------------------------------------------------------
-    "CREATE VIRTUAL TABLE IF NOT EXISTS memory_entries_vec"
-    " USING vec0(embedding FLOAT[128] distance_metric=cosine)",
-]
+from pathlib import Path
+
+SCHEMA_VERSION: int = 13
+
+_MIGRATIONS_DIR = Path(__file__).parent / "db" / "migrations"
+
+
+def load_migration_files() -> list[tuple[int, str, str]]:
+    """Return (version, filename, sql) tuples sorted ascending by version."""
+    result: list[tuple[int, str, str]] = []
+    for path in sorted(_MIGRATIONS_DIR.glob("*.sql")):
+        version = int(path.stem.split("_")[0])
+        sql = path.read_text(encoding="utf-8")
+        result.append((version, path.name, sql))
+    return result
