@@ -290,3 +290,25 @@ class WebhookFilter:
     status: str | None = None
     limit: int = 100
     offset: int = 0
+
+
+# ---------------------------------------------------------------------------
+# Vector search types (sqlite-vec)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class MemoryVecSearchFilter:
+    """ANN query parameters for cosine-distance search over memory_entries_vec."""
+
+    embedding: bytes  # sqlite_vec.serialize_float32(vector)
+    scope: str | None = None
+    limit: int = 10
+
+
+@dataclass(frozen=True)
+class MemoryVecSearchResult:
+    """A single result from a vec_search() ANN query."""
+
+    entry: "MemoryEntry"
+    distance: float

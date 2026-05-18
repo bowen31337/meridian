@@ -182,4 +182,13 @@ MIGRATIONS: list[str] = [
         updated_at TEXT NOT NULL
     )
     """,
+    # ------------------------------------------------------------------
+    # memory_entries_vec  (sqlite-vec vec0 virtual table)
+    #
+    # Companion to memory_entries.  Stores one float32[128] embedding per
+    # entry, keyed by the same integer rowid as the parent row.  Requires
+    # the sqlite-vec extension to be loaded before this statement executes.
+    # ------------------------------------------------------------------
+    "CREATE VIRTUAL TABLE IF NOT EXISTS memory_entries_vec"
+    " USING vec0(embedding FLOAT[128] distance_metric=cosine)",
 ]

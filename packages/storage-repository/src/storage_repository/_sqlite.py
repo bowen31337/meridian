@@ -16,11 +16,13 @@ SQLite >= 3.24 (Python 3.11 ships with SQLite >= 3.39).  Placeholders are `?`.
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import aiosqlite
+import sqlite_vec
 
 from ._audit import AuditLog, NoopAuditLog
 from ._contract import (
@@ -42,6 +44,8 @@ from ._runtime import RepositoryDriver
 from ._telemetry import get_tracer, record_invocation_event, record_repo_failure
 from ._types import (
     AuditLogEntry,
+    MemoryVecSearchFilter,
+    MemoryVecSearchResult,
     RepositoryFailure,
     StructuredEvent,
     Agent,
@@ -71,6 +75,18 @@ from ._types import (
 )
 
 Row = tuple[Any, ...]
+
+
+# ---------------------------------------------------------------------------
+# sqlite-vec extension loader
+# ---------------------------------------------------------------------------
+
+
+def _load_sqlite_vec(db: sqlite3.Connection) -> None:
+    """Load the sqlite-vec extension into a raw sqlite3 connection."""
+    db.enable_load_extension(True)
+    sqlite_vec.load(db)
+    db.enable_load_extension(False)
 
 
 # ---------------------------------------------------------------------------
@@ -607,8 +623,9 @@ class _SqliteEnvironmentRepo(EnvironmentRepository):
 
 
 class _SqliteMemoryRepo(MemoryRepository):
-    def __init__(self, conn: aiosqlite.Connection) -> None:
+    def __init__(self, conn: aiosqlite.Connection, audit_log: AuditLog) -> None:
         self._conn = conn
+        self._audit = audit_log
 
     async def get(self, entry_id: str) -> MemoryEntry | None:
         async with self._conn.execute(
@@ -634,6 +651,14 @@ class _SqliteMemoryRepo(MemoryRepository):
         await self._conn.commit()
 
     async def delete(self, entry_id: str) -> None:
+        async with self._conn.execute(
+            "SELECT rowid FROM memory_entries WHERE id = ?", (entry_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        if row is not None:
+            await self._conn.execute(
+                "DELETE FROM memory_entries_vec WHERE rowid = ?", (row[0],)
+            )
         await self._conn.execute("DELETE FROM memory_entries WHERE id = ?", (entry_id,))
         await self._conn.commit()
 
@@ -651,6 +676,178 @@ class _SqliteMemoryRepo(MemoryRepository):
             params,
         ) as cur:
             return [_memory_entry(row) for row in await cur.fetchall()]
+
+    async def save_embedding(self, entry_id: str, embedding: bytes) -> None:
+        now = datetime.now(UTC).isoformat()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "repo.memory.save_embedding",
+            attributes={"entity.type": "memory", "entity.id": entry_id, "repo.operation": "save_embedding"},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="repo.invocation",
+                    entity_type="memory",
+                    entity_id=entry_id,
+                    operation="save_embedding",
+                    timestamp=now,
+                ),
+            )
+            try:
+                async with self._conn.execute(
+                    "SELECT rowid FROM memory_entries WHERE id = ?", (entry_id,)
+                ) as cur:
+                    row = await cur.fetchone()
+                if row is None:
+                    raise RepositoryFailure(
+                        code="MEMORY_ENTRY_NOT_FOUND",
+                        message=f"No memory entry with id {entry_id!r}",
+                        entity_type="memory",
+                        entity_id=entry_id,
+                        operation="save_embedding",
+                        timestamp=now,
+                    )
+                vec_rowid: int = row[0]
+                await self._conn.execute(
+                    "INSERT INTO memory_entries_vec(rowid, embedding) VALUES (?, ?)"
+                    " ON CONFLICT(rowid) DO UPDATE SET embedding = excluded.embedding",
+                    (vec_rowid, embedding),
+                )
+                await self._conn.commit()
+            except RepositoryFailure as failure:
+                record_repo_failure(span, failure)
+                self._audit.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="repo.memory.save_embedding.failed",
+                        entity_type=failure.entity_type,
+                        entity_id=failure.entity_id,
+                        operation=failure.operation,
+                        timestamp=failure.timestamp,
+                        detail={"code": failure.code, "message": failure.message},
+                    )
+                )
+                raise
+            except Exception as exc:
+                failure = RepositoryFailure(
+                    code="MEMORY_SAVE_EMBEDDING_FAILED",
+                    message=str(exc),
+                    entity_type="memory",
+                    entity_id=entry_id,
+                    operation="save_embedding",
+                    timestamp=now,
+                    cause=exc,
+                )
+                record_repo_failure(span, failure)
+                self._audit.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="repo.memory.save_embedding.failed",
+                        entity_type="memory",
+                        entity_id=entry_id,
+                        operation="save_embedding",
+                        timestamp=now,
+                        detail={"code": failure.code, "message": failure.message},
+                    )
+                )
+                raise failure from exc
+
+    async def vec_search(self, filter: MemoryVecSearchFilter) -> list[MemoryVecSearchResult]:
+        now = datetime.now(UTC).isoformat()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "repo.memory.vec_search",
+            attributes={
+                "entity.type": "memory",
+                "entity.id": "*",
+                "repo.operation": "vec_search",
+                "vec_search.scope": filter.scope or "",
+                "vec_search.limit": filter.limit,
+            },
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="repo.invocation",
+                    entity_type="memory",
+                    entity_id="*",
+                    operation="vec_search",
+                    timestamp=now,
+                ),
+            )
+            try:
+                candidates = filter.limit * 10
+                if filter.scope is not None:
+                    sql = """
+                        SELECT m.id, m.scope, m.key, m.value, m.created_at, m.updated_at,
+                               v.distance
+                        FROM (
+                            SELECT rowid, distance
+                            FROM memory_entries_vec
+                            WHERE embedding MATCH ? AND k = ?
+                            ORDER BY distance
+                        ) v
+                        JOIN memory_entries m ON m.rowid = v.rowid
+                        WHERE m.scope = ?
+                        ORDER BY v.distance
+                        LIMIT ?
+                    """
+                    params: list[Any] = [filter.embedding, candidates, filter.scope, filter.limit]
+                else:
+                    sql = """
+                        SELECT m.id, m.scope, m.key, m.value, m.created_at, m.updated_at,
+                               v.distance
+                        FROM (
+                            SELECT rowid, distance
+                            FROM memory_entries_vec
+                            WHERE embedding MATCH ? AND k = ?
+                            ORDER BY distance
+                        ) v
+                        JOIN memory_entries m ON m.rowid = v.rowid
+                        ORDER BY v.distance
+                        LIMIT ?
+                    """
+                    params = [filter.embedding, candidates, filter.limit]
+
+                async with self._conn.execute(sql, params) as cur:
+                    rows = await cur.fetchall()
+
+                results = [
+                    MemoryVecSearchResult(
+                        entry=_memory_entry(row),
+                        distance=row[6],
+                    )
+                    for row in rows
+                ]
+                span.set_attribute("vec_search.result_count", len(results))
+                return results
+
+            except Exception as exc:
+                failure = RepositoryFailure(
+                    code="MEMORY_VEC_SEARCH_FAILED",
+                    message=str(exc),
+                    entity_type="memory",
+                    entity_id="*",
+                    operation="vec_search",
+                    timestamp=now,
+                    cause=exc,
+                )
+                record_repo_failure(span, failure)
+                self._audit.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="repo.memory.vec_search.failed",
+                        entity_type="memory",
+                        entity_id="*",
+                        operation="vec_search",
+                        timestamp=now,
+                        detail={"code": failure.code, "message": failure.message},
+                    )
+                )
+                raise failure from exc
 
 
 class _SqliteVaultRepo(VaultRepository):
@@ -879,7 +1076,7 @@ class SqliteRepositoryDriver(RepositoryDriver):
         await driver.close()
     """
 
-    def __init__(self, conn: aiosqlite.Connection) -> None:
+    def __init__(self, conn: aiosqlite.Connection, audit_log: AuditLog) -> None:
         self._conn = conn
         self._agents = _SqliteAgentRepo(conn)
         self._sessions = _SqliteSessionRepo(conn)
@@ -888,7 +1085,7 @@ class SqliteRepositoryDriver(RepositoryDriver):
         self._tool_calls = _SqliteToolCallRepo(conn)
         self._skills = _SqliteSkillRepo(conn)
         self._environments = _SqliteEnvironmentRepo(conn)
-        self._memory = _SqliteMemoryRepo(conn)
+        self._memory = _SqliteMemoryRepo(conn, audit_log)
         self._vault = _SqliteVaultRepo(conn)
         self._user_profiles = _SqliteUserProfileRepo(conn)
         self._channels = _SqliteChannelRepo(conn)
@@ -929,7 +1126,8 @@ class SqliteRepositoryDriver(RepositoryDriver):
                 await conn.execute("PRAGMA busy_timeout=5000")
                 await conn.execute("PRAGMA synchronous=NORMAL")
                 await conn.execute("PRAGMA foreign_keys=ON")
-                return cls(conn)
+                await conn.run_sync(_load_sqlite_vec)
+                return cls(conn, _audit)
             except Exception as exc:
                 if conn is not None:
                     await conn.close()

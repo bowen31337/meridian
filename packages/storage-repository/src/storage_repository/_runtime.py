@@ -33,6 +33,8 @@ from ._types import (
     EnvironmentFilter,
     MemoryEntry,
     MemoryFilter,
+    MemoryVecSearchFilter,
+    MemoryVecSearchResult,
     Message,
     MessageFilter,
     RepositoryFailure,
@@ -410,6 +412,24 @@ class _TracedMemoryRepo:
 
     async def list(self, filter: MemoryFilter) -> list[MemoryEntry]:
         return await _trace_op("memory", "*", "list", self._opts, lambda: self._repo.list(filter))
+
+    async def save_embedding(self, entry_id: str, embedding: bytes) -> None:
+        await _trace_op(
+            "memory",
+            entry_id,
+            "save_embedding",
+            self._opts,
+            lambda: self._repo.save_embedding(entry_id, embedding),
+        )
+
+    async def vec_search(self, filter: MemoryVecSearchFilter) -> list[MemoryVecSearchResult]:
+        return await _trace_op(
+            "memory",
+            "*",
+            "vec_search",
+            self._opts,
+            lambda: self._repo.vec_search(filter),
+        )
 
 
 class _TracedVaultRepo:

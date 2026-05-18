@@ -11,6 +11,8 @@ from ._types import (
     EnvironmentFilter,
     MemoryEntry,
     MemoryFilter,
+    MemoryVecSearchFilter,
+    MemoryVecSearchResult,
     Message,
     MessageFilter,
     Session,
@@ -193,6 +195,14 @@ class MemoryRepository(ABC):
     @abstractmethod
     async def list(self, filter: MemoryFilter) -> list[MemoryEntry]:
         """Return MemoryEntries matching the filter, ordered by key ascending."""
+
+    @abstractmethod
+    async def save_embedding(self, entry_id: str, embedding: bytes) -> None:
+        """Store or replace the float32 embedding for an existing MemoryEntry."""
+
+    @abstractmethod
+    async def vec_search(self, filter: MemoryVecSearchFilter) -> list[MemoryVecSearchResult]:
+        """Cosine-distance ANN query via vec_search() over the memory_entries_vec table."""
 
 
 class VaultRepository(ABC):
