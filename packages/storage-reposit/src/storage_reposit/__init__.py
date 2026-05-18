@@ -9,6 +9,15 @@ from ._indexer import BackgroundIndexer
 # Phase projection
 from ._phase import PhaseProjection, PhaseProjectionOptions, PhaseProjectionRuntime
 
+# Phase state machine
+from ._state_machine import (
+    EVENTS,
+    PHASES,
+    PhaseStateMachine,
+    PhaseStateMachineOptions,
+    PhaseStateMachineRuntime,
+)
+
 # Core components
 from ._reader import LocalEventLogReader
 from ._reader_runtime import ReaderOptions, ReaderRuntime
@@ -24,6 +33,7 @@ from ._telemetry import (
     record_invocation_event,
     record_phase_failure,
     record_reader_failure,
+    record_state_machine_failure,
 )
 from ._types import AuditLogEntry, EventSeq, IndexerFailure, StructuredEvent
 
@@ -46,6 +56,12 @@ __all__ = [
     "PhaseProjection",
     "PhaseProjectionOptions",
     "PhaseProjectionRuntime",
+    # Phase state machine
+    "EVENTS",
+    "PHASES",
+    "PhaseStateMachine",
+    "PhaseStateMachineOptions",
+    "PhaseStateMachineRuntime",
     # Audit
     "AuditLog",
     "NoopAuditLog",
@@ -55,6 +71,7 @@ __all__ = [
     "record_invocation_event",
     "record_phase_failure",
     "record_reader_failure",
+    "record_state_machine_failure",
     # Runtime
     "IndexerOptions",
     "IndexerRuntime",

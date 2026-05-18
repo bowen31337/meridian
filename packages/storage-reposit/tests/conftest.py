@@ -204,3 +204,38 @@ def mock_phase_tracer(monkeypatch: pytest.MonkeyPatch) -> MockTracer:
 @pytest.fixture()
 def mock_phase_span(mock_phase_tracer: MockTracer) -> MockSpan:
     return mock_phase_tracer.span
+
+
+# ---------------------------------------------------------------------------
+# Phase state machine stubs
+# ---------------------------------------------------------------------------
+
+
+class StubPhaseStateMachine:
+    """PhaseStateMachine substitute for PhaseStateMachineRuntime tests."""
+
+    def __init__(
+        self,
+        *,
+        raises: Exception | None = None,
+        returns: str = "running",
+    ) -> None:
+        self._raises = raises
+        self._returns = returns
+
+    def next_phase(self, current: str, event_type: str) -> str:
+        if self._raises:
+            raise self._raises
+        return self._returns
+
+
+@pytest.fixture()
+def mock_state_machine_tracer(monkeypatch: pytest.MonkeyPatch) -> MockTracer:
+    tracer = MockTracer()
+    monkeypatch.setattr("storage_reposit._state_machine.get_tracer", lambda: tracer)
+    return tracer
+
+
+@pytest.fixture()
+def mock_state_machine_span(mock_state_machine_tracer: MockTracer) -> MockSpan:
+    return mock_state_machine_tracer.span

@@ -12,9 +12,11 @@ src/storage_reposit/_phase.py
 src/storage_reposit/_reader.py
 src/storage_reposit/_reader_runtime.py
 src/storage_reposit/_runtime.py
+src/storage_reposit/_state_machine.py
 src/storage_reposit/_store.py
 src/storage_reposit/_telemetry.py
 src/storage_reposit/_types.py
 src/storage_reposit/_version.py
 tests/test_conformance.py
 tests/test_phase.py
+tests/test_state_machine.py

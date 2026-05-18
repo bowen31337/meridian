@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/foundation-repo-system-import-linter-config-defines-cro/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/testing-conform-system-property-tests-for-the-phase-sta/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

@@ -17,6 +17,7 @@ src/meridiand/_replay.py
 src/meridiand/_resume.py
 src/meridiand/_services.py
 src/meridiand/_spawn.py
+src/meridiand/_telemetry.py
 src/meridiand/_version.py
 src/meridiand.egg-info/PKG-INFO
 src/meridiand.egg-info/SOURCES.txt
@@ -25,10 +26,12 @@ src/meridiand.egg-info/entry_points.txt
 src/meridiand.egg-info/requires.txt
 src/meridiand.egg-info/top_level.txt
 tests/test_acp.py
+tests/test_app_factory.py
 tests/test_budget_aggregation.py
 tests/test_cancel.py
 tests/test_checkpoint.py
 tests/test_ci_regression.py
+tests/test_config.py
 tests/test_conformance.py
 tests/test_events.py
 tests/test_handoff.py
