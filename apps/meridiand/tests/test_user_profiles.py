@@ -27,6 +27,21 @@ Tests cover:
   - Span carries user_profile.id and user_profile.username attributes.
   - create_app wires user_profiles router when storage_root is supplied.
   - create_app omits user_profiles route when storage_root is None.
+  - DELETE /v1/user_profiles/{id} returns 204 on success.
+  - DELETE response has no body.
+  - DELETE returns 404 with code "user_profile_not_found" for unknown id.
+  - DELETE returns 409 with code "user_profile_is_primary" for primary profile.
+  - DELETE returns 409 with code "user_profile_has_active_sessions" when active sessions exist.
+  - DELETE removes profile JSON from storage.
+  - Second DELETE on same id returns 404.
+  - DELETE failure writes audit log entry with event "user_profile.delete.failed".
+  - DELETE audit entry level is "error" on failure.
+  - DELETE audit detail includes user_profile_id and message.
+  - OTel span "user_profile.delete" emitted on success.
+  - OTel span "user_profile.delete" emitted on failure.
+  - OTel span set to ERROR status on DELETE failure.
+  - Span carries user_profile.id attribute on DELETE.
+  - DELETE route present with storage_root; absent without.
 """
 
 from __future__ import annotations
@@ -389,4 +404,285 @@ class TestUserProfileRouteWiring:
         app = create_app(FileAuditLog(storage_root))
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post("/v1/user_profiles", json=_body())
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# DELETE success
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileDeleteSuccess:
+    def test_delete_returns_204(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username="alice"))
+        user_id = client.post("/v1/user_profiles", json=_body(username="bob")).json()["id"]
+        resp = client.delete(f"/v1/user_profiles/{user_id}")
+        assert resp.status_code == 204
+
+    def test_delete_response_has_no_body(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username="alice"))
+        user_id = client.post("/v1/user_profiles", json=_body(username="bob")).json()["id"]
+        resp = client.delete(f"/v1/user_profiles/{user_id}")
+        assert resp.content == b""
+
+
+# ---------------------------------------------------------------------------
+# DELETE not found
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileDeleteNotFound:
+    def test_unknown_id_returns_404(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.delete("/v1/user_profiles/user_nonexistent")
+        assert resp.status_code == 404
+
+    def test_not_found_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.delete("/v1/user_profiles/user_nonexistent").json()
+        assert body["error"]["code"] == "user_profile_not_found"
+
+    def test_not_found_error_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.delete("/v1/user_profiles/user_nonexistent").json()
+        assert len(body["error"]["message"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# DELETE conflict: is_primary
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileDeleteIsPrimary:
+    def test_primary_profile_returns_409(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body(username="alice")).json()["id"]
+        resp = client.delete(f"/v1/user_profiles/{user_id}")
+        assert resp.status_code == 409
+
+    def test_primary_profile_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body(username="alice")).json()["id"]
+        body = client.delete(f"/v1/user_profiles/{user_id}").json()
+        assert body["error"]["code"] == "user_profile_is_primary"
+
+    def test_primary_profile_error_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body(username="alice")).json()["id"]
+        body = client.delete(f"/v1/user_profiles/{user_id}").json()
+        assert len(body["error"]["message"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# DELETE conflict: active sessions
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileDeleteActiveSessions:
+    def test_active_session_returns_409(self, storage_root: Path, tmp_path: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username="alice"))
+        user_id = client.post("/v1/user_profiles", json=_body(username="bob")).json()["id"]
+        session_dir = storage_root / "sessions" / "sess_active"
+        session_dir.mkdir(parents=True, exist_ok=True)
+        (session_dir / "manifest.json").write_text(
+            json.dumps({"user_profile_id": user_id, "status": "active"})
+        )
+        resp = client.delete(f"/v1/user_profiles/{user_id}")
+        assert resp.status_code == 409
+
+    def test_active_session_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username="alice"))
+        user_id = client.post("/v1/user_profiles", json=_body(username="bob")).json()["id"]
+        session_dir = storage_root / "sessions" / "sess_active2"
+        session_dir.mkdir(parents=True, exist_ok=True)
+        (session_dir / "manifest.json").write_text(
+            json.dumps({"user_profile_id": user_id, "status": "active"})
+        )
+        body = client.delete(f"/v1/user_profiles/{user_id}").json()
+        assert body["error"]["code"] == "user_profile_has_active_sessions"
+
+    def test_closed_session_allows_delete(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username="alice"))
+        user_id = client.post("/v1/user_profiles", json=_body(username="bob")).json()["id"]
+        session_dir = storage_root / "sessions" / "sess_closed"
+        session_dir.mkdir(parents=True, exist_ok=True)
+        (session_dir / "manifest.json").write_text(
+            json.dumps({"user_profile_id": user_id, "status": "closed"})
+        )
+        resp = client.delete(f"/v1/user_profiles/{user_id}")
+        assert resp.status_code == 204
+
+    def test_session_for_other_profile_allows_delete(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username="alice"))
+        user_id = client.post("/v1/user_profiles", json=_body(username="bob")).json()["id"]
+        session_dir = storage_root / "sessions" / "sess_other"
+        session_dir.mkdir(parents=True, exist_ok=True)
+        (session_dir / "manifest.json").write_text(
+            json.dumps({"user_profile_id": "user_other", "status": "active"})
+        )
+        resp = client.delete(f"/v1/user_profiles/{user_id}")
+        assert resp.status_code == 204
+
+
+# ---------------------------------------------------------------------------
+# DELETE persistence
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileDeletePersistence:
+    def test_file_removed_after_delete(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username="alice"))
+        user_id = client.post("/v1/user_profiles", json=_body(username="bob")).json()["id"]
+        client.delete(f"/v1/user_profiles/{user_id}")
+        assert not (storage_root / "user_profiles" / f"{user_id}.json").exists()
+
+    def test_second_delete_returns_404(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username="alice"))
+        user_id = client.post("/v1/user_profiles", json=_body(username="bob")).json()["id"]
+        client.delete(f"/v1/user_profiles/{user_id}")
+        resp = client.delete(f"/v1/user_profiles/{user_id}")
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# DELETE audit log
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileDeleteAuditLog:
+    def test_not_found_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.delete("/v1/user_profiles/user_missing")
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "user_profile.delete.failed" for r in records)
+
+    def test_not_found_audit_level_is_error(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.delete("/v1/user_profiles/user_missing")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "user_profile.delete.failed"
+        )
+        assert record["level"] == "error"
+
+    def test_not_found_audit_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.delete("/v1/user_profiles/user_missing")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "user_profile.delete.failed"
+        )
+        assert record["code"] == "user_profile_not_found"
+
+    def test_not_found_audit_detail_has_user_profile_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.delete("/v1/user_profiles/user_missing")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "user_profile.delete.failed"
+        )
+        assert record["detail"]["user_profile_id"] == "user_missing"
+
+    def test_not_found_audit_detail_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.delete("/v1/user_profiles/user_missing")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "user_profile.delete.failed"
+        )
+        assert len(record["detail"]["message"]) > 0
+
+    def test_is_primary_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body(username="alice")).json()["id"]
+        client.delete(f"/v1/user_profiles/{user_id}")
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "user_profile.delete.failed" for r in records)
+
+    def test_is_primary_audit_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body(username="alice")).json()["id"]
+        client.delete(f"/v1/user_profiles/{user_id}")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "user_profile.delete.failed"
+        )
+        assert record["code"] == "user_profile_is_primary"
+
+
+# ---------------------------------------------------------------------------
+# DELETE OTel spans
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileDeleteOtel:
+    def setup_method(self) -> None:
+        _otel_exporter.clear()
+
+    def _client(self, storage_root: Path) -> TestClient:
+        app = create_app(FileAuditLog(storage_root), storage_root=storage_root)
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_success_emits_delete_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username="alice"))
+        user_id = client.post("/v1/user_profiles", json=_body(username="bob")).json()["id"]
+        _otel_exporter.clear()
+        client.delete(f"/v1/user_profiles/{user_id}")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "user_profile.delete" in span_names
+
+    def test_not_found_emits_delete_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        client.delete("/v1/user_profiles/user_missing")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "user_profile.delete" in span_names
+
+    def test_not_found_span_has_error_status(self, storage_root: Path) -> None:
+        from opentelemetry.trace import StatusCode
+
+        client = self._client(storage_root)
+        client.delete("/v1/user_profiles/user_missing")
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("user_profile.delete")
+        assert span is not None
+        assert span.status.status_code == StatusCode.ERROR
+
+    def test_success_span_has_user_profile_id_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username="alice"))
+        user_id = client.post("/v1/user_profiles", json=_body(username="bob")).json()["id"]
+        _otel_exporter.clear()
+        client.delete(f"/v1/user_profiles/{user_id}")
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("user_profile.delete")
+        assert span is not None
+        assert span.attributes["user_profile.id"] == user_id
+
+
+# ---------------------------------------------------------------------------
+# DELETE route wiring
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileDeleteRouteWiring:
+    def test_delete_route_present_with_storage_root(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username="alice"))
+        user_id = client.post("/v1/user_profiles", json=_body(username="bob")).json()["id"]
+        resp = client.delete(f"/v1/user_profiles/{user_id}")
+        assert resp.status_code != 404
+
+    def test_delete_route_absent_without_storage_root(self, storage_root: Path) -> None:
+        app = create_app(FileAuditLog(storage_root))
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.delete("/v1/user_profiles/user_any")
         assert resp.status_code == 404

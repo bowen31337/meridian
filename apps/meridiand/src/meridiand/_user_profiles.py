@@ -17,6 +17,7 @@ from core_errors import (
 )
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 
@@ -56,6 +57,61 @@ class UserProfileInvalidRequestError(MeridianError):
 
     def http_status(self) -> int:
         return 422
+
+
+class UserProfileNotFoundError(MeridianError):
+    def __init__(self, *, user_profile_id: str, timestamp: str) -> None:
+        super().__init__(
+            code="user_profile_not_found",
+            message=f"User profile '{user_profile_id}' not found",
+            timestamp=timestamp,
+        )
+
+    def http_status(self) -> int:
+        return 404
+
+
+class UserProfileIsPrimaryError(MeridianError):
+    def __init__(self, *, user_profile_id: str, timestamp: str) -> None:
+        super().__init__(
+            code="user_profile_is_primary",
+            message=f"Cannot delete primary user profile '{user_profile_id}'",
+            timestamp=timestamp,
+        )
+
+    def http_status(self) -> int:
+        return 409
+
+
+class UserProfileHasActiveSessionsError(MeridianError):
+    def __init__(self, *, user_profile_id: str, timestamp: str) -> None:
+        super().__init__(
+            code="user_profile_has_active_sessions",
+            message=f"Cannot delete user profile '{user_profile_id}' with active sessions",
+            timestamp=timestamp,
+        )
+
+    def http_status(self) -> int:
+        return 409
+
+
+class UserProfileDeleteError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="user_profile_delete_failed",
+            message=message,
+            timestamp=timestamp,
+            cause=cause,
+        )
+
+    def http_status(self) -> int:
+        return 500
 
 
 # ---------------------------------------------------------------------------
@@ -172,5 +228,97 @@ def make_user_profiles_router(*, audit_log: AuditLog, storage_root: Path) -> API
                 raise err2
 
         return JSONResponse(content=profile_record, status_code=201)
+
+    @router.delete("/v1/user_profiles/{user_profile_id}", status_code=204)
+    async def delete_user_profile(user_profile_id: str) -> Response:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "user_profile.delete",
+            attributes={"user_profile.id": user_profile_id},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="user_profile.delete.invocation",
+                    code="user_profile_delete",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                profile_file = profiles_dir / f"{user_profile_id}.json"
+                if not profile_file.exists():
+                    raise UserProfileNotFoundError(
+                        user_profile_id=user_profile_id, timestamp=now
+                    )
+
+                profile = json.loads(profile_file.read_text())
+
+                if profile.get("is_primary"):
+                    raise UserProfileIsPrimaryError(
+                        user_profile_id=user_profile_id, timestamp=now
+                    )
+
+                sessions_dir = storage_root / "sessions"
+                if sessions_dir.exists():
+                    for manifest_path in sessions_dir.glob("*/manifest.json"):
+                        try:
+                            manifest = json.loads(manifest_path.read_text())
+                        except Exception:
+                            continue
+                        if (
+                            manifest.get("user_profile_id") == user_profile_id
+                            and manifest.get("status") == "active"
+                        ):
+                            raise UserProfileHasActiveSessionsError(
+                                user_profile_id=user_profile_id, timestamp=now
+                            )
+
+                profile_file.unlink()
+
+            except (
+                UserProfileNotFoundError,
+                UserProfileIsPrimaryError,
+                UserProfileHasActiveSessionsError,
+            ) as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="user_profile.delete.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "user_profile_id": user_profile_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = UserProfileDeleteError(
+                    message=f"Failed to delete user profile: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="user_profile.delete.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={
+                            "user_profile_id": user_profile_id,
+                            "message": err2.message,
+                        },
+                    )
+                )
+                raise err2
+
+        return Response(status_code=204)
 
     return router
