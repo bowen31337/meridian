@@ -1,21 +1,63 @@
 [importlinter]
 root_packages =
+    api_capabilities
     core_errors
+    meridiand
+    meridian_builtin_tools
+    meridian_cli
+    meridian_kb_indexer
+    meridian_plugin_loader
+    meridian_sdk_provider
+    meridian_sdk_tool
     sdk_capabilities
     sdk_channel
     sdk_environment
+    sdk_sandbox
     storage_blob
     storage_event_log
+    storage_reposit
+    storage_repository
     system_ulid
 
-[importlinter:contract:1]
-name = Packages are independent
+# --- Contract 1: Cross-package layering ---
+# Apps (Layer 3) may import from composed or foundation packages.
+# Composed packages (Layer 2) may import from foundation only.
+# Foundation packages (Layer 1) may not import from any other workspace package.
+[importlinter:contract:layering]
+name = Cross-package layering
+type = layers
+layers =
+    meridiand | meridian_cli
+    api_capabilities | meridian_builtin_tools | meridian_plugin_loader | storage_reposit
+    core_errors | system_ulid | sdk_capabilities | sdk_channel | sdk_environment | meridian_sdk_provider | sdk_sandbox | meridian_sdk_tool | storage_blob | storage_event_log | storage_repository | meridian_kb_indexer
+
+# --- Contract 2: Foundation packages are independent ---
+# No foundation package may import from any other foundation package.
+[importlinter:contract:foundation-independence]
+name = Foundation packages are independent
 type = independence
 modules =
     core_errors
+    system_ulid
     sdk_capabilities
     sdk_channel
     sdk_environment
+    meridian_sdk_provider
+    sdk_sandbox
+    meridian_sdk_tool
     storage_blob
     storage_event_log
-    system_ulid
+    storage_repository
+    meridian_kb_indexer
+
+# --- Contract 3: Composed packages are independent from each other ---
+# Composed packages may only depend downward into foundation; they must not
+# cross-import from sibling composed packages.
+[importlinter:contract:composed-independence]
+name = Composed packages are independent from each other
+type = independence
+modules =
+    api_capabilities
+    meridian_builtin_tools
+    meridian_plugin_loader
+    storage_reposit
