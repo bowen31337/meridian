@@ -44,7 +44,7 @@ from opentelemetry.trace import Span, Status, StatusCode
 
 from ._audit import AuditLog, NoopAuditLog
 from ._contract import ToolDispatcher
-from ._telemetry import get_tracer
+from ._telemetry import get_tracer, record_dispatch_overhead
 from ._types import (
     AuditLogEntry,
     ExecutionContext,
@@ -100,10 +100,11 @@ def _write_audit(
     session_id: str,
     now: str,
     detail: dict[str, Any] | None = None,
+    level: str = "error",
 ) -> None:
     audit_log.write(
         AuditLogEntry(
-            level="error",
+            level=level,  # type: ignore[arg-type]
             event=event,
             tool_name=tool_name,
             session_id=session_id,
@@ -180,6 +181,7 @@ class InProcessDispatcher(ToolDispatcher):
     ) -> SandboxResult:
         now = _now()
         tracer = get_tracer()
+        dispatch_start = time.monotonic()
         with tracer.start_as_current_span(
             "in_process.dispatch",
             attributes={"tool.name": tool.name, "session.id": context.session_id},
@@ -225,6 +227,23 @@ class InProcessDispatcher(ToolDispatcher):
                     now=now,
                 )
 
+            overhead_ms = _ms_since(dispatch_start)
+            breached = record_dispatch_overhead(span, "in_process", overhead_ms)
+            if breached:
+                _write_audit(
+                    self._audit_log,
+                    event="dispatch.overhead.target_breached",
+                    code="dispatch_overhead_target_breached",
+                    message=(
+                        f"in_process dispatch overhead {overhead_ms:.1f}ms "
+                        f"exceeded target 20.0ms"
+                    ),
+                    tool_name=tool.name,
+                    session_id=context.session_id,
+                    now=now,
+                    detail={"kind": "in_process", "overhead_ms": overhead_ms, "target_ms": 20.0},
+                    level="warn",
+                )
             return SandboxResult(content=result, duration_ms=_ms_since(start))
 
 
@@ -261,6 +280,7 @@ class SubprocessDispatcher(ToolDispatcher):
         now = _now()
         tracer = get_tracer()
         handler: SubprocessHandler = tool.handler
+        dispatch_start = time.monotonic()
 
         with tracer.start_as_current_span(
             "subprocess.dispatch",
@@ -368,6 +388,28 @@ class SubprocessDispatcher(ToolDispatcher):
                     now=now,
                 )
 
+            overhead_ms = _ms_since(dispatch_start)
+            breached = record_dispatch_overhead(span, "subprocess", overhead_ms)
+            if breached:
+                _write_audit(
+                    self._audit_log,
+                    event="dispatch.overhead.target_breached",
+                    code="dispatch_overhead_target_breached",
+                    message=(
+                        f"subprocess dispatch overhead {overhead_ms:.1f}ms "
+                        f"exceeded target 200.0ms"
+                    ),
+                    tool_name=tool.name,
+                    session_id=context.session_id,
+                    now=now,
+                    detail={
+                        "kind": "subprocess",
+                        "overhead_ms": overhead_ms,
+                        "target_ms": 200.0,
+                        "path": handler.path,
+                    },
+                    level="warn",
+                )
             return SandboxResult(content=response.get("result"), duration_ms=_ms_since(start))
 
 
@@ -681,6 +723,7 @@ class ContainerDispatcher(ToolDispatcher):
         now = _now()
         tracer = get_tracer()
         handler: ContainerHandler = tool.handler
+        dispatch_start = time.monotonic()
 
         with tracer.start_as_current_span(
             "container.dispatch",
@@ -799,4 +842,26 @@ class ContainerDispatcher(ToolDispatcher):
                     detail={"environment_id": handler.environment_id},
                 )
 
+            overhead_ms = _ms_since(dispatch_start)
+            breached = record_dispatch_overhead(span, "container", overhead_ms)
+            if breached:
+                _write_audit(
+                    self._audit_log,
+                    event="dispatch.overhead.target_breached",
+                    code="dispatch_overhead_target_breached",
+                    message=(
+                        f"container dispatch overhead {overhead_ms:.1f}ms "
+                        f"exceeded target 500.0ms"
+                    ),
+                    tool_name=tool.name,
+                    session_id=context.session_id,
+                    now=now,
+                    detail={
+                        "kind": "container",
+                        "overhead_ms": overhead_ms,
+                        "target_ms": 500.0,
+                        "environment_id": handler.environment_id,
+                    },
+                    level="warn",
+                )
             return SandboxResult(content=response.get("result"), duration_ms=_ms_since(start))

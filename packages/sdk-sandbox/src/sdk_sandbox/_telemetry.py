@@ -149,6 +149,41 @@ def record_output_schema_failure(
     )
 
 
+_OVERHEAD_TARGET_MS: dict[str, float] = {
+    "in_process": 20.0,
+    "subprocess": 200.0,
+    "container": 500.0,
+}
+
+
+def record_dispatch_overhead(
+    span: Span,
+    kind: str,
+    overhead_ms: float,
+) -> bool:
+    """
+    Record a dispatch.overhead event on the span. Returns True if overhead
+    exceeded the SLO target for the given backend kind.
+
+    Emits: dispatch.kind, dispatch.overhead_ms, dispatch.overhead.target_ms,
+    dispatch.overhead.target_breached.  No-op for unknown kinds.
+    """
+    target_ms = _OVERHEAD_TARGET_MS.get(kind)
+    if target_ms is None:
+        return False
+    breached = overhead_ms > target_ms
+    span.add_event(
+        "dispatch.overhead",
+        {
+            "dispatch.kind": kind,
+            "dispatch.overhead_ms": overhead_ms,
+            "dispatch.overhead.target_ms": target_ms,
+            "dispatch.overhead.target_breached": breached,
+        },
+    )
+    return breached
+
+
 def record_sandbox_failure(span: Span, failure: SandboxFailure) -> None:
     """
     Records a failure on the span: sets status to ERROR, adds a

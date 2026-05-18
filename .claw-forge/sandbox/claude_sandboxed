@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/environment-bac-system-environment-manager-exposes-crud/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/sandbox-tool-di-system-sandbox-dispatch-overhead-target/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
