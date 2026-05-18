@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/harness-run-loo-system-stateless-harness-wake-session-i/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/sessions-event--system-property-test-suite-asserts-ever/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
