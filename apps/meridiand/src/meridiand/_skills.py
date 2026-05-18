@@ -53,6 +53,14 @@ class SkillInvalidRequestError(MeridianError):
         return 422
 
 
+class SkillVersionNotFoundError(MeridianError):
+    def __init__(self, *, message: str, timestamp: str) -> None:
+        super().__init__(code="skill_version_not_found", message=message, timestamp=timestamp)
+
+    def http_status(self) -> int:
+        return 404
+
+
 # ---------------------------------------------------------------------------
 # Request model (agentskills.io schema)
 # ---------------------------------------------------------------------------
@@ -200,5 +208,83 @@ def make_skills_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                 raise err2
 
         return JSONResponse(content=skill_record, status_code=201)
+
+    @router.get("/v1/skills/{skill_id}/versions/{ver}")
+    async def get_skill_version(skill_id: str, ver: str) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "skill.version.get",
+            attributes={
+                "skill.id": skill_id,
+                "skill.version.id": ver,
+            },
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="skill.version.get.invocation",
+                    code="skill_version_get",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                version_path = versions_dir / f"{ver}.json"
+                if not version_path.exists():
+                    raise SkillVersionNotFoundError(
+                        message=f"Skill version '{ver}' not found",
+                        timestamp=now,
+                    )
+
+                version_record = json.loads(version_path.read_text())
+
+                if version_record.get("skill_id") != skill_id:
+                    raise SkillVersionNotFoundError(
+                        message=f"Skill version '{ver}' not found",
+                        timestamp=now,
+                    )
+
+            except SkillVersionNotFoundError as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="skill.version.get.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "skill_id": skill_id,
+                            "version_id": ver,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = SkillCreateError(
+                    message=f"Failed to retrieve skill version: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="skill.version.get.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={
+                            "skill_id": skill_id,
+                            "version_id": ver,
+                            "message": err2.message,
+                        },
+                    )
+                )
+                raise err2
+
+        return JSONResponse(content=version_record, status_code=200)
 
     return router

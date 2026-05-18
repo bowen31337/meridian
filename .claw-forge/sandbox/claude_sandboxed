@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/skill-forge-sel-system-skill-forge-runs-as-a-separate-b/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/skills-agentski-api-get-v1-skills-id-versions-ver-retur/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

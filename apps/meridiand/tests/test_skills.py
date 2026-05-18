@@ -32,6 +32,16 @@ Tests cover:
   - Span carries skill.id and skill.name attributes.
   - create_app wires skills router when storage_root is supplied.
   - create_app omits skills route when storage_root is None.
+  - GET /v1/skills/{id}/versions/{ver} returns 200 with SkillVersionRecord.
+  - GET /v1/skills/{id}/versions/{ver} returns 404 if version not found.
+  - GET /v1/skills/{id}/versions/{ver} returns 404 if version belongs to different skill.
+  - Response fields: id, skill_id, version_number, instructions, tools, tests, created_at.
+  - On not-found, audit log entry written with event "skill.version.get.failed".
+  - On not-found, audit entry code is "skill_version_not_found".
+  - OTel span "skill.version.get" emitted on success.
+  - OTel span "skill.version.get" emitted on failure.
+  - OTel span set to ERROR on not-found.
+  - Span carries skill.id and skill.version.id attributes.
 """
 
 from __future__ import annotations
@@ -477,3 +487,229 @@ class TestSkillRouteWiring:
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.post("/v1/skills", json=_body())
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# GET /v1/skills/{id}/versions/{ver} — success
+# ---------------------------------------------------------------------------
+
+
+def _create_skill(client: TestClient, **overrides) -> dict:
+    resp = client.post("/v1/skills", json=_body(**overrides))
+    assert resp.status_code == 201
+    return resp.json()
+
+
+class TestSkillVersionGetSuccess:
+    def test_returns_200(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        skill = _create_skill(client)
+        resp = client.get(f"/v1/skills/{skill['id']}/versions/{skill['version']['id']}")
+        assert resp.status_code == 200
+
+    def test_response_has_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        skill = _create_skill(client)
+        body = client.get(f"/v1/skills/{skill['id']}/versions/{skill['version']['id']}").json()
+        assert body["id"] == skill["version"]["id"]
+
+    def test_response_has_skill_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        skill = _create_skill(client)
+        body = client.get(f"/v1/skills/{skill['id']}/versions/{skill['version']['id']}").json()
+        assert body["skill_id"] == skill["id"]
+
+    def test_response_has_version_number(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        skill = _create_skill(client)
+        body = client.get(f"/v1/skills/{skill['id']}/versions/{skill['version']['id']}").json()
+        assert body["version_number"] == 1
+
+    def test_response_has_instructions(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        skill = _create_skill(client, instructions="Do the thing carefully")
+        body = client.get(f"/v1/skills/{skill['id']}/versions/{skill['version']['id']}").json()
+        assert body["instructions"] == "Do the thing carefully"
+
+    def test_response_has_tools(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        skill = _create_skill(client, tools=[{"name": "grep", "description": "Search files"}])
+        body = client.get(f"/v1/skills/{skill['id']}/versions/{skill['version']['id']}").json()
+        assert body["tools"][0]["name"] == "grep"
+
+    def test_response_has_tests(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        tests = [{"name": "basic", "input": {"cmd": "echo hi"}, "expected_output": "hi"}]
+        skill = _create_skill(client, tests=tests)
+        body = client.get(f"/v1/skills/{skill['id']}/versions/{skill['version']['id']}").json()
+        assert body["tests"][0]["name"] == "basic"
+
+    def test_response_has_created_at(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        skill = _create_skill(client)
+        body = client.get(f"/v1/skills/{skill['id']}/versions/{skill['version']['id']}").json()
+        assert isinstance(body["created_at"], str)
+        assert len(body["created_at"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# GET /v1/skills/{id}/versions/{ver} — not found
+# ---------------------------------------------------------------------------
+
+
+class TestSkillVersionGetNotFound:
+    def test_unknown_version_returns_404(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        skill = _create_skill(client)
+        resp = client.get(f"/v1/skills/{skill['id']}/versions/skillver_doesnotexist")
+        assert resp.status_code == 404
+
+    def test_unknown_version_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        skill = _create_skill(client)
+        body = client.get(f"/v1/skills/{skill['id']}/versions/skillver_doesnotexist").json()
+        assert body["error"]["code"] == "skill_version_not_found"
+
+    def test_unknown_version_error_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        skill = _create_skill(client)
+        body = client.get(f"/v1/skills/{skill['id']}/versions/skillver_doesnotexist").json()
+        assert "message" in body["error"]
+        assert len(body["error"]["message"]) > 0
+
+    def test_wrong_skill_id_returns_404(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        skill = _create_skill(client)
+        ver_id = skill["version"]["id"]
+        resp = client.get(f"/v1/skills/skill_wrongid/versions/{ver_id}")
+        assert resp.status_code == 404
+
+    def test_wrong_skill_id_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        skill = _create_skill(client)
+        ver_id = skill["version"]["id"]
+        body = client.get(f"/v1/skills/skill_wrongid/versions/{ver_id}").json()
+        assert body["error"]["code"] == "skill_version_not_found"
+
+
+# ---------------------------------------------------------------------------
+# GET /v1/skills/{id}/versions/{ver} — audit log
+# ---------------------------------------------------------------------------
+
+
+class TestSkillVersionGetAuditLog:
+    def test_not_found_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        skill = _create_skill(client)
+        client.get(f"/v1/skills/{skill['id']}/versions/skillver_doesnotexist")
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "skill.version.get.failed" for r in records)
+
+    def test_not_found_audit_level_is_error(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        skill = _create_skill(client)
+        client.get(f"/v1/skills/{skill['id']}/versions/skillver_doesnotexist")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.version.get.failed"
+        )
+        assert record["level"] == "error"
+
+    def test_not_found_audit_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        skill = _create_skill(client)
+        client.get(f"/v1/skills/{skill['id']}/versions/skillver_doesnotexist")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.version.get.failed"
+        )
+        assert record["code"] == "skill_version_not_found"
+
+    def test_not_found_audit_detail_has_skill_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        skill = _create_skill(client)
+        client.get(f"/v1/skills/{skill['id']}/versions/skillver_doesnotexist")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.version.get.failed"
+        )
+        assert record["detail"]["skill_id"] == skill["id"]
+
+    def test_not_found_audit_detail_has_version_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        skill = _create_skill(client)
+        client.get(f"/v1/skills/{skill['id']}/versions/skillver_doesnotexist")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.version.get.failed"
+        )
+        assert record["detail"]["version_id"] == "skillver_doesnotexist"
+
+    def test_not_found_audit_detail_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        skill = _create_skill(client)
+        client.get(f"/v1/skills/{skill['id']}/versions/skillver_doesnotexist")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.version.get.failed"
+        )
+        assert "message" in record["detail"]
+        assert len(record["detail"]["message"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# GET /v1/skills/{id}/versions/{ver} — OTel
+# ---------------------------------------------------------------------------
+
+
+class TestSkillVersionGetOtel:
+    def setup_method(self) -> None:
+        _otel_exporter.clear()
+
+    def _client(self, storage_root: Path) -> TestClient:
+        app = create_app(FileAuditLog(storage_root), storage_root=storage_root)
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_success_emits_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        skill = _create_skill(client)
+        _otel_exporter.clear()
+        client.get(f"/v1/skills/{skill['id']}/versions/{skill['version']['id']}")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "skill.version.get" in span_names
+
+    def test_not_found_emits_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        skill = _create_skill(client)
+        _otel_exporter.clear()
+        client.get(f"/v1/skills/{skill['id']}/versions/skillver_doesnotexist")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "skill.version.get" in span_names
+
+    def test_not_found_span_has_error_status(self, storage_root: Path) -> None:
+        from opentelemetry.trace import StatusCode
+
+        client = self._client(storage_root)
+        skill = _create_skill(client)
+        _otel_exporter.clear()
+        client.get(f"/v1/skills/{skill['id']}/versions/skillver_doesnotexist")
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("skill.version.get")
+        assert span is not None
+        assert span.status.status_code == StatusCode.ERROR
+
+    def test_span_has_skill_id_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        skill = _create_skill(client)
+        _otel_exporter.clear()
+        client.get(f"/v1/skills/{skill['id']}/versions/{skill['version']['id']}")
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("skill.version.get")
+        assert span is not None
+        assert span.attributes["skill.id"] == skill["id"]
+
+    def test_span_has_version_id_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        skill = _create_skill(client)
+        ver_id = skill["version"]["id"]
+        _otel_exporter.clear()
+        client.get(f"/v1/skills/{skill['id']}/versions/{ver_id}")
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("skill.version.get")
+        assert span is not None
+        assert span.attributes["skill.version.id"] == ver_id
