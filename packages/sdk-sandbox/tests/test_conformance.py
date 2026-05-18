@@ -576,6 +576,332 @@ class TestExecuteCapabilityDenied:
 
 
 # ---------------------------------------------------------------------------
+# execute — environment mismatch (ENV_MISMATCH)
+# ---------------------------------------------------------------------------
+
+
+ENV_TOOL = ToolDefinition(
+    name="test.docker_only",
+    description="Requires docker environment",
+    input_schema={"type": "object"},
+    handler=InProcessHandler(),
+    requires_env="docker",
+)
+
+CTX_NO_ENV = ExecutionContext(session_id="sess1", workspace="/tmp")
+CTX_WRONG_ENV = ExecutionContext(session_id="sess1", workspace="/tmp", environment="podman")
+CTX_RIGHT_ENV = ExecutionContext(session_id="sess1", workspace="/tmp", environment="docker")
+
+
+def registered_sandbox_with_env_tool() -> tuple[Sandbox, StubDispatcher]:
+    dispatcher = StubDispatcher()
+    sb = Sandbox()
+    sb.register_dispatcher(dispatcher)
+    sb.register_tool(ENV_TOOL)
+    return sb, dispatcher
+
+
+class TestExecuteEnvMismatch:
+    async def test_returns_result_not_raises(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """Env mismatch must return, never raise — no orchestrator crash."""
+        sb, _ = registered_sandbox_with_env_tool()
+        result = await sb.execute("test.docker_only", {}, CTX_NO_ENV, make_options(audit_log))
+        assert isinstance(result, SandboxResult)
+
+    async def test_is_error_true(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_env_tool()
+        result = await sb.execute("test.docker_only", {}, CTX_NO_ENV, make_options(audit_log))
+        assert result.is_error is True
+
+    async def test_error_code_env_mismatch(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_env_tool()
+        result = await sb.execute("test.docker_only", {}, CTX_NO_ENV, make_options(audit_log))
+        assert result.error_code == "env_mismatch"
+
+    async def test_error_message_names_required_env(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_env_tool()
+        result = await sb.execute("test.docker_only", {}, CTX_NO_ENV, make_options(audit_log))
+        assert result.error_message is not None
+        assert "docker" in result.error_message
+
+    async def test_wrong_env_still_denied(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_env_tool()
+        result = await sb.execute(
+            "test.docker_only", {}, CTX_WRONG_ENV, make_options(audit_log)
+        )
+        assert result.is_error is True
+        assert result.error_code == "env_mismatch"
+        assert result.error_message is not None
+        assert "podman" in result.error_message
+
+    async def test_matching_env_dispatches_normally(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """Correct environment → dispatch proceeds, no error."""
+        sb, dispatcher = registered_sandbox_with_env_tool()
+        result = await sb.execute(
+            "test.docker_only", {}, CTX_RIGHT_ENV, make_options(audit_log)
+        )
+        assert result.is_error is False
+        assert result.content == "ok"
+        assert len(dispatcher.calls) == 1
+
+    async def test_no_requires_env_always_passes(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """Tool with requires_env=None dispatches in any environment."""
+        result = await registered_sandbox().execute(
+            "test.echo", {}, CTX_NO_ENV, make_options(audit_log)
+        )
+        assert result.is_error is False
+
+    async def test_span_marked_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        from opentelemetry.trace import StatusCode
+
+        sb, _ = registered_sandbox_with_env_tool()
+        await sb.execute("test.docker_only", {}, CTX_NO_ENV, make_options(audit_log))
+        assert mock_span.status is not None
+        assert mock_span.status.status_code == StatusCode.ERROR
+
+    async def test_env_mismatch_event_on_span(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_env_tool()
+        await sb.execute("test.docker_only", {}, CTX_NO_ENV, make_options(audit_log))
+        event_names = [e[0] for e in mock_span.events]
+        assert "env.mismatch" in event_names
+
+    async def test_env_mismatch_event_attributes(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_env_tool()
+        await sb.execute("test.docker_only", {}, CTX_NO_ENV, make_options(audit_log))
+        ev = next(e for e in mock_span.events if e[0] == "env.mismatch")
+        assert ev[1]["error.code"] == "env_mismatch"
+        assert ev[1]["env.required"] == "docker"
+        assert ev[1]["tool.name"] == "test.docker_only"
+
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_env_tool()
+        await sb.execute("test.docker_only", {}, CTX_NO_ENV, make_options(audit_log))
+        assert len(audit_log.entries) == 1
+        entry = audit_log.entries[0]
+        assert entry.level == "error"
+        assert entry.event == "sandbox.env.mismatch"
+
+    async def test_audit_entry_detail(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_env_tool()
+        await sb.execute("test.docker_only", {}, CTX_NO_ENV, make_options(audit_log))
+        detail = audit_log.entries[0].detail
+        assert detail is not None
+        assert detail["code"] == "env_mismatch"
+        assert detail["requires_env"] == "docker"
+
+    async def test_on_error_callback_called(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        errors: list[SandboxFailure] = []
+        sb, _ = registered_sandbox_with_env_tool()
+        await sb.execute(
+            "test.docker_only", {}, CTX_NO_ENV, make_options(audit_log, errors)
+        )
+        assert len(errors) == 1
+        assert errors[0].code == "env_mismatch"
+
+    async def test_dispatcher_not_called_on_mismatch(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, dispatcher = registered_sandbox_with_env_tool()
+        await sb.execute("test.docker_only", {}, CTX_NO_ENV, make_options(audit_log))
+        assert dispatcher.calls == []
+
+    async def test_span_ended_on_mismatch(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_env_tool()
+        await sb.execute("test.docker_only", {}, CTX_NO_ENV, make_options(audit_log))
+        assert mock_span.ended
+
+
+# ---------------------------------------------------------------------------
+# execute — timeout (TIMEOUT)
+# ---------------------------------------------------------------------------
+
+
+class SlowDispatcher(StubDispatcher):
+    """Dispatcher that sleeps for a configurable duration before returning."""
+
+    def __init__(self, sleep_seconds: float) -> None:
+        super().__init__()
+        self._sleep_seconds = sleep_seconds
+
+    async def dispatch(
+        self, tool: ToolDefinition, input: dict, context: ExecutionContext
+    ) -> SandboxResult:
+        import asyncio as _asyncio
+
+        await _asyncio.sleep(self._sleep_seconds)
+        self.calls.append((tool, input, context))
+        return SandboxResult(content="ok", duration_ms=1.0)
+
+
+TIMEOUT_TOOL = ToolDefinition(
+    name="test.slow",
+    description="Slow tool with short timeout",
+    input_schema={"type": "object"},
+    handler=InProcessHandler(),
+    timeout_ms=50,  # 50 ms — will be exceeded by SlowDispatcher(sleep=1)
+)
+
+
+def registered_sandbox_with_timeout_tool(sleep: float = 1.0) -> tuple[Sandbox, SlowDispatcher]:
+    dispatcher = SlowDispatcher(sleep)
+    sb = Sandbox()
+    sb.register_dispatcher(dispatcher)
+    sb.register_tool(TIMEOUT_TOOL)
+    return sb, dispatcher
+
+
+class TestExecuteTimeout:
+    async def test_returns_result_not_raises(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """Timeout must return, never raise — no orchestrator crash."""
+        sb, _ = registered_sandbox_with_timeout_tool()
+        result = await sb.execute("test.slow", {}, CTX, make_options(audit_log))
+        assert isinstance(result, SandboxResult)
+
+    async def test_is_error_true(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_timeout_tool()
+        result = await sb.execute("test.slow", {}, CTX, make_options(audit_log))
+        assert result.is_error is True
+
+    async def test_error_code_timeout(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_timeout_tool()
+        result = await sb.execute("test.slow", {}, CTX, make_options(audit_log))
+        assert result.error_code == "timeout"
+
+    async def test_error_message_contains_tool_name(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_timeout_tool()
+        result = await sb.execute("test.slow", {}, CTX, make_options(audit_log))
+        assert result.error_message is not None
+        assert "test.slow" in result.error_message
+
+    async def test_error_message_contains_timeout_ms(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_timeout_tool()
+        result = await sb.execute("test.slow", {}, CTX, make_options(audit_log))
+        assert result.error_message is not None
+        assert "50" in result.error_message
+
+    async def test_within_timeout_dispatches_normally(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """Dispatcher completes before deadline → no error."""
+        fast_tool = ToolDefinition(
+            name="test.fast",
+            description="Fast tool with generous timeout",
+            input_schema={"type": "object"},
+            handler=InProcessHandler(),
+            timeout_ms=5_000,
+        )
+        dispatcher = SlowDispatcher(0.0)
+        sb = Sandbox()
+        sb.register_dispatcher(dispatcher)
+        sb.register_tool(fast_tool)
+        result = await sb.execute("test.fast", {}, CTX, make_options(audit_log))
+        assert result.is_error is False
+        assert result.content == "ok"
+
+    async def test_span_marked_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        from opentelemetry.trace import StatusCode
+
+        sb, _ = registered_sandbox_with_timeout_tool()
+        await sb.execute("test.slow", {}, CTX, make_options(audit_log))
+        assert mock_span.status is not None
+        assert mock_span.status.status_code == StatusCode.ERROR
+
+    async def test_timeout_event_on_span(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_timeout_tool()
+        await sb.execute("test.slow", {}, CTX, make_options(audit_log))
+        event_names = [e[0] for e in mock_span.events]
+        assert "tool.timeout" in event_names
+
+    async def test_timeout_event_attributes(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_timeout_tool()
+        await sb.execute("test.slow", {}, CTX, make_options(audit_log))
+        ev = next(e for e in mock_span.events if e[0] == "tool.timeout")
+        assert ev[1]["error.code"] == "timeout"
+        assert ev[1]["timeout.ms"] == 50
+        assert ev[1]["tool.name"] == "test.slow"
+
+    async def test_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_timeout_tool()
+        await sb.execute("test.slow", {}, CTX, make_options(audit_log))
+        assert len(audit_log.entries) == 1
+        entry = audit_log.entries[0]
+        assert entry.level == "error"
+        assert entry.event == "sandbox.tool.timeout"
+
+    async def test_audit_entry_detail(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_timeout_tool()
+        await sb.execute("test.slow", {}, CTX, make_options(audit_log))
+        detail = audit_log.entries[0].detail
+        assert detail is not None
+        assert detail["code"] == "timeout"
+        assert detail["timeout_ms"] == 50
+
+    async def test_on_error_callback_called(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        errors: list[SandboxFailure] = []
+        sb, _ = registered_sandbox_with_timeout_tool()
+        await sb.execute("test.slow", {}, CTX, make_options(audit_log, errors))
+        assert len(errors) == 1
+        assert errors[0].code == "timeout"
+
+    async def test_span_ended_on_timeout(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_timeout_tool()
+        await sb.execute("test.slow", {}, CTX, make_options(audit_log))
+        assert mock_span.ended
+
+
+# ---------------------------------------------------------------------------
 # SandboxResult helpers
 # ---------------------------------------------------------------------------
 

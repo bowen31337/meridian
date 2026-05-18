@@ -53,6 +53,54 @@ def record_capability_denial(
     )
 
 
+def record_env_mismatch(
+    span: Span,
+    tool_name: str,
+    session_id: str,
+    requires_env: str,
+    actual_env: str | None,
+    message: str,
+) -> None:
+    """
+    Records an environment mismatch on the span: sets status to ERROR and adds
+    an "env.mismatch" event with requires/actual detail.
+    """
+    span.set_status(Status(StatusCode.ERROR, message))
+    span.add_event(
+        "env.mismatch",
+        {
+            "tool.name": tool_name,
+            "session.id": session_id,
+            "error.code": "env_mismatch",
+            "env.required": requires_env,
+            "env.actual": actual_env or "",
+        },
+    )
+
+
+def record_tool_timeout(
+    span: Span,
+    tool_name: str,
+    session_id: str,
+    timeout_ms: int,
+    message: str,
+) -> None:
+    """
+    Records a tool execution timeout on the span: sets status to ERROR and
+    adds a "tool.timeout" event.
+    """
+    span.set_status(Status(StatusCode.ERROR, message))
+    span.add_event(
+        "tool.timeout",
+        {
+            "tool.name": tool_name,
+            "session.id": session_id,
+            "error.code": "timeout",
+            "timeout.ms": timeout_ms,
+        },
+    )
+
+
 def record_sandbox_failure(span: Span, failure: SandboxFailure) -> None:
     """
     Records a failure on the span: sets status to ERROR, adds a

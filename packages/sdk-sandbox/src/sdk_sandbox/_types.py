@@ -12,6 +12,7 @@ class ExecutionContext:
     workspace: str = ""
     scratch_dir: str | None = None
     granted_capabilities: frozenset[str] = field(default_factory=frozenset)
+    environment: str | None = None  # active environment name; matched against requires_env
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,9 @@ class ToolDefinition:
     handler: Any  # ToolHandler union — kept as Any to avoid runtime union issues
     output_schema: dict[str, Any] | None = None
     required_capabilities: frozenset[str] = field(default_factory=frozenset)
+    requires_env: str | None = None  # e.g. "docker"; None = any environment
+    timeout_ms: int = 30_000
+    memory_cap_mb: int | None = None
 
 
 @dataclass(frozen=True)

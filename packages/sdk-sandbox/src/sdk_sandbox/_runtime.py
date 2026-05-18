@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -7,7 +8,14 @@ from typing import Any
 
 from ._audit import AuditLog, NoopAuditLog
 from ._contract import ToolDispatcher
-from ._telemetry import get_tracer, record_capability_denial, record_invocation_event, record_sandbox_failure
+from ._telemetry import (
+    get_tracer,
+    record_capability_denial,
+    record_env_mismatch,
+    record_invocation_event,
+    record_sandbox_failure,
+    record_tool_timeout,
+)
 from ._types import (
     AuditLogEntry,
     ExecutionContext,
@@ -206,6 +214,55 @@ class Sandbox:
                     error_message=denial_message,
                 )
 
+            # Environment check: requires_env must match context.environment.
+            # On mismatch, return a synthetic SandboxResult (is_error=True) —
+            # never raise, never silent.
+            if tool.requires_env is not None and context.environment != tool.requires_env:
+                env_message = (
+                    f'Environment mismatch for tool "{name}"; '
+                    f'requires "{tool.requires_env}", '
+                    f'got "{context.environment}"'
+                )
+                record_env_mismatch(
+                    span,
+                    tool_name=name,
+                    session_id=context.session_id,
+                    requires_env=tool.requires_env,
+                    actual_env=context.environment,
+                    message=env_message,
+                )
+                opts.audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="sandbox.env.mismatch",
+                        tool_name=name,
+                        session_id=context.session_id,
+                        timestamp=now,
+                        detail={
+                            "code": "env_mismatch",
+                            "message": env_message,
+                            "requires_env": tool.requires_env,
+                            "actual_env": context.environment,
+                        },
+                    )
+                )
+                if opts.on_error is not None:
+                    opts.on_error(
+                        SandboxFailure(
+                            code="env_mismatch",
+                            message=env_message,
+                            tool_name=name,
+                            session_id=context.session_id,
+                            timestamp=now,
+                        )
+                    )
+                return SandboxResult(
+                    content=env_message,
+                    is_error=True,
+                    error_code="env_mismatch",
+                    error_message=env_message,
+                )
+
             dispatcher = self._dispatchers.get(tool.handler.kind)
             if dispatcher is None:
                 failure = SandboxFailure(
@@ -219,7 +276,49 @@ class Sandbox:
                 raise failure
 
             try:
-                return await dispatcher.dispatch(tool, input, context)
+                return await asyncio.wait_for(
+                    dispatcher.dispatch(tool, input, context),
+                    timeout=tool.timeout_ms / 1000,
+                )
+            except asyncio.TimeoutError:
+                timeout_message = f'Tool "{name}" timed out after {tool.timeout_ms}ms'
+                record_tool_timeout(
+                    span,
+                    tool_name=name,
+                    session_id=context.session_id,
+                    timeout_ms=tool.timeout_ms,
+                    message=timeout_message,
+                )
+                opts.audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="sandbox.tool.timeout",
+                        tool_name=name,
+                        session_id=context.session_id,
+                        timestamp=now,
+                        detail={
+                            "code": "timeout",
+                            "message": timeout_message,
+                            "timeout_ms": tool.timeout_ms,
+                        },
+                    )
+                )
+                if opts.on_error is not None:
+                    opts.on_error(
+                        SandboxFailure(
+                            code="timeout",
+                            message=timeout_message,
+                            tool_name=name,
+                            session_id=context.session_id,
+                            timestamp=now,
+                        )
+                    )
+                return SandboxResult(
+                    content=timeout_message,
+                    is_error=True,
+                    error_code="timeout",
+                    error_message=timeout_message,
+                )
             except SandboxFailure:
                 raise
             except Exception as exc:
