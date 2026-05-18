@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/webhooks-cron-api-post-v1-x-cron-creates-a-cron-resourc/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/webhooks-cron-api-post-v1-webhooks-creates-a-webhook-wi/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

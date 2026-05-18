@@ -21,6 +21,7 @@ from ._checkpoint import make_checkpoint_router
 from ._ci_regression import make_ci_regression_router
 from ._config import CorsConfig
 from ._cron import make_cron_router
+from ._webhooks import make_webhooks_router
 from ._events import make_events_router
 from ._files import make_files_router
 from ._handoff import make_handoff_router
@@ -138,6 +139,9 @@ def create_app(
                 )
                 app.include_router(
                     make_cron_router(audit_log=audit_log, storage_root=storage_root)
+                )
+                app.include_router(
+                    make_webhooks_router(audit_log=audit_log, storage_root=storage_root)
                 )
                 if event_log is not None:
                     app.include_router(
