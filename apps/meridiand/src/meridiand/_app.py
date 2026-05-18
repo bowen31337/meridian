@@ -16,6 +16,7 @@ from storage_event_log import EventLogWriter
 from meridian_sdk_provider import ModelRouter
 
 from ._acp import AcpPeerClient, make_acp_router
+from ._acp_compliance import make_acp_compliance_router
 from ._cancel import make_cancel_router
 from ._checkpoint import make_checkpoint_router
 from ._ci_regression import make_ci_regression_router
@@ -158,6 +159,9 @@ def create_app(
                         targets=acp_targets,
                         peer_client=acp_peer_client,
                     )
+                )
+                app.include_router(
+                    make_acp_compliance_router(audit_log=audit_log)
                 )
             if model_router is not None:
                 app.include_router(
