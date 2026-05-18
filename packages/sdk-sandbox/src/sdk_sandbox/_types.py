@@ -10,6 +10,7 @@ class ExecutionContext:
 
     session_id: str
     workspace: str = ""
+    thread_id: str | None = None
     scratch_dir: str | None = None
     granted_capabilities: frozenset[str] = field(default_factory=frozenset)
     environment: str | None = None  # active environment name; matched against requires_env

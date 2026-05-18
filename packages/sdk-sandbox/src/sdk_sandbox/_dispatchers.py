@@ -16,7 +16,7 @@ Handler protocols
 -----------------
 subprocess / container (docker-exec):
     stdin  → {"args": {...}, "context": {"workspace": ..., "session_id": ...,
-                                          "scratch_dir": ...}}
+                                          "thread_id": ..., "scratch_dir": ...}}
     stdout ← {"result": ...}  |  {"error": {"code": "...", "message": "..."}}
     stderr → captured (≤ 64 KB), attached on crash
 
@@ -311,6 +311,7 @@ class SubprocessDispatcher(ToolDispatcher):
                     "context": {
                         "workspace": context.workspace,
                         "session_id": context.session_id,
+                        "thread_id": context.thread_id,
                         "scratch_dir": context.scratch_dir,
                     },
                 }
@@ -838,6 +839,7 @@ class ContainerDispatcher(ToolDispatcher):
                     "context": {
                         "workspace": context.workspace,
                         "session_id": context.session_id,
+                        "thread_id": context.thread_id,
                         "scratch_dir": context.scratch_dir,
                     },
                 }

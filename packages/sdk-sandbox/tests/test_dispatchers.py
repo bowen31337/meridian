@@ -386,6 +386,29 @@ class TestSubprocessDispatcher:
         await d.dispatch(_tool(SubprocessHandler(path="/no/such/binary")), {}, CTX)
         assert mock_span.status.status_code == StatusCode.ERROR
 
+    async def test_payload_includes_thread_id(self, tmp_path: Path, mock_span: MockSpan) -> None:
+        received: list[dict] = []
+        script_text = (
+            "import sys, json\n"
+            "req = json.load(sys.stdin)\n"
+            "import json as _j; open('/dev/null','w').write('')\n"
+            "sys.stdout.write(_j.dumps({'result': req['context']}))\n"
+        )
+        exe = tmp_path / "ctx_tool"
+        exe.write_text(f"#!{sys.executable}\n{script_text}")
+        exe.chmod(0o755)
+        ctx_with_thread = ExecutionContext(
+            session_id="sess-disp", workspace="/workspace",
+            thread_id="thread-123", scratch_dir="/tmp/scratch"
+        )
+        d = SubprocessDispatcher()
+        result = await d.dispatch(_tool(SubprocessHandler(path=str(exe))), {}, ctx_with_thread)
+        assert result.is_error is False
+        assert result.content["thread_id"] == "thread-123"
+        assert result.content["session_id"] == "sess-disp"
+        assert result.content["workspace"] == "/workspace"
+        assert result.content["scratch_dir"] == "/tmp/scratch"
+
 
 # ---------------------------------------------------------------------------
 # McpDispatcher — mocked httpx
@@ -839,3 +862,32 @@ class TestContainerDispatcher:
 
         assert result.is_error is True
         assert result.error_code == "container_tool_error"
+
+    async def test_payload_includes_thread_id(self, tmp_path: Path, mock_span: MockSpan) -> None:
+        script_text = (
+            "import sys, json\n"
+            "req = json.load(sys.stdin)\n"
+            "sys.stdout.write(json.dumps({'result': req['context']}))\n"
+        )
+        exe = tmp_path / "ctx_tool"
+        exe.write_text(f"#!{sys.executable}\n{script_text}")
+        exe.chmod(0o755)
+        orig = asyncio.create_subprocess_exec
+
+        async def fake_exec(*args: str, **kwargs: Any) -> asyncio.subprocess.Process:
+            return await orig(str(exe), **kwargs)
+
+        ctx_with_thread = ExecutionContext(
+            session_id="sess-disp", workspace="/workspace",
+            thread_id="thread-456", scratch_dir="/tmp/scratch"
+        )
+        with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+            result = await ContainerDispatcher().dispatch(
+                self._tool_with_handler("c1", str(exe)), {}, ctx_with_thread
+            )
+
+        assert result.is_error is False
+        assert result.content["thread_id"] == "thread-456"
+        assert result.content["session_id"] == "sess-disp"
+        assert result.content["workspace"] == "/workspace"
+        assert result.content["scratch_dir"] == "/tmp/scratch"
