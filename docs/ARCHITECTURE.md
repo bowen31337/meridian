@@ -866,6 +866,66 @@ check.
 In **none** of these cases does the session phase transition to
 terminated. The agent decides what to do.
 
+### 11.5 Tool-author contract
+
+Every tool implementation **must satisfy** the following contract.
+
+#### Idempotency on retry
+
+If the caller supplies an `idempotency_key` in `ToolContext`, the SDK
+guarantees that a second invocation with the same `(tool_name,
+idempotency_key)` pair returns the cached first result **without
+re-executing the handler**:
+
+```python
+ctx = ToolContext(
+    workspace="/workspace",
+    session_id="sess_abc",
+    idempotency_key="order-42-ship",   # stable key chosen by caller
+)
+result1 = await ship_order.execute(args, ctx)
+result2 = await ship_order.execute(args, ctx)  # handler does NOT run again
+assert result1 == result2
+```
+
+Key semantics:
+
+- The cache is keyed by `(tool_name, idempotency_key)`.  Two different
+  tools may share the same key without conflict.
+- Both **success and failure** results are cached; a retry after a
+  handler crash replays the error rather than re-executing.
+- **Input-validation failures are not cached** — they are caller-side
+  errors (wrong payload) and should be fixed before retrying.
+- The cache is in-process and lives for the lifetime of the Sandbox
+  worker.  Long-lived retries across process restarts rely on the
+  session event-log replay path (§5.4).
+
+#### Error surface
+
+All failures — schema violations, capability denials, handler
+exceptions — are returned as `ToolResult(is_error=True,
+error=ToolError(code, message, details))`.  Handlers **must never
+raise** — catch every exception, translate it into a `ToolResult.err`,
+and let the agent decide whether to retry or escalate.
+
+Every failure is also written to the audit log (`~/.meridian/audit.ndjson`
+or the path in `MERIDIAN_AUDIT_LOG`) so operators can inspect what went
+wrong without live OTel infrastructure (§22.4).  The audit record
+includes `idempotency_key` when present so retries can be correlated.
+
+#### Subprocess / HTTP handler contract
+
+Out-of-process handlers must honour the same contract via the
+stdin/stdout JSON protocol (§11.2):
+
+```
+stdout ← { "result": ... }           # success
+        | { "error": { "code": "...", "message": "..." } }  # failure
+```
+
+The Sandbox normalises both shapes into `ToolResult` before returning
+to the execution pipeline.
+
 ---
 
 ## 12. Environment Manager

@@ -18,6 +18,7 @@ def write_audit_event(
     event_type: str,
     tool_name: str,
     session_id: str | None = None,
+    idempotency_key: str | None = None,
     error: dict[str, Any] | None = None,
     audit_log_path: str | None = None,
 ) -> None:
@@ -33,6 +34,8 @@ def write_audit_event(
     }
     if session_id:
         record["session_id"] = session_id
+    if idempotency_key:
+        record["idempotency_key"] = idempotency_key
     if error:
         record["error"] = error
 

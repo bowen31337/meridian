@@ -16,6 +16,10 @@ class ToolContext(BaseModel):
     session_id: str
     thread_id: str | None = None
     scratch_dir: str | None = None
+    # Stable caller-supplied key that enables idempotent retry (§11.5).
+    # Two invocations with equal (tool_name, idempotency_key) return the
+    # same ToolResult without re-executing the handler.
+    idempotency_key: str | None = None
     extra: dict[str, Any] = Field(default_factory=dict)
 
 
