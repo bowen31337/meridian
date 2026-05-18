@@ -152,8 +152,9 @@ def _user_profile(r: Record) -> UserProfile:
         display_name=r[2],
         email=r[3],
         metadata=r[4],
-        created_at=r[5],
-        updated_at=r[6],
+        is_primary=bool(r[5]),
+        created_at=r[6],
+        updated_at=r[7],
     )
 
 
@@ -712,7 +713,7 @@ class _PgUserProfileRepo(UserProfileRepository):
     async def get(self, user_id: str) -> UserProfile | None:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT id, username, display_name, email, metadata, created_at, updated_at"
+                "SELECT id, username, display_name, email, metadata, is_primary, created_at, updated_at"
                 " FROM user_profiles WHERE id = $1",
                 user_id,
             )
@@ -723,13 +724,14 @@ class _PgUserProfileRepo(UserProfileRepository):
             await conn.execute(
                 """
                 INSERT INTO user_profiles
-                    (id, username, display_name, email, metadata, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    (id, username, display_name, email, metadata, is_primary, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 ON CONFLICT (id) DO UPDATE SET
                     username     = EXCLUDED.username,
                     display_name = EXCLUDED.display_name,
                     email        = EXCLUDED.email,
                     metadata     = EXCLUDED.metadata,
+                    is_primary   = EXCLUDED.is_primary,
                     updated_at   = EXCLUDED.updated_at
                 """,
                 profile.id,
@@ -737,6 +739,7 @@ class _PgUserProfileRepo(UserProfileRepository):
                 profile.display_name,
                 profile.email,
                 profile.metadata,
+                profile.is_primary,
                 profile.created_at,
                 profile.updated_at,
             )
@@ -748,7 +751,7 @@ class _PgUserProfileRepo(UserProfileRepository):
     async def list(self, filter: UserProfileFilter) -> list[UserProfile]:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT id, username, display_name, email, metadata, created_at, updated_at"
+                "SELECT id, username, display_name, email, metadata, is_primary, created_at, updated_at"
                 " FROM user_profiles ORDER BY username ASC LIMIT $1 OFFSET $2",
                 filter.limit,
                 filter.offset,

@@ -172,6 +172,7 @@ class UserProfile:
     display_name: str | None
     email: str | None
     metadata: str | None  # JSON object or None
+    is_primary: bool
     created_at: str
     updated_at: str
 

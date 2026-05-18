@@ -1,0 +1,392 @@
+"""
+User profiles endpoint conformance suite.
+
+Tests cover:
+  - POST /v1/user_profiles returns 201 on success.
+  - Response has id with "user_" prefix.
+  - IDs are unique across calls.
+  - Response has username, display_name, email, metadata, is_primary, created_at, updated_at.
+  - display_name is null when omitted; stored when provided.
+  - email is null when omitted; stored when provided.
+  - metadata is null when omitted; stored when provided.
+  - is_primary is true for the first profile created.
+  - is_primary is false for subsequent profiles.
+  - Profile JSON written to storage_root/user_profiles/{id}.json.
+  - Persisted profile has correct username.
+  - Not written to disk on validation failure.
+  - Empty username returns 422 with code "user_profile_invalid_request".
+  - Missing required fields return 422.
+  - On validation failure, audit log entry written with event "user_profile.create.failed".
+  - Audit entry level is "error" on failure.
+  - Audit entry code is "user_profile_invalid_request" on validation failure.
+  - Audit detail includes user_profile_id, username, message on failure.
+  - Error response body has error.code and error.message on failure.
+  - OTel span "user_profile.create" emitted on success.
+  - OTel span "user_profile.create" emitted on failure.
+  - OTel span set to ERROR status on failure.
+  - Span carries user_profile.id and user_profile.username attributes.
+  - create_app wires user_profiles router when storage_root is supplied.
+  - create_app omits user_profiles route when storage_root is None.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+from meridiand._app import create_app
+from meridiand._audit import FileAuditLog
+
+from tests._otel_shared import otel_exporter as _otel_exporter
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_client(storage_root: Path) -> TestClient:
+    app = create_app(FileAuditLog(storage_root), storage_root=storage_root)
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def _body(**overrides) -> dict:
+    base: dict = {"username": "alice"}
+    base.update(overrides)
+    return base
+
+
+def _audit_records(storage_root: Path) -> list[dict]:
+    path = storage_root / "audit.ndjson"
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def _profile_resource(storage_root: Path, user_id: str) -> dict:
+    return json.loads((storage_root / "user_profiles" / f"{user_id}.json").read_text())
+
+
+# ---------------------------------------------------------------------------
+# Success
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileCreateSuccess:
+    def test_returns_201(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/user_profiles", json=_body())
+        assert resp.status_code == 201
+
+    def test_with_display_name_returns_201(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/user_profiles", json=_body(display_name="Alice Smith"))
+        assert resp.status_code == 201
+
+    def test_with_email_returns_201(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/user_profiles", json=_body(email="alice@example.com"))
+        assert resp.status_code == 201
+
+    def test_with_metadata_returns_201(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/user_profiles", json=_body(metadata={"role": "admin"}))
+        assert resp.status_code == 201
+
+
+# ---------------------------------------------------------------------------
+# Response fields
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileCreateResponse:
+    def test_response_has_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/user_profiles", json=_body()).json()
+        assert "id" in body
+        assert isinstance(body["id"], str)
+
+    def test_id_has_user_prefix(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/user_profiles", json=_body()).json()
+        assert body["id"].startswith("user_")
+
+    def test_ids_are_unique(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        id1 = client.post("/v1/user_profiles", json=_body(username="alice")).json()["id"]
+        id2 = client.post("/v1/user_profiles", json=_body(username="bob")).json()["id"]
+        assert id1 != id2
+
+    def test_response_has_username(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/user_profiles", json=_body(username="charlie")).json()
+        assert body["username"] == "charlie"
+
+    def test_display_name_null_when_omitted(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/user_profiles", json=_body()).json()
+        assert body["display_name"] is None
+
+    def test_display_name_stored_when_provided(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/user_profiles", json=_body(display_name="Alice Smith")).json()
+        assert body["display_name"] == "Alice Smith"
+
+    def test_email_null_when_omitted(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/user_profiles", json=_body()).json()
+        assert body["email"] is None
+
+    def test_email_stored_when_provided(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/user_profiles", json=_body(email="alice@example.com")).json()
+        assert body["email"] == "alice@example.com"
+
+    def test_metadata_null_when_omitted(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/user_profiles", json=_body()).json()
+        assert body["metadata"] is None
+
+    def test_metadata_stored_when_provided(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        meta = {"role": "admin", "tier": "paid"}
+        body = client.post("/v1/user_profiles", json=_body(metadata=meta)).json()
+        assert body["metadata"] == meta
+
+    def test_response_has_created_at(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/user_profiles", json=_body()).json()
+        assert "created_at" in body
+        assert isinstance(body["created_at"], str)
+        assert len(body["created_at"]) > 0
+
+    def test_response_has_updated_at(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/user_profiles", json=_body()).json()
+        assert "updated_at" in body
+        assert isinstance(body["updated_at"], str)
+        assert len(body["updated_at"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# is_primary flag
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileIsPrimary:
+    def test_first_profile_is_primary(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/user_profiles", json=_body(username="alice")).json()
+        assert body["is_primary"] is True
+
+    def test_second_profile_is_not_primary(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username="alice"))
+        body = client.post("/v1/user_profiles", json=_body(username="bob")).json()
+        assert body["is_primary"] is False
+
+    def test_third_profile_is_not_primary(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username="alice"))
+        client.post("/v1/user_profiles", json=_body(username="bob"))
+        body = client.post("/v1/user_profiles", json=_body(username="carol")).json()
+        assert body["is_primary"] is False
+
+
+# ---------------------------------------------------------------------------
+# Persistence
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfilePersistence:
+    def test_profile_json_written_to_storage(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        assert (storage_root / "user_profiles" / f"{user_id}.json").exists()
+
+    def test_persisted_username(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body(username="persist-user")).json()["id"]
+        resource = _profile_resource(storage_root, user_id)
+        assert resource["username"] == "persist-user"
+
+    def test_persisted_is_primary_true_for_first(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body(username="first")).json()["id"]
+        resource = _profile_resource(storage_root, user_id)
+        assert resource["is_primary"] is True
+
+    def test_persisted_is_primary_false_for_second(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username="first"))
+        user_id = client.post("/v1/user_profiles", json=_body(username="second")).json()["id"]
+        resource = _profile_resource(storage_root, user_id)
+        assert resource["is_primary"] is False
+
+    def test_not_written_on_validation_failure(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username=""))
+        profiles_dir = storage_root / "user_profiles"
+        files = list(profiles_dir.glob("*.json")) if profiles_dir.exists() else []
+        assert files == []
+
+
+# ---------------------------------------------------------------------------
+# Validation errors
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileCreateValidation:
+    def test_missing_username_returns_422(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/user_profiles", json={})
+        assert resp.status_code == 422
+
+    def test_empty_username_returns_422(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/user_profiles", json=_body(username="   "))
+        assert resp.status_code == 422
+
+    def test_empty_username_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/user_profiles", json=_body(username="")).json()
+        assert body["error"]["code"] == "user_profile_invalid_request"
+
+    def test_validation_error_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/user_profiles", json=_body(username="")).json()
+        assert "message" in body["error"]
+        assert len(body["error"]["message"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# Audit log
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileAuditLog:
+    def test_validation_failure_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username=""))
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "user_profile.create.failed" for r in records)
+
+    def test_failure_audit_level_is_error(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username=""))
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "user_profile.create.failed"
+        )
+        assert record["level"] == "error"
+
+    def test_failure_audit_code_is_user_profile_invalid_request(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username=""))
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "user_profile.create.failed"
+        )
+        assert record["code"] == "user_profile_invalid_request"
+
+    def test_failure_audit_detail_has_user_profile_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username=""))
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "user_profile.create.failed"
+        )
+        assert record["detail"]["user_profile_id"].startswith("user_")
+
+    def test_failure_audit_detail_has_username(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username="audit-user", email="x@x.com"))
+        # Trigger a validation error with empty username but show name context via a different field
+        client.post("/v1/user_profiles", json={"username": ""})
+        records = _audit_records(storage_root)
+        record = next(
+            r for r in records if r.get("event") == "user_profile.create.failed"
+        )
+        assert "username" in record["detail"]
+
+    def test_failure_audit_detail_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username=""))
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "user_profile.create.failed"
+        )
+        assert "message" in record["detail"]
+        assert len(record["detail"]["message"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# OTel spans
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileOtel:
+    def setup_method(self) -> None:
+        _otel_exporter.clear()
+
+    def _client(self, storage_root: Path) -> TestClient:
+        app = create_app(FileAuditLog(storage_root), storage_root=storage_root)
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_success_emits_user_profile_create_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        client.post("/v1/user_profiles", json=_body())
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "user_profile.create" in span_names
+
+    def test_failure_emits_user_profile_create_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username=""))
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "user_profile.create" in span_names
+
+    def test_failure_span_has_error_status(self, storage_root: Path) -> None:
+        from opentelemetry.trace import StatusCode
+
+        client = self._client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username=""))
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("user_profile.create")
+        assert span is not None
+        assert span.status.status_code == StatusCode.ERROR
+
+    def test_success_span_has_user_profile_id_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        client.post("/v1/user_profiles", json=_body())
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("user_profile.create")
+        assert span is not None
+        assert span.attributes["user_profile.id"].startswith("user_")
+
+    def test_success_span_has_username_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        client.post("/v1/user_profiles", json=_body(username="otel-user"))
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("user_profile.create")
+        assert span is not None
+        assert span.attributes["user_profile.username"] == "otel-user"
+
+
+# ---------------------------------------------------------------------------
+# Route wiring
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileRouteWiring:
+    def test_route_present_with_storage_root(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/user_profiles", json=_body())
+        assert resp.status_code != 404
+
+    def test_route_absent_without_storage_root(self, storage_root: Path) -> None:
+        app = create_app(FileAuditLog(storage_root))
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post("/v1/user_profiles", json=_body())
+        assert resp.status_code == 404

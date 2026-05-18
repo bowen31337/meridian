@@ -168,8 +168,9 @@ def _user_profile(row: Row) -> UserProfile:
         display_name=row[2],
         email=row[3],
         metadata=row[4],
-        created_at=row[5],
-        updated_at=row[6],
+        is_primary=bool(row[5]),
+        created_at=row[6],
+        updated_at=row[7],
     )
 
 
@@ -697,7 +698,7 @@ class _SqliteUserProfileRepo(UserProfileRepository):
 
     async def get(self, user_id: str) -> UserProfile | None:
         async with self._conn.execute(
-            "SELECT id, username, display_name, email, metadata, created_at, updated_at"
+            "SELECT id, username, display_name, email, metadata, is_primary, created_at, updated_at"
             " FROM user_profiles WHERE id = ?",
             (user_id,),
         ) as cur:
@@ -708,13 +709,14 @@ class _SqliteUserProfileRepo(UserProfileRepository):
         await self._conn.execute(
             """
             INSERT INTO user_profiles
-                (id, username, display_name, email, metadata, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (id, username, display_name, email, metadata, is_primary, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (id) DO UPDATE SET
                 username     = excluded.username,
                 display_name = excluded.display_name,
                 email        = excluded.email,
                 metadata     = excluded.metadata,
+                is_primary   = excluded.is_primary,
                 updated_at   = excluded.updated_at
             """,
             (
@@ -723,6 +725,7 @@ class _SqliteUserProfileRepo(UserProfileRepository):
                 profile.display_name,
                 profile.email,
                 profile.metadata,
+                1 if profile.is_primary else 0,
                 profile.created_at,
                 profile.updated_at,
             ),
@@ -735,7 +738,7 @@ class _SqliteUserProfileRepo(UserProfileRepository):
 
     async def list(self, filter: UserProfileFilter) -> list[UserProfile]:
         async with self._conn.execute(
-            "SELECT id, username, display_name, email, metadata, created_at, updated_at"
+            "SELECT id, username, display_name, email, metadata, is_primary, created_at, updated_at"
             " FROM user_profiles ORDER BY username ASC LIMIT ? OFFSET ?",
             (filter.limit, filter.offset),
         ) as cur:
