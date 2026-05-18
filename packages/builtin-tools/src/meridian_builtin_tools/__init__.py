@@ -15,16 +15,18 @@ Example::
 from __future__ import annotations
 
 from .canvas import canvas_op_tool
+from .exec import exec_tool
 from .grep import grep_tool
 from .kb_search import kb_search_tool
 from .read import read_tool
 from .spawn import spawn_tool
 from .write import write_tool
 
-ALL_TOOLS = [canvas_op_tool, grep_tool, kb_search_tool, read_tool, spawn_tool, write_tool]
+ALL_TOOLS = [canvas_op_tool, exec_tool, grep_tool, kb_search_tool, read_tool, spawn_tool, write_tool]
 
 __all__ = [
     "canvas_op_tool",
+    "exec_tool",
     "grep_tool",
     "kb_search_tool",
     "read_tool",
