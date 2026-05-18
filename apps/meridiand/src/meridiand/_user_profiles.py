@@ -135,6 +135,25 @@ class UserProfileUpdateError(MeridianError):
         return 500
 
 
+class UserProfileGetError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="user_profile_get_failed",
+            message=message,
+            timestamp=timestamp,
+            cause=cause,
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
 # ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
@@ -426,6 +445,73 @@ def make_user_profiles_router(*, audit_log: AuditLog, storage_root: Path) -> API
                     AuditLogEntry(
                         level="error",
                         event="user_profile.update.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={
+                            "user_profile_id": user_profile_id,
+                            "message": err2.message,
+                        },
+                    )
+                )
+                raise err2
+
+        return JSONResponse(content=profile, status_code=200)
+
+    @router.get("/v1/user_profiles/{user_profile_id}", status_code=200)
+    async def get_user_profile(user_profile_id: str) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "user_profile.get",
+            attributes={"user_profile.id": user_profile_id},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="user_profile.get.invocation",
+                    code="user_profile_get",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                profile_file = profiles_dir / f"{user_profile_id}.json"
+                if not profile_file.exists():
+                    raise UserProfileNotFoundError(
+                        user_profile_id=user_profile_id, timestamp=now
+                    )
+
+                profile = json.loads(profile_file.read_text())
+                profile.setdefault("channel_pairings", [])
+
+            except UserProfileNotFoundError as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="user_profile.get.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "user_profile_id": user_profile_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = UserProfileGetError(
+                    message=f"Failed to get user profile: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="user_profile.get.failed",
                         code=err2.code,
                         timestamp=err2.timestamp,
                         detail={

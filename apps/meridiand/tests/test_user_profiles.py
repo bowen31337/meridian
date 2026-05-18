@@ -1026,3 +1026,235 @@ class TestUserProfileUpdateRouteWiring:
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.patch("/v1/user_profiles/user_any", json={"display_name": "X"})
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# GET success
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileGetSuccess:
+    def test_returns_200(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        resp = client.get(f"/v1/user_profiles/{user_id}")
+        assert resp.status_code == 200
+
+    def test_response_has_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        body = client.get(f"/v1/user_profiles/{user_id}").json()
+        assert body["id"] == user_id
+
+    def test_response_has_display_name(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body(display_name="Alice")).json()["id"]
+        body = client.get(f"/v1/user_profiles/{user_id}").json()
+        assert body["display_name"] == "Alice"
+
+    def test_display_name_null_when_not_set(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        body = client.get(f"/v1/user_profiles/{user_id}").json()
+        assert body["display_name"] is None
+
+    def test_response_has_is_primary(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        body = client.get(f"/v1/user_profiles/{user_id}").json()
+        assert body["is_primary"] is True
+
+    def test_response_has_capabilities(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        body = client.get(f"/v1/user_profiles/{user_id}").json()
+        assert "capabilities" in body
+        assert isinstance(body["capabilities"], list)
+
+    def test_capabilities_reflect_updates(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        caps = ["fs.read[/workspace/**]"]
+        client.patch(f"/v1/user_profiles/{user_id}", json={"capabilities": caps})
+        body = client.get(f"/v1/user_profiles/{user_id}").json()
+        assert body["capabilities"] == caps
+
+    def test_response_has_memories(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        body = client.get(f"/v1/user_profiles/{user_id}").json()
+        assert "memories" in body
+        assert isinstance(body["memories"], list)
+
+    def test_memories_reflect_updates(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        mems = ["Prefers dark mode"]
+        client.patch(f"/v1/user_profiles/{user_id}", json={"memories": mems})
+        body = client.get(f"/v1/user_profiles/{user_id}").json()
+        assert body["memories"] == mems
+
+    def test_response_has_channel_pairings(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        body = client.get(f"/v1/user_profiles/{user_id}").json()
+        assert "channel_pairings" in body
+        assert isinstance(body["channel_pairings"], list)
+
+    def test_channel_pairings_empty_by_default(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        body = client.get(f"/v1/user_profiles/{user_id}").json()
+        assert body["channel_pairings"] == []
+
+    def test_response_includes_all_required_fields(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        body = client.get(f"/v1/user_profiles/{user_id}").json()
+        for field in ("id", "display_name", "is_primary", "memories", "capabilities", "channel_pairings"):
+            assert field in body
+
+    def test_get_reflects_patch_changes(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        client.patch(f"/v1/user_profiles/{user_id}", json={"display_name": "Updated"})
+        body = client.get(f"/v1/user_profiles/{user_id}").json()
+        assert body["display_name"] == "Updated"
+
+
+# ---------------------------------------------------------------------------
+# GET not found
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileGetNotFound:
+    def test_unknown_id_returns_404(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.get("/v1/user_profiles/user_nonexistent")
+        assert resp.status_code == 404
+
+    def test_not_found_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.get("/v1/user_profiles/user_nonexistent").json()
+        assert body["error"]["code"] == "user_profile_not_found"
+
+    def test_not_found_error_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.get("/v1/user_profiles/user_nonexistent").json()
+        assert len(body["error"]["message"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# GET audit log
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileGetAuditLog:
+    def test_not_found_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/user_profiles/user_missing")
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "user_profile.get.failed" for r in records)
+
+    def test_failure_audit_level_is_error(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/user_profiles/user_missing")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "user_profile.get.failed"
+        )
+        assert record["level"] == "error"
+
+    def test_not_found_audit_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/user_profiles/user_missing")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "user_profile.get.failed"
+        )
+        assert record["code"] == "user_profile_not_found"
+
+    def test_audit_detail_has_user_profile_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/user_profiles/user_missing")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "user_profile.get.failed"
+        )
+        assert record["detail"]["user_profile_id"] == "user_missing"
+
+    def test_audit_detail_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/user_profiles/user_missing")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "user_profile.get.failed"
+        )
+        assert len(record["detail"]["message"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# GET OTel spans
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileGetOtel:
+    def setup_method(self) -> None:
+        _otel_exporter.clear()
+
+    def _client(self, storage_root: Path) -> TestClient:
+        app = create_app(FileAuditLog(storage_root), storage_root=storage_root)
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_success_emits_get_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        _otel_exporter.clear()
+        client.get(f"/v1/user_profiles/{user_id}")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "user_profile.get" in span_names
+
+    def test_not_found_emits_get_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        client.get("/v1/user_profiles/user_missing")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "user_profile.get" in span_names
+
+    def test_not_found_span_has_error_status(self, storage_root: Path) -> None:
+        from opentelemetry.trace import StatusCode
+
+        client = self._client(storage_root)
+        client.get("/v1/user_profiles/user_missing")
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("user_profile.get")
+        assert span is not None
+        assert span.status.status_code == StatusCode.ERROR
+
+    def test_success_span_has_user_profile_id_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        _otel_exporter.clear()
+        client.get(f"/v1/user_profiles/{user_id}")
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("user_profile.get")
+        assert span is not None
+        assert span.attributes["user_profile.id"] == user_id
+
+
+# ---------------------------------------------------------------------------
+# GET route wiring
+# ---------------------------------------------------------------------------
+
+
+class TestUserProfileGetRouteWiring:
+    def test_get_route_present_with_storage_root(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
+        resp = client.get(f"/v1/user_profiles/{user_id}")
+        assert resp.status_code != 404
+
+    def test_get_route_absent_without_storage_root(self, storage_root: Path) -> None:
+        app = create_app(FileAuditLog(storage_root))
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.get("/v1/user_profiles/user_any")
+        assert resp.status_code == 404
