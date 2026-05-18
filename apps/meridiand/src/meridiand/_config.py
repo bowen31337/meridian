@@ -90,6 +90,12 @@ class CronSchedulerConfig(BaseModel):
     check_interval_seconds: float = 5.0
 
 
+class WebhookSenderConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    check_interval_seconds: float = 5.0
+
+
 class MeridianConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -100,6 +106,7 @@ class MeridianConfig(BaseModel):
     cors: CorsConfig = Field(default_factory=CorsConfig)
     compaction: CompactionConfig = Field(default_factory=CompactionConfig)
     cron: CronSchedulerConfig = Field(default_factory=CronSchedulerConfig)
+    webhook_sender: WebhookSenderConfig = Field(default_factory=WebhookSenderConfig)
 
     @field_validator("storage_root", mode="before")
     @classmethod
