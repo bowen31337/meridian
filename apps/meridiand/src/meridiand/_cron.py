@@ -118,6 +118,8 @@ class CronCreateRequest(BaseModel):
     webhook_id: str | None = None
     # memory_anniversary trigger
     memory_key: str | None = None
+    # days_before: how many days before the anniversary date to fire
+    days_before: int | None = None
     metadata: dict[str, Any] | None = None
 
 
@@ -139,6 +141,14 @@ def _validate_trigger(body: CronCreateRequest) -> CronInvalidRequestError | None
             message=(
                 f"trigger_type '{body.trigger_type.value}' requires '{field}' "
                 f"({description})"
+            ),
+            timestamp=_now(),
+        )
+    if body.trigger_type == TriggerType.memory_anniversary and body.days_before is None:
+        return CronInvalidRequestError(
+            message=(
+                "trigger_type 'memory_anniversary' requires 'days_before' "
+                "(number of days before the anniversary to fire)"
             ),
             timestamp=_now(),
         )
@@ -196,6 +206,7 @@ def make_cron_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                     "path": body.path,
                     "webhook_id": body.webhook_id,
                     "memory_key": body.memory_key,
+                    "days_before": body.days_before,
                     "metadata": body.metadata,
                 }
                 (cron_dir / f"{cron_id}.json").write_text(json.dumps(resource))

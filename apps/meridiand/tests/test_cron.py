@@ -73,7 +73,7 @@ def _body(
         "channel_event": {"channel_id": "chan-1"},
         "file_change": {"path": "/workspace/data.csv"},
         "webhook": {"webhook_id": "wh-1"},
-        "memory_anniversary": {"memory_key": "user.birthday"},
+        "memory_anniversary": {"memory_key": "user.birthday", "days_before": 3},
     }
     base.update(defaults.get(trigger_type, {}))
     base.update(extras)
@@ -228,6 +228,13 @@ class TestCronCreateResponse:
         ).json()
         assert body["memory_key"] == "join.date"
 
+    def test_days_before_field_in_response(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post(
+            "/v1/x/cron", json=_body("memory_anniversary", days_before=7)
+        ).json()
+        assert body["days_before"] == 7
+
 
 # ---------------------------------------------------------------------------
 # Validation errors
@@ -294,6 +301,30 @@ class TestCronCreateValidation:
         )
         assert resp.status_code == 422
 
+    def test_memory_anniversary_without_days_before_returns_422(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post(
+            "/v1/x/cron",
+            json={"trigger_type": "memory_anniversary", "session_id": "s1", "memory_key": "user.birthday"},
+        )
+        assert resp.status_code == 422
+
+    def test_memory_anniversary_days_before_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post(
+            "/v1/x/cron",
+            json={"trigger_type": "memory_anniversary", "session_id": "s1", "memory_key": "user.birthday"},
+        ).json()
+        assert body["error"]["code"] == "cron_invalid_request"
+
+    def test_memory_anniversary_days_before_error_names_field(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post(
+            "/v1/x/cron",
+            json={"trigger_type": "memory_anniversary", "session_id": "s1", "memory_key": "user.birthday"},
+        ).json()
+        assert "days_before" in body["error"]["message"]
+
     def test_validation_error_code_is_cron_invalid_request(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         body = client.post(
@@ -351,6 +382,22 @@ class TestCronPersistence:
         ).json()["id"]
         resource = _cron_resource(storage_root, cron_id)
         assert resource["webhook_id"] == "wh-persist"
+
+    def test_persisted_memory_key(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        cron_id = client.post(
+            "/v1/x/cron", json=_body("memory_anniversary", memory_key="user.birthday")
+        ).json()["id"]
+        resource = _cron_resource(storage_root, cron_id)
+        assert resource["memory_key"] == "user.birthday"
+
+    def test_persisted_days_before(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        cron_id = client.post(
+            "/v1/x/cron", json=_body("memory_anniversary", days_before=14)
+        ).json()["id"]
+        resource = _cron_resource(storage_root, cron_id)
+        assert resource["days_before"] == 14
 
     def test_not_written_on_validation_failure(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
