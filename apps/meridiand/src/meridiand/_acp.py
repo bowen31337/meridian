@@ -60,8 +60,40 @@ class AcpOutboundFailedError(MeridianError):
         return 502
 
 
+class AcpInboundDeniedError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="acp_inbound_denied", message=message, timestamp=timestamp, cause=cause
+        )
+
+    def http_status(self) -> int:
+        return 403
+
+
+class AcpInboundFailedError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="acp_inbound_failed", message=message, timestamp=timestamp, cause=cause
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
 # ---------------------------------------------------------------------------
-# Peer transport
+# Peer transport (outbound)
 # ---------------------------------------------------------------------------
 
 
@@ -86,7 +118,27 @@ class HttpAcpPeerClient:
 
 
 # ---------------------------------------------------------------------------
-# Request model
+# Inbound handler
+# ---------------------------------------------------------------------------
+
+
+@runtime_checkable
+class AcpInboundHandler(Protocol):
+    """Handler protocol for processing ACP messages received from peer systems."""
+
+    async def handle(self, target: str, message: dict[str, Any]) -> dict[str, Any]:
+        ...
+
+
+class DefaultAcpInboundHandler:
+    """Default handler: accepts all messages and returns an empty acknowledgement."""
+
+    async def handle(self, target: str, message: dict[str, Any]) -> dict[str, Any]:
+        return {}
+
+
+# ---------------------------------------------------------------------------
+# Request models
 # ---------------------------------------------------------------------------
 
 
@@ -102,6 +154,18 @@ class AcpOutboundTopLevelRequest(BaseModel):
     message: dict[str, Any]
 
 
+class AcpInboundRequest(BaseModel):
+    session_capabilities: list[str]
+    target: str
+    message: dict[str, Any]
+
+
+class AcpInboundTopLevelRequest(BaseModel):
+    capabilities: list[str]
+    target: str
+    message: dict[str, Any]
+
+
 # ---------------------------------------------------------------------------
 # Router factory
 # ---------------------------------------------------------------------------
@@ -112,8 +176,12 @@ def make_acp_router(
     audit_log: AuditLog,
     targets: dict[str, str],
     peer_client: AcpPeerClient | None = None,
+    inbound_handler: AcpInboundHandler | None = None,
 ) -> APIRouter:
     _client: AcpPeerClient = peer_client if peer_client is not None else HttpAcpPeerClient()
+    _inbound: AcpInboundHandler = (
+        inbound_handler if inbound_handler is not None else DefaultAcpInboundHandler()
+    )
     router = APIRouter()
 
     @router.post("/v1/x/acp/outbound")
@@ -379,6 +447,269 @@ def make_acp_router(
                 "target": target,
                 "status": "delivered",
                 "response": peer_response,
+            }
+        )
+
+    @router.post("/v1/x/acp/inbound")
+    async def acp_inbound_toplevel(body: AcpInboundTopLevelRequest) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+        call_id = str(uuid.uuid4())
+        target = body.target
+
+        with tracer.start_as_current_span(
+            "acp.inbound",
+            attributes={
+                "acp.target": target,
+                "acp.call_id": call_id,
+            },
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="acp.inbound.invocation",
+                    code="acp_inbound",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                granted_caps = parse_set(body.capabilities)
+            except CapabilityParseError as exc:
+                err = AcpInboundDeniedError(
+                    message=f"Invalid capability string: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="acp.inbound.denied",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "target": target,
+                            "call_id": call_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise err
+
+            required_cap = Capability(namespace="acp", name="inbound", param=target)
+            if not check_grant(frozenset({required_cap}), granted_caps):
+                err = AcpInboundDeniedError(
+                    message=f"ACP inbound denied: does not hold acp.inbound[{target}]",
+                    timestamp=_now(),
+                )
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="acp.inbound.denied",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "target": target,
+                            "call_id": call_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise err
+
+            if target not in targets:
+                err = AcpInboundDeniedError(
+                    message=f"ACP inbound denied: target {target!r} not registered",
+                    timestamp=_now(),
+                )
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="acp.inbound.denied",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "target": target,
+                            "call_id": call_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise err
+
+            try:
+                await _inbound.handle(target, body.message)
+            except Exception as exc:
+                err = AcpInboundFailedError(
+                    message=f"ACP inbound processing for target {target!r} failed: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="acp.inbound.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "target": target,
+                            "call_id": call_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise err
+
+        return JSONResponse(
+            content={
+                "call_id": call_id,
+                "target": target,
+                "status": "accepted",
+            }
+        )
+
+    @router.post("/v1/x/sessions/{session_id}/acp/inbound")
+    async def acp_inbound(session_id: str, body: AcpInboundRequest) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+        call_id = str(uuid.uuid4())
+        target = body.target
+
+        with tracer.start_as_current_span(
+            "acp.inbound",
+            attributes={
+                "session.id": session_id,
+                "acp.target": target,
+                "acp.call_id": call_id,
+            },
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="acp.inbound.invocation",
+                    code="acp_inbound",
+                    timestamp=now,
+                ),
+            )
+
+            # Parse session capabilities
+            try:
+                granted_caps = parse_set(body.session_capabilities)
+            except CapabilityParseError as exc:
+                err = AcpInboundDeniedError(
+                    message=f"Invalid capability string for session {session_id!r}: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="acp.inbound.denied",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "session_id": session_id,
+                            "target": target,
+                            "call_id": call_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise err
+
+            # Capability gate: must hold acp.inbound[target]
+            required_cap = Capability(namespace="acp", name="inbound", param=target)
+            if not check_grant(frozenset({required_cap}), granted_caps):
+                err = AcpInboundDeniedError(
+                    message=(
+                        f"ACP inbound denied for session {session_id!r}: "
+                        f"does not hold acp.inbound[{target}]"
+                    ),
+                    timestamp=_now(),
+                )
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="acp.inbound.denied",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "session_id": session_id,
+                            "target": target,
+                            "call_id": call_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise err
+
+            # Target registration check
+            if target not in targets:
+                err = AcpInboundDeniedError(
+                    message=(
+                        f"ACP inbound denied for session {session_id!r}: "
+                        f"target {target!r} not registered"
+                    ),
+                    timestamp=_now(),
+                )
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="acp.inbound.denied",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "session_id": session_id,
+                            "target": target,
+                            "call_id": call_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise err
+
+            # Process the inbound message
+            try:
+                await _inbound.handle(target, body.message)
+            except Exception as exc:
+                err = AcpInboundFailedError(
+                    message=(
+                        f"ACP inbound processing for target {target!r} failed "
+                        f"for session {session_id!r}: {exc}"
+                    ),
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="acp.inbound.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "session_id": session_id,
+                            "target": target,
+                            "call_id": call_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise err
+
+        return JSONResponse(
+            content={
+                "call_id": call_id,
+                "session_id": session_id,
+                "target": target,
+                "status": "accepted",
             }
         )
 

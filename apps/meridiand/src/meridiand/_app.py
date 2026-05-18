@@ -15,7 +15,7 @@ from storage_event_log import EventLogWriter
 
 from meridian_sdk_provider import ModelRouter
 
-from ._acp import AcpPeerClient, make_acp_router
+from ._acp import AcpInboundHandler, AcpPeerClient, make_acp_router
 from ._acp_compliance import make_acp_compliance_router
 from ._cancel import make_cancel_router
 from ._checkpoint import make_checkpoint_router
@@ -49,6 +49,7 @@ def create_app(
     event_log: EventLogWriter | None = None,
     acp_targets: dict[str, str] | None = None,
     acp_peer_client: AcpPeerClient | None = None,
+    acp_inbound_handler: AcpInboundHandler | None = None,
     cors: CorsConfig | None = None,
     model_router: ModelRouter | None = None,
 ) -> FastAPI:
@@ -158,6 +159,7 @@ def create_app(
                         audit_log=audit_log,
                         targets=acp_targets,
                         peer_client=acp_peer_client,
+                        inbound_handler=acp_inbound_handler,
                     )
                 )
                 app.include_router(

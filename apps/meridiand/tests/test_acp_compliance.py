@@ -4,7 +4,7 @@ ACP CI compliance suite conformance tests.
 Tests cover:
   - POST /v1/x/ci/acp-compliance returns 200 with run_id, status, test_count, tests on success.
   - status is "passed" when all compliance tests pass.
-  - test_count equals the number of tests in the suite (20).
+  - test_count equals the number of tests in the suite (35).
   - Each test entry has name, description, and status fields.
   - Each test entry status is "passed" when the suite succeeds.
   - Returns 422 with code "acp_compliance_failed" when any compliance test fails.
@@ -109,7 +109,7 @@ class TestAcpComplianceSuccess:
     def test_response_test_count_is_20(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         body = client.post("/v1/x/ci/acp-compliance").json()
-        assert body["test_count"] == 20
+        assert body["test_count"] == 35
 
     def test_tests_list_length_matches_test_count(self, storage_root: Path) -> None:
         client = _make_client(storage_root)

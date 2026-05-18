@@ -20,7 +20,7 @@ from core_errors import (
 from fastapi import APIRouter, FastAPI
 from fastapi.responses import JSONResponse
 
-from ._acp import AcpPeerClient, make_acp_router
+from ._acp import AcpInboundHandler, AcpPeerClient, make_acp_router
 
 
 def _now() -> str:
@@ -71,6 +71,11 @@ class _FailingPeerClient:
         raise RuntimeError("Connection refused: compliance transport test")
 
 
+class _FailingInboundHandler:
+    async def handle(self, target: str, message: dict[str, Any]) -> dict[str, Any]:
+        raise RuntimeError("Inbound processing failed: compliance failure test")
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -89,7 +94,10 @@ def _result(
     return r
 
 
-def _make_acp_test_app(peer_client: AcpPeerClient) -> FastAPI:
+def _make_acp_test_app(
+    peer_client: AcpPeerClient,
+    inbound_handler: AcpInboundHandler | None = None,
+) -> FastAPI:
     app = FastAPI()
     install_error_handler(app, HandlerOptions(audit_log=NoopAuditLog()))
     app.include_router(
@@ -97,6 +105,7 @@ def _make_acp_test_app(peer_client: AcpPeerClient) -> FastAPI:
             audit_log=NoopAuditLog(),
             targets=_COMPLIANCE_TARGETS,
             peer_client=peer_client,
+            inbound_handler=inbound_handler,
         )
     )
     return app
@@ -404,6 +413,221 @@ async def _run_compliance_suite() -> list[dict[str, Any]]:
                 "Transport failure error code is 'acp_outbound_failed'",
                 tf_code == "acp_outbound_failed",
                 f"got {tf_code!r}",
+            )
+        )
+
+    # --- inbound: success path ---
+
+    inbound_app = _make_acp_test_app(_SuccessPeerClient())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=inbound_app), base_url="http://test"
+    ) as c:
+        r13 = await c.post(
+            "/v1/x/sessions/ci-s13/acp/inbound",
+            json={
+                "target": "hermes",
+                "session_capabilities": ["acp.inbound[hermes]"],
+                "message": {"action": "ping"},
+            },
+        )
+        results.append(
+            _result(
+                "inbound_session_accepted",
+                "POST /v1/x/sessions/{id}/acp/inbound returns 200 on a valid call",
+                r13.status_code == 200,
+                f"status {r13.status_code}",
+            )
+        )
+        ib_body = r13.json() if r13.status_code == 200 else {}
+        results.append(
+            _result(
+                "inbound_response_has_call_id",
+                "Inbound 200 response contains a non-empty call_id string",
+                isinstance(ib_body.get("call_id"), str) and len(ib_body.get("call_id", "")) > 0,
+                "call_id missing or empty",
+            )
+        )
+        results.append(
+            _result(
+                "inbound_session_id_echoed",
+                "Inbound 200 response session_id matches the session path parameter",
+                ib_body.get("session_id") == "ci-s13",
+                f"got {ib_body.get('session_id')!r}",
+            )
+        )
+        results.append(
+            _result(
+                "inbound_target_echoed",
+                "Inbound 200 response target matches the request body target",
+                ib_body.get("target") == "hermes",
+                f"got {ib_body.get('target')!r}",
+            )
+        )
+        results.append(
+            _result(
+                "inbound_status_accepted",
+                "Inbound 200 response status is 'accepted'",
+                ib_body.get("status") == "accepted",
+                f"got {ib_body.get('status')!r}",
+            )
+        )
+
+        # unrestricted inbound capability
+        r14 = await c.post(
+            "/v1/x/sessions/ci-s14/acp/inbound",
+            json={
+                "target": "hermes",
+                "session_capabilities": ["acp.inbound"],
+                "message": {},
+            },
+        )
+        results.append(
+            _result(
+                "inbound_unrestricted_cap_grants_any_target",
+                "acp.inbound (no param) is accepted for any registered target",
+                r14.status_code == 200,
+                f"status {r14.status_code}",
+            )
+        )
+
+        # inbound capability denial
+        r15 = await c.post(
+            "/v1/x/sessions/ci-s15/acp/inbound",
+            json={
+                "target": "hermes",
+                "session_capabilities": ["exec.shell"],
+                "message": {},
+            },
+        )
+        results.append(
+            _result(
+                "inbound_missing_cap_denied",
+                "Missing acp.inbound capability returns 403",
+                r15.status_code == 403,
+                f"status {r15.status_code}",
+            )
+        )
+        ib_denied_code = (
+            r15.json().get("error", {}).get("code") if r15.status_code == 403 else None
+        )
+        results.append(
+            _result(
+                "inbound_denial_error_code",
+                "Inbound capability denial error code is 'acp_inbound_denied'",
+                ib_denied_code == "acp_inbound_denied",
+                f"got {ib_denied_code!r}",
+            )
+        )
+
+        r16 = await c.post(
+            "/v1/x/sessions/ci-s16/acp/inbound",
+            json={
+                "target": "hermes",
+                "session_capabilities": ["acp.inbound[other]"],
+                "message": {},
+            },
+        )
+        results.append(
+            _result(
+                "inbound_wrong_target_cap_denied",
+                "acp.inbound[other] is denied when receiving from a different target",
+                r16.status_code == 403,
+                f"status {r16.status_code}",
+            )
+        )
+
+        r17 = await c.post(
+            "/v1/x/sessions/ci-s17/acp/inbound",
+            json={
+                "target": "unknown-peer",
+                "session_capabilities": ["acp.inbound[unknown-peer]"],
+                "message": {},
+            },
+        )
+        results.append(
+            _result(
+                "inbound_unregistered_target_denied",
+                "Inbound call from an unregistered target returns 403",
+                r17.status_code == 403,
+                f"status {r17.status_code}",
+            )
+        )
+
+        # top-level inbound endpoint
+        r18 = await c.post(
+            "/v1/x/acp/inbound",
+            json={
+                "target": "hermes",
+                "capabilities": ["acp.inbound[hermes]"],
+                "message": {},
+            },
+        )
+        results.append(
+            _result(
+                "inbound_toplevel_accepted",
+                "POST /v1/x/acp/inbound returns 200 on a valid call",
+                r18.status_code == 200,
+                f"status {r18.status_code}",
+            )
+        )
+        tl_ib_body = r18.json() if r18.status_code == 200 else {}
+        results.append(
+            _result(
+                "inbound_toplevel_no_session_id",
+                "Top-level inbound response does not include session_id",
+                "session_id" not in tl_ib_body,
+                "session_id unexpectedly present",
+            )
+        )
+
+        r19 = await c.post(
+            "/v1/x/acp/inbound",
+            json={
+                "target": "hermes",
+                "capabilities": ["exec.shell"],
+                "message": {},
+            },
+        )
+        results.append(
+            _result(
+                "inbound_toplevel_cap_denial",
+                "Top-level inbound endpoint returns 403 when capability is missing",
+                r19.status_code == 403,
+                f"status {r19.status_code}",
+            )
+        )
+
+    # --- inbound: processing failure path ---
+
+    inbound_failure_app = _make_acp_test_app(_SuccessPeerClient(), _FailingInboundHandler())
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=inbound_failure_app), base_url="http://test"
+    ) as c:
+        r20 = await c.post(
+            "/v1/x/sessions/ci-s20/acp/inbound",
+            json={
+                "target": "hermes",
+                "session_capabilities": ["acp.inbound[hermes]"],
+                "message": {},
+            },
+        )
+        results.append(
+            _result(
+                "inbound_processing_failure_500",
+                "Inbound handler error returns 500",
+                r20.status_code == 500,
+                f"status {r20.status_code}",
+            )
+        )
+        ib_fail_code = (
+            r20.json().get("error", {}).get("code") if r20.status_code == 500 else None
+        )
+        results.append(
+            _result(
+                "inbound_processing_failure_error_code",
+                "Inbound processing failure error code is 'acp_inbound_failed'",
+                ib_fail_code == "acp_inbound_failed",
+                f"got {ib_fail_code!r}",
             )
         )
 
