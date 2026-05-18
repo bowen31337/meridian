@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import subprocess
@@ -190,6 +191,38 @@ def _validate_request(body: SkillCreateRequest) -> SkillInvalidRequestError | No
             timestamp=_now(),
         )
     return None
+
+
+# ---------------------------------------------------------------------------
+# Content-addressed version ID
+# ---------------------------------------------------------------------------
+
+
+def _content_version_id(
+    *,
+    skill_id: str,
+    instructions: str,
+    tools: list[dict[str, Any]],
+    tests: list[dict[str, Any]],
+    source_type: str,
+    source_url: str | None,
+    source: str,
+    derived_from_session_ids: list[str] | None,
+) -> str:
+    """Return ``skillver_<sha256>`` where the hash covers the canonical JSON body."""
+    body = {
+        "derived_from_session_ids": derived_from_session_ids,
+        "instructions": instructions,
+        "skill_id": skill_id,
+        "source": source,
+        "source_type": source_type,
+        "source_url": source_url,
+        "tests": tests,
+        "tools": tools,
+    }
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(canonical.encode()).hexdigest()
+    return f"skillver_{digest}"
 
 
 # ---------------------------------------------------------------------------
@@ -409,7 +442,6 @@ def make_skills_router(
         now = _now()
         tracer = get_tracer()
         skill_id = f"skill_{uuid.uuid4().hex}"
-        version_id = f"skillver_{uuid.uuid4().hex}"
 
         with tracer.start_as_current_span(
             "skill.create",
@@ -435,16 +467,31 @@ def make_skills_router(
                 skills_dir.mkdir(parents=True, exist_ok=True)
                 versions_dir.mkdir(parents=True, exist_ok=True)
 
+                tools_data = [t.model_dump() for t in body.tools]
+                tests_data = [t.model_dump() for t in body.tests] if body.tests else []
+                version_id = _content_version_id(
+                    skill_id=skill_id,
+                    instructions=body.instructions,
+                    tools=tools_data,
+                    tests=tests_data,
+                    source_type="api",
+                    source_url=None,
+                    source="authored",
+                    derived_from_session_ids=None,
+                )
+
                 version_record: dict[str, Any] = {
                     "id": version_id,
                     "skill_id": skill_id,
                     "version_number": 1,
                     "instructions": body.instructions,
-                    "tools": [t.model_dump() for t in body.tools],
-                    "tests": [t.model_dump() for t in body.tests] if body.tests else [],
+                    "tools": tools_data,
+                    "tests": tests_data,
                     "created_at": now,
                     "source_type": "api",
                     "source_url": None,
+                    "source": "authored",
+                    "derived_from_session_ids": None,
                 }
                 (versions_dir / f"{version_id}.json").write_text(json.dumps(version_record))
 
@@ -504,7 +551,6 @@ def make_skills_router(
         now = _now()
         tracer = get_tracer()
         skill_id = f"skill_{uuid.uuid4().hex}"
-        version_id = f"skillver_{uuid.uuid4().hex}"
 
         with tracer.start_as_current_span(
             "skill.install",
@@ -559,16 +605,31 @@ def make_skills_router(
                 skills_dir.mkdir(parents=True, exist_ok=True)
                 versions_dir.mkdir(parents=True, exist_ok=True)
 
+                tools_data = [t.model_dump() for t in req.tools]
+                tests_data = [t.model_dump() for t in req.tests] if req.tests else []
+                version_id = _content_version_id(
+                    skill_id=skill_id,
+                    instructions=req.instructions,
+                    tools=tools_data,
+                    tests=tests_data,
+                    source_type=source_type,
+                    source_url=body.source,
+                    source="authored",
+                    derived_from_session_ids=None,
+                )
+
                 version_record: dict[str, Any] = {
                     "id": version_id,
                     "skill_id": skill_id,
                     "version_number": 1,
                     "instructions": req.instructions,
-                    "tools": [t.model_dump() for t in req.tools],
-                    "tests": [t.model_dump() for t in req.tests] if req.tests else [],
+                    "tools": tools_data,
+                    "tests": tests_data,
                     "created_at": now,
                     "source_type": source_type,
                     "source_url": body.source,
+                    "source": "authored",
+                    "derived_from_session_ids": None,
                 }
                 (versions_dir / f"{version_id}.json").write_text(json.dumps(version_record))
 

@@ -11,6 +11,12 @@ Tests cover:
   - POST /v1/skills version has source_type "api".
   - POST /v1/skills version has source_url None.
   - version has id with "skillver_" prefix.
+  - SkillVersionRecord id is SHA-256 of canonical JSON body prefixed "skillver_".
+  - Content-addressed id is stable: same skill_id+content → same version id.
+  - version has source field "authored" for API-created skills.
+  - version has derived_from_session_ids null for authored skills.
+  - POST /v1/skills/install version has source field "authored".
+  - POST /v1/skills/install version has derived_from_session_ids null.
   - version has skill_id matching the skill id.
   - version has version_number 1 on first creation.
   - version has instructions, tools, tests, created_at.
@@ -93,6 +99,7 @@ Tests cover:
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -104,6 +111,7 @@ from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from meridiand._skills import (
     SkillInstallSourceLoadError,
+    _content_version_id,
     make_skills_router,
 )
 from core_errors import HandlerOptions, install_error_handler
@@ -1602,3 +1610,146 @@ class TestSkillInstallOtel:
         span = spans.get("skill.install")
         assert span is not None
         assert span.attributes["skill.install.source"] == source
+
+
+# ---------------------------------------------------------------------------
+# SkillVersionRecord — content-addressed ID
+# ---------------------------------------------------------------------------
+
+
+class TestSkillVersionContentAddressed:
+    def test_version_id_is_sha256_based(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/skills", json=_body()).json()
+        ver_id = body["version"]["id"]
+        assert ver_id.startswith("skillver_")
+        hex_part = ver_id[len("skillver_"):]
+        assert len(hex_part) == 64
+        assert all(c in "0123456789abcdef" for c in hex_part)
+
+    def test_version_id_matches_content_hash(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/skills", json=_body()).json()
+        skill_id = body["id"]
+        ver = body["version"]
+        tools = ver["tools"]
+        tests = ver["tests"]
+        expected = _content_version_id(
+            skill_id=skill_id,
+            instructions=ver["instructions"],
+            tools=tools,
+            tests=tests,
+            source_type="api",
+            source_url=None,
+            source="authored",
+            derived_from_session_ids=None,
+        )
+        assert ver["id"] == expected
+
+    def test_same_content_same_version_id(self, storage_root: Path) -> None:
+        tools = [{"name": "bash", "description": "Run shell commands", "input_schema": None}]
+        skill_id = "skill_abc123"
+        id1 = _content_version_id(
+            skill_id=skill_id,
+            instructions="Do the thing.",
+            tools=tools,
+            tests=[],
+            source_type="api",
+            source_url=None,
+            source="authored",
+            derived_from_session_ids=None,
+        )
+        id2 = _content_version_id(
+            skill_id=skill_id,
+            instructions="Do the thing.",
+            tools=tools,
+            tests=[],
+            source_type="api",
+            source_url=None,
+            source="authored",
+            derived_from_session_ids=None,
+        )
+        assert id1 == id2
+
+    def test_different_skill_id_different_version_id(self, storage_root: Path) -> None:
+        tools = [{"name": "bash", "description": "Run shell commands", "input_schema": None}]
+        kwargs: dict[str, Any] = dict(
+            instructions="Do the thing.",
+            tools=tools,
+            tests=[],
+            source_type="api",
+            source_url=None,
+            source="authored",
+            derived_from_session_ids=None,
+        )
+        id1 = _content_version_id(skill_id="skill_aaa", **kwargs)
+        id2 = _content_version_id(skill_id="skill_bbb", **kwargs)
+        assert id1 != id2
+
+    def test_different_instructions_different_version_id(self, storage_root: Path) -> None:
+        tools = [{"name": "bash", "description": "Run shell commands", "input_schema": None}]
+        kwargs: dict[str, Any] = dict(
+            skill_id="skill_abc",
+            tools=tools,
+            tests=[],
+            source_type="api",
+            source_url=None,
+            source="authored",
+            derived_from_session_ids=None,
+        )
+        id1 = _content_version_id(instructions="Step A.", **kwargs)
+        id2 = _content_version_id(instructions="Step B.", **kwargs)
+        assert id1 != id2
+
+
+# ---------------------------------------------------------------------------
+# SkillVersionRecord — source and derived_from_session_ids fields
+# ---------------------------------------------------------------------------
+
+
+class TestSkillVersionProvenanceFields:
+    def test_api_version_has_source_authored(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/skills", json=_body()).json()
+        assert body["version"]["source"] == "authored"
+
+    def test_api_version_derived_from_session_ids_is_null(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/skills", json=_body()).json()
+        assert body["version"]["derived_from_session_ids"] is None
+
+    def test_api_version_persisted_source_authored(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/skills", json=_body()).json()
+        version = _version_resource(storage_root, body["version"]["id"])
+        assert version["source"] == "authored"
+
+    def test_api_version_persisted_derived_from_session_ids_null(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/skills", json=_body()).json()
+        version = _version_resource(storage_root, body["version"]["id"])
+        assert version["derived_from_session_ids"] is None
+
+    def test_install_version_has_source_authored(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root, source_loaders={"npm": _MockLoader()})
+        body = client.post("/v1/skills/install", json={"source": "npm:my-skill@1.0.0"}).json()
+        assert body["version"]["source"] == "authored"
+
+    def test_install_version_derived_from_session_ids_is_null(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root, source_loaders={"npm": _MockLoader()})
+        body = client.post("/v1/skills/install", json={"source": "npm:my-skill@1.0.0"}).json()
+        assert body["version"]["derived_from_session_ids"] is None
+
+    def test_install_version_persisted_source_authored(self, storage_root: Path) -> None:
+        client = _make_install_client(storage_root, source_loaders={"npm": _MockLoader()})
+        body = client.post("/v1/skills/install", json={"source": "npm:my-skill@1.0.0"}).json()
+        version = _version_resource(storage_root, body["version"]["id"])
+        assert version["source"] == "authored"
+
+    def test_install_version_persisted_derived_from_session_ids_null(
+        self, storage_root: Path
+    ) -> None:
+        client = _make_install_client(storage_root, source_loaders={"npm": _MockLoader()})
+        body = client.post("/v1/skills/install", json={"source": "npm:my-skill@1.0.0"}).json()
+        version = _version_resource(storage_root, body["version"]["id"])
+        assert version["derived_from_session_ids"] is None
