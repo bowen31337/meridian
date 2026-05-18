@@ -793,46 +793,30 @@ class TestSkillListSuccess:
         body = client.get("/v1/skills").json()
         assert body["items"] == []
 
-    def test_empty_total_is_zero(self, storage_root: Path) -> None:
+    def test_next_cursor_null_when_empty(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         body = client.get("/v1/skills").json()
-        assert body["total"] == 0
+        assert body["next_cursor"] is None
 
     def test_response_has_items_key(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         body = client.get("/v1/skills").json()
         assert "items" in body
 
-    def test_response_has_total_key(self, storage_root: Path) -> None:
+    def test_response_has_next_cursor_key(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         body = client.get("/v1/skills").json()
-        assert "total" in body
+        assert "next_cursor" in body
 
     def test_response_has_limit_key(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         body = client.get("/v1/skills").json()
         assert "limit" in body
 
-    def test_response_has_offset_key(self, storage_root: Path) -> None:
+    def test_default_limit_is_50(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         body = client.get("/v1/skills").json()
-        assert "offset" in body
-
-    def test_default_limit_is_20(self, storage_root: Path) -> None:
-        client = _make_client(storage_root)
-        body = client.get("/v1/skills").json()
-        assert body["limit"] == 20
-
-    def test_default_offset_is_0(self, storage_root: Path) -> None:
-        client = _make_client(storage_root)
-        body = client.get("/v1/skills").json()
-        assert body["offset"] == 0
-
-    def test_with_one_skill_total_is_1(self, storage_root: Path) -> None:
-        client = _make_client(storage_root)
-        _create_skill(client)
-        body = client.get("/v1/skills").json()
-        assert body["total"] == 1
+        assert body["limit"] == 50
 
     def test_with_one_skill_items_has_one_entry(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
@@ -889,7 +873,6 @@ class TestSkillListSuccess:
         _create_skill(client, name="skill-b")
         _create_skill(client, name="skill-c")
         body = client.get("/v1/skills").json()
-        assert body["total"] == 3
         assert len(body["items"]) == 3
 
 
@@ -906,36 +889,32 @@ class TestSkillListPagination:
         body = client.get("/v1/skills", params={"limit": 5}).json()
         assert body["limit"] == 5
 
-    def test_offset_reflected_in_response(self, storage_root: Path) -> None:
-        client = _make_client(storage_root)
-        body = client.get("/v1/skills", params={"offset": 3}).json()
-        assert body["offset"] == 3
-
-    def test_total_reflects_full_count_not_page(self, storage_root: Path) -> None:
+    def test_next_cursor_present_when_more_items(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         _create_skill(client, name="skill-a")
         _create_skill(client, name="skill-b")
         _create_skill(client, name="skill-c")
         body = client.get("/v1/skills", params={"limit": 2}).json()
-        assert body["total"] == 3
         assert len(body["items"]) == 2
+        assert body["next_cursor"] is not None
 
-    def test_offset_skips_items(self, storage_root: Path) -> None:
+    def test_cursor_navigates_to_second_page(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         _create_skill(client, name="skill-a")
         _create_skill(client, name="skill-b")
-        body_all = client.get("/v1/skills").json()
-        first_id = body_all["items"][0]["id"]
-        body_paged = client.get("/v1/skills", params={"offset": 1}).json()
-        assert len(body_paged["items"]) == 1
-        assert body_paged["items"][0]["id"] != first_id
+        body_page1 = client.get("/v1/skills", params={"limit": 1}).json()
+        first_id = body_page1["items"][0]["id"]
+        cursor = body_page1["next_cursor"]
+        body_page2 = client.get("/v1/skills", params={"limit": 1, "cursor": cursor}).json()
+        assert len(body_page2["items"]) == 1
+        assert body_page2["items"][0]["id"] != first_id
 
-    def test_offset_beyond_total_returns_empty(self, storage_root: Path) -> None:
+    def test_last_page_has_null_next_cursor(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         _create_skill(client)
-        body = client.get("/v1/skills", params={"offset": 100}).json()
-        assert body["items"] == []
-        assert body["total"] == 1
+        body_page1 = client.get("/v1/skills", params={"limit": 1}).json()
+        cursor = body_page1["next_cursor"]
+        assert cursor is None
 
 
 class TestSkillListOtel:
@@ -990,11 +969,11 @@ class TestSkillVersionsListSuccess:
         body = client.get(f"/v1/skills/{skill['id']}/versions").json()
         assert "items" in body
 
-    def test_response_has_total(self, storage_root: Path) -> None:
+    def test_response_has_next_cursor(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         skill = _create_skill(client)
         body = client.get(f"/v1/skills/{skill['id']}/versions").json()
-        assert "total" in body
+        assert "next_cursor" in body
 
     def test_response_has_limit(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
@@ -1002,29 +981,16 @@ class TestSkillVersionsListSuccess:
         body = client.get(f"/v1/skills/{skill['id']}/versions").json()
         assert "limit" in body
 
-    def test_response_has_offset(self, storage_root: Path) -> None:
+    def test_default_limit_is_50(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         skill = _create_skill(client)
         body = client.get(f"/v1/skills/{skill['id']}/versions").json()
-        assert "offset" in body
-
-    def test_default_limit_is_20(self, storage_root: Path) -> None:
-        client = _make_client(storage_root)
-        skill = _create_skill(client)
-        body = client.get(f"/v1/skills/{skill['id']}/versions").json()
-        assert body["limit"] == 20
-
-    def test_default_offset_is_0(self, storage_root: Path) -> None:
-        client = _make_client(storage_root)
-        skill = _create_skill(client)
-        body = client.get(f"/v1/skills/{skill['id']}/versions").json()
-        assert body["offset"] == 0
+        assert body["limit"] == 50
 
     def test_one_version_after_create(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         skill = _create_skill(client)
         body = client.get(f"/v1/skills/{skill['id']}/versions").json()
-        assert body["total"] == 1
         assert len(body["items"]) == 1
 
     def test_item_has_id(self, storage_root: Path) -> None:
@@ -1075,7 +1041,7 @@ class TestSkillVersionsListSuccess:
         client = _make_client(storage_root)
         body = client.get("/v1/skills/skill_doesnotexist/versions").json()
         assert body["items"] == []
-        assert body["total"] == 0
+        assert body["next_cursor"] is None
 
     def test_only_returns_versions_for_requested_skill(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
@@ -1112,39 +1078,36 @@ class TestSkillVersionsListPagination:
         body = client.get(f"/v1/skills/{skill['id']}/versions", params={"limit": 5}).json()
         assert body["limit"] == 5
 
-    def test_offset_reflected_in_response(self, storage_root: Path) -> None:
-        client = _make_client(storage_root)
-        skill = _create_skill(client)
-        body = client.get(f"/v1/skills/{skill['id']}/versions", params={"offset": 2}).json()
-        assert body["offset"] == 2
-
-    def test_total_reflects_full_count_not_page(self, storage_root: Path) -> None:
+    def test_next_cursor_present_when_more_items(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         skill = _create_skill(client)
         skill_id = skill["id"]
         _write_version(storage_root, skill_id, "2024-06-01T00:00:00+00:00", 2)
         _write_version(storage_root, skill_id, "2024-07-01T00:00:00+00:00", 3)
         body = client.get(f"/v1/skills/{skill_id}/versions", params={"limit": 2}).json()
-        assert body["total"] == 3
         assert len(body["items"]) == 2
+        assert body["next_cursor"] is not None
 
-    def test_offset_skips_items(self, storage_root: Path) -> None:
+    def test_cursor_navigates_to_second_page(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         skill = _create_skill(client)
         skill_id = skill["id"]
         _write_version(storage_root, skill_id, "2024-06-01T00:00:00+00:00", 2)
         body_all = client.get(f"/v1/skills/{skill_id}/versions").json()
         first_id = body_all["items"][0]["id"]
-        body_paged = client.get(f"/v1/skills/{skill_id}/versions", params={"offset": 1}).json()
-        assert len(body_paged["items"]) == 1
-        assert body_paged["items"][0]["id"] != first_id
+        body_page1 = client.get(f"/v1/skills/{skill_id}/versions", params={"limit": 1}).json()
+        cursor = body_page1["next_cursor"]
+        body_page2 = client.get(
+            f"/v1/skills/{skill_id}/versions", params={"limit": 1, "cursor": cursor}
+        ).json()
+        assert len(body_page2["items"]) == 1
+        assert body_page2["items"][0]["id"] != first_id
 
-    def test_offset_beyond_total_returns_empty(self, storage_root: Path) -> None:
+    def test_last_page_has_null_next_cursor(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         skill = _create_skill(client)
-        body = client.get(f"/v1/skills/{skill['id']}/versions", params={"offset": 100}).json()
-        assert body["items"] == []
-        assert body["total"] == 1
+        body = client.get(f"/v1/skills/{skill['id']}/versions", params={"limit": 100}).json()
+        assert body["next_cursor"] is None
 
 
 class TestSkillVersionsListOtel:

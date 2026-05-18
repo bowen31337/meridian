@@ -25,6 +25,14 @@ from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from ._pagination import (
+    DEFAULT_PAGE_SIZE,
+    CursorDecodeError,
+    apply_cursor_filter,
+    decode_cursor,
+    make_cursor_page,
+)
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -768,8 +776,8 @@ def make_skills_router(
 
     @router.get("/v1/skills")
     async def list_skills(
-        limit: int = Query(default=20),
-        offset: int = Query(default=0),
+        cursor: str | None = Query(default=None),
+        limit: int = Query(default=DEFAULT_PAGE_SIZE),
     ) -> JSONResponse:
         now = _now()
         tracer = get_tracer()
@@ -790,16 +798,18 @@ def make_skills_router(
                     for path in skills_dir.glob("*.json"):
                         all_skills.append(json.loads(path.read_text()))
 
-                all_skills.sort(key=lambda r: r.get("created_at", ""), reverse=True)
-                total = len(all_skills)
-                page = all_skills[offset : offset + limit]
-
-            except Exception as exc:
-                err = SkillListError(
-                    message=f"Failed to list skills: {exc}",
-                    timestamp=_now(),
-                    cause=exc,
+                all_skills.sort(
+                    key=lambda r: (r.get("created_at", ""), r.get("id", "")),
+                    reverse=True,
                 )
+
+                if cursor is not None:
+                    c_created_at, c_id = decode_cursor(cursor, timestamp=now)
+                    all_skills = apply_cursor_filter(all_skills, c_created_at, c_id)
+
+                page, next_cursor = make_cursor_page(all_skills, limit)
+
+            except CursorDecodeError as err:
                 record_error(span, err)
                 audit_log.write(
                     AuditLogEntry(
@@ -810,18 +820,41 @@ def make_skills_router(
                         detail={"message": err.message},
                     )
                 )
-                raise err
+                raise
+
+            except Exception as exc:
+                err2 = SkillListError(
+                    message=f"Failed to list skills: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="skill.list.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={"message": err2.message},
+                    )
+                )
+                raise err2
+
+        response_headers: dict[str, str] = {}
+        if next_cursor is not None:
+            response_headers["X-Next-Cursor"] = next_cursor
 
         return JSONResponse(
-            content={"items": page, "total": total, "limit": limit, "offset": offset},
+            content={"items": page, "next_cursor": next_cursor, "limit": limit},
             status_code=200,
+            headers=response_headers,
         )
 
     @router.get("/v1/skills/{skill_id}/versions")
     async def list_skill_versions(
         skill_id: str,
-        limit: int = Query(default=20),
-        offset: int = Query(default=0),
+        cursor: str | None = Query(default=None),
+        limit: int = Query(default=DEFAULT_PAGE_SIZE),
     ) -> JSONResponse:
         now = _now()
         tracer = get_tracer()
@@ -847,16 +880,18 @@ def make_skills_router(
                         if record.get("skill_id") == skill_id:
                             all_versions.append(record)
 
-                all_versions.sort(key=lambda r: r.get("created_at", ""), reverse=True)
-                total = len(all_versions)
-                page = all_versions[offset : offset + limit]
-
-            except Exception as exc:
-                err = SkillVersionsListError(
-                    message=f"Failed to list skill versions: {exc}",
-                    timestamp=_now(),
-                    cause=exc,
+                all_versions.sort(
+                    key=lambda r: (r.get("created_at", ""), r.get("id", "")),
+                    reverse=True,
                 )
+
+                if cursor is not None:
+                    c_created_at, c_id = decode_cursor(cursor, timestamp=now)
+                    all_versions = apply_cursor_filter(all_versions, c_created_at, c_id)
+
+                page, next_cursor = make_cursor_page(all_versions, limit)
+
+            except CursorDecodeError as err:
                 record_error(span, err)
                 audit_log.write(
                     AuditLogEntry(
@@ -867,11 +902,34 @@ def make_skills_router(
                         detail={"skill_id": skill_id, "message": err.message},
                     )
                 )
-                raise err
+                raise
+
+            except Exception as exc:
+                err2 = SkillVersionsListError(
+                    message=f"Failed to list skill versions: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="skill.versions.list.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={"skill_id": skill_id, "message": err2.message},
+                    )
+                )
+                raise err2
+
+        response_headers: dict[str, str] = {}
+        if next_cursor is not None:
+            response_headers["X-Next-Cursor"] = next_cursor
 
         return JSONResponse(
-            content={"items": page, "total": total, "limit": limit, "offset": offset},
+            content={"items": page, "next_cursor": next_cursor, "limit": limit},
             status_code=200,
+            headers=response_headers,
         )
 
     return router
