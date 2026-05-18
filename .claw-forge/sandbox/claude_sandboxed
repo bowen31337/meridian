@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/multi-agent-acp-api-post-v1-x-acp-inbound-receives-acp/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/skills-agentski-api-post-v1-skills-creates-a-skill-and/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
