@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from core_errors import (
     AuditLog,
@@ -50,6 +52,7 @@ class SpawnError(MeridianError):
 class SpawnRequest(BaseModel):
     parent_capabilities: list[str]
     child_capabilities: list[str]
+    output_schema: dict[str, Any] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -158,13 +161,27 @@ def make_spawn_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                 )
                 raise err
 
+        child_capabilities = sorted(str(c) for c in child_caps)
+        session_dir = storage_root / "sessions" / child_session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+        manifest = {
+            "child_session_id": child_session_id,
+            "parent_session_id": session_id,
+            "capabilities": child_capabilities,
+            "output_schema": body.output_schema,
+            "created_at": now,
+            "status": "spawned",
+        }
+        (session_dir / "manifest.json").write_text(json.dumps(manifest))
+
         return JSONResponse(
             content={
                 "child_session_id": child_session_id,
                 "parent_session_id": session_id,
-                "capabilities": sorted(str(c) for c in child_caps),
+                "capabilities": child_capabilities,
                 "status": "spawned",
-            }
+            },
+            status_code=201,
         )
 
     return router

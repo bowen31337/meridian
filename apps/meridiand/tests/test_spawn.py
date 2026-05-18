@@ -2,7 +2,7 @@
 Spawn endpoint conformance suite.
 
 Tests cover:
-  - POST /v1/x/sessions/{id}/spawn returns 200 when child caps ⊆ parent caps
+  - POST /v1/x/sessions/{id}/spawn returns 201 when child caps ⊆ parent caps
     and parent holds agent.spawn.
   - Response fields: child_session_id, parent_session_id, capabilities, status.
   - Empty child_capabilities is always valid (parent still needs agent.spawn).
@@ -19,6 +19,8 @@ Tests cover:
   - create_app omits spawn route when storage_root is None.
   - OTel span "session.spawn" emitted on success.
   - OTel span set to ERROR status on denial.
+  - Child session manifest written to storage_root/sessions/{id}/manifest.json.
+  - output_schema is optional; stored in manifest when provided.
 """
 
 from __future__ import annotations
@@ -72,10 +74,10 @@ def _audit_records(storage_root: Path) -> list[dict]:
 
 
 class TestSpawnEndpointSuccess:
-    def test_returns_200_on_valid_subset(self, storage_root: Path) -> None:
+    def test_returns_201_on_valid_subset(self, storage_root: Path) -> None:
         client = _make_client(storage_root, FileAuditLog(storage_root))
         resp = client.post("/v1/x/sessions/parent-1/spawn", json=_make_body())
-        assert resp.status_code == 200
+        assert resp.status_code == 201
 
     def test_response_has_child_session_id(self, storage_root: Path) -> None:
         client = _make_client(storage_root, FileAuditLog(storage_root))
@@ -108,7 +110,7 @@ class TestSpawnEndpointSuccess:
             "/v1/x/sessions/parent-6/spawn",
             json=_make_body(child_capabilities=[]),
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 201
 
     def test_equal_caps_is_valid(self, storage_root: Path) -> None:
         caps = ["agent.spawn", "exec.shell", "fs.read"]
@@ -117,7 +119,7 @@ class TestSpawnEndpointSuccess:
             "/v1/x/sessions/parent-7/spawn",
             json=_make_body(parent_capabilities=caps, child_capabilities=caps),
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 201
 
     def test_parameterized_child_under_unrestricted_parent(self, storage_root: Path) -> None:
         client = _make_client(storage_root, FileAuditLog(storage_root))
@@ -128,7 +130,7 @@ class TestSpawnEndpointSuccess:
                 child_capabilities=["fs.read[/workspace]"],
             ),
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 201
 
     def test_child_session_ids_are_unique(self, storage_root: Path) -> None:
         client = _make_client(storage_root, FileAuditLog(storage_root))
@@ -358,7 +360,7 @@ class TestSpawnAgentSpawnGate:
                 child_capabilities=["exec.shell"],
             ),
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 201
 
     def test_gate_denial_writes_audit_log(self, storage_root: Path) -> None:
         client = _make_client(storage_root, FileAuditLog(storage_root))
@@ -438,6 +440,114 @@ class TestSpawnRouteWiring:
         client = _make_client(storage_root, FileAuditLog(storage_root))
         resp = client.post("/v1/x/sessions/any/spawn", json=_make_body())
         assert resp.status_code != 404
+
+
+# ---------------------------------------------------------------------------
+# Child session manifest persistence
+# ---------------------------------------------------------------------------
+
+
+class TestSpawnManifestPersistence:
+    def _post(self, client, session_id: str, body: dict | None = None):
+        return client.post(f"/v1/x/sessions/{session_id}/spawn", json=body or _make_body())
+
+    def _manifest(self, storage_root: Path, child_session_id: str) -> dict:
+        path = storage_root / "sessions" / child_session_id / "manifest.json"
+        return json.loads(path.read_text())
+
+    def test_manifest_file_created(self, storage_root: Path) -> None:
+        client = _make_client(storage_root, FileAuditLog(storage_root))
+        body = self._post(client, "persist-1").json()
+        child_id = body["child_session_id"]
+        assert (storage_root / "sessions" / child_id / "manifest.json").exists()
+
+    def test_manifest_has_correct_child_session_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root, FileAuditLog(storage_root))
+        body = self._post(client, "persist-2").json()
+        child_id = body["child_session_id"]
+        manifest = self._manifest(storage_root, child_id)
+        assert manifest["child_session_id"] == child_id
+
+    def test_manifest_has_correct_parent_session_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root, FileAuditLog(storage_root))
+        body = self._post(client, "persist-3").json()
+        manifest = self._manifest(storage_root, body["child_session_id"])
+        assert manifest["parent_session_id"] == "persist-3"
+
+    def test_manifest_has_correct_capabilities(self, storage_root: Path) -> None:
+        client = _make_client(storage_root, FileAuditLog(storage_root))
+        body = self._post(
+            client,
+            "persist-4",
+            _make_body(child_capabilities=["exec.shell", "fs.read"]),
+        ).json()
+        manifest = self._manifest(storage_root, body["child_session_id"])
+        assert sorted(manifest["capabilities"]) == ["exec.shell", "fs.read"]
+
+    def test_manifest_status_is_spawned(self, storage_root: Path) -> None:
+        client = _make_client(storage_root, FileAuditLog(storage_root))
+        body = self._post(client, "persist-5").json()
+        manifest = self._manifest(storage_root, body["child_session_id"])
+        assert manifest["status"] == "spawned"
+
+    def test_manifest_output_schema_null_when_not_provided(self, storage_root: Path) -> None:
+        client = _make_client(storage_root, FileAuditLog(storage_root))
+        body = self._post(client, "persist-6").json()
+        manifest = self._manifest(storage_root, body["child_session_id"])
+        assert manifest["output_schema"] is None
+
+    def test_manifest_not_written_on_denial(self, storage_root: Path) -> None:
+        client = _make_client(storage_root, FileAuditLog(storage_root))
+        client.post(
+            "/v1/x/sessions/persist-7/spawn",
+            json=_make_body(
+                parent_capabilities=["agent.spawn", "exec.shell"],
+                child_capabilities=["exec.sudo"],
+            ),
+        )
+        assert not any((storage_root / "sessions").iterdir()) if (storage_root / "sessions").exists() else True
+
+
+# ---------------------------------------------------------------------------
+# output_schema field
+# ---------------------------------------------------------------------------
+
+
+class TestSpawnOutputSchema:
+    def test_output_schema_optional_omitted(self, storage_root: Path) -> None:
+        client = _make_client(storage_root, FileAuditLog(storage_root))
+        resp = client.post("/v1/x/sessions/schema-os-1/spawn", json=_make_body())
+        assert resp.status_code == 201
+
+    def test_output_schema_accepted_when_provided(self, storage_root: Path) -> None:
+        client = _make_client(storage_root, FileAuditLog(storage_root))
+        schema = {"type": "object", "properties": {"result": {"type": "string"}}}
+        resp = client.post(
+            "/v1/x/sessions/schema-os-2/spawn",
+            json={**_make_body(), "output_schema": schema},
+        )
+        assert resp.status_code == 201
+
+    def test_output_schema_persisted_in_manifest(self, storage_root: Path) -> None:
+        client = _make_client(storage_root, FileAuditLog(storage_root))
+        schema = {"type": "object", "properties": {"result": {"type": "string"}}}
+        body = client.post(
+            "/v1/x/sessions/schema-os-3/spawn",
+            json={**_make_body(), "output_schema": schema},
+        ).json()
+        manifest_path = storage_root / "sessions" / body["child_session_id"] / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        assert manifest["output_schema"] == schema
+
+    def test_output_schema_null_explicit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root, FileAuditLog(storage_root))
+        body = client.post(
+            "/v1/x/sessions/schema-os-4/spawn",
+            json={**_make_body(), "output_schema": None},
+        ).json()
+        manifest_path = storage_root / "sessions" / body["child_session_id"] / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        assert manifest["output_schema"] is None
 
 
 # FastAPI TestClient must be importable here
