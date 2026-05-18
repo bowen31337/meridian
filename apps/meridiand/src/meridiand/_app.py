@@ -23,10 +23,11 @@ from ._cancel import make_cancel_router
 from ._checkpoint import make_checkpoint_router
 from ._ci_regression import make_ci_regression_router
 from ._compaction import make_compaction_router, run_compaction_loop
-from ._config import CompactionConfig, CronSchedulerConfig, CorsConfig, WebhookSenderConfig
+from ._config import CompactionConfig, CronSchedulerConfig, CorsConfig, SkillForgeConfig, WebhookSenderConfig
 from ._cron import make_cron_router
 from ._cron_scheduler import run_cron_scheduler_loop
 from ._webhook_sender import run_webhook_sender_loop
+from ._skill_forge import run_skill_forge_loop
 from ._skills import make_skills_router
 from ._user_profiles import make_user_profiles_router
 from ._webhooks import make_webhooks_router
@@ -62,6 +63,7 @@ def create_app(
     compaction: CompactionConfig | None = None,
     cron_scheduler: CronSchedulerConfig | None = None,
     webhook_sender: WebhookSenderConfig | None = None,
+    skill_forge: SkillForgeConfig | None = None,
 ) -> FastAPI:
     """
     Application factory for the meridiand HTTP API.
@@ -130,6 +132,19 @@ def create_app(
                         )
                     )
 
+                skill_forge_task: asyncio.Task[None] | None = None
+                if storage_root is not None:
+                    _sf_cfg = skill_forge or SkillForgeConfig()
+                    if _sf_cfg.enabled:
+                        skill_forge_task = asyncio.create_task(
+                            run_skill_forge_loop(
+                                storage_root,
+                                audit_log,
+                                max_invocations_per_minute=_sf_cfg.max_invocations_per_minute,
+                                check_interval_seconds=_sf_cfg.check_interval_seconds,
+                            )
+                        )
+
                 _LOG.info("meridiand ready")
                 yield
 
@@ -147,6 +162,11 @@ def create_app(
                     webhook_sender_task.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
                         await webhook_sender_task
+
+                if skill_forge_task is not None:
+                    skill_forge_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await skill_forge_task
 
             app = FastAPI(title="meridiand", lifespan=_lifespan)
 

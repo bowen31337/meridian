@@ -96,6 +96,15 @@ class WebhookSenderConfig(BaseModel):
     check_interval_seconds: float = 5.0
 
 
+class SkillForgeConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    enabled: bool = True
+    # Maximum model invocations issued per 60-second window.
+    max_invocations_per_minute: int = 10
+    check_interval_seconds: float = 5.0
+
+
 class MeridianConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -107,6 +116,7 @@ class MeridianConfig(BaseModel):
     compaction: CompactionConfig = Field(default_factory=CompactionConfig)
     cron: CronSchedulerConfig = Field(default_factory=CronSchedulerConfig)
     webhook_sender: WebhookSenderConfig = Field(default_factory=WebhookSenderConfig)
+    skill_forge: SkillForgeConfig = Field(default_factory=SkillForgeConfig)
 
     @field_validator("storage_root", mode="before")
     @classmethod
