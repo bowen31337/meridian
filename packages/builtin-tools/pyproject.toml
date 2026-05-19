@@ -7,6 +7,7 @@ license = { text = "MIT" }
 dependencies = [
     "meridian-sdk-tool>=0.1.0",
     "meridian-sdk-capabilities>=0.1.0",
+    "meridian-kb-indexer>=0.1.0",
     "pydantic>=2.0",
 ]
 
@@ -24,6 +25,7 @@ dev = [
 [tool.uv.sources]
 meridian-sdk-tool = { workspace = true }
 meridian-sdk-capabilities = { workspace = true }
+meridian-kb-indexer = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]

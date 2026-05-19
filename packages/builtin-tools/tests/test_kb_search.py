@@ -14,12 +14,14 @@ import pytest
 from meridian_builtin_tools.kb_search import (
     _INPUT_SCHEMA,
     _OUTPUT_SCHEMA,
+    kb_search_tool,
+)
+from meridian_kb_indexer._reader import (
     _glob_matches,
     _hash_embed,
     _resolve_db_path,
     _rrf_fuse,
     _scope_matches,
-    kb_search_tool,
 )
 
 try:
@@ -553,7 +555,7 @@ async def test_corrupt_db_writes_audit_log(
     async def _tool_with_audit(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         import asyncio
 
-        from meridian_builtin_tools.kb_search import _resolve_db_path, _sync_search
+        from meridian_kb_indexer._reader import _resolve_db_path, _sync_search
 
         query: str = args["query"]
         scope: str | None = args.get("scope")

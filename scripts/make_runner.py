@@ -52,6 +52,12 @@ _LINT_STEPS: list[_Step] = [
         "fix import boundary violations shown above",
     ),
     (
+        "lint:db-imports",
+        ["uv", "run", "python", "scripts/check-db-imports.py"],
+        None,
+        "move DB imports behind a repository or storage-layer abstraction",
+    ),
+    (
         "lint:biome",
         ["packages/sdk-widget/node_modules/.bin/biome", "check", "."],
         None,
