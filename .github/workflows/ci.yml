@@ -63,6 +63,13 @@ jobs:
             exit 1
           }
 
+      - name: agent-sdk-imports
+        run: |
+          uv run python scripts/check-agent-sdk-imports.py || {
+            echo "::error::STAGE FAILED: agent-sdk-imports — see docs/ARCHITECTURE.md §13.4 and §13.5 for the provider-isolation rule"
+            exit 1
+          }
+
       - name: provider-imports
         run: |
           uv run python scripts/check-provider-imports.py || {

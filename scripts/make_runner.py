@@ -52,6 +52,12 @@ _LINT_STEPS: list[_Step] = [
         "fix import boundary violations shown above",
     ),
     (
+        "lint:agent-sdk-imports",
+        ["uv", "run", "python", "scripts/check-agent-sdk-imports.py"],
+        None,
+        "see docs/ARCHITECTURE.md §13.4 and §13.5 for the provider-isolation rule",
+    ),
+    (
         "lint:provider-imports",
         ["uv", "run", "python", "scripts/check-provider-imports.py"],
         None,
