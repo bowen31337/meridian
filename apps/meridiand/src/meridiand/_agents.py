@@ -17,7 +17,7 @@ from core_errors import (
     record_invocation_event,
 )
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 
@@ -52,6 +52,34 @@ class AgentInvalidRequestError(MeridianError):
 
     def http_status(self) -> int:
         return 422
+
+
+class AgentNotFoundError(MeridianError):
+    def __init__(self, *, agent_id: str, timestamp: str) -> None:
+        super().__init__(
+            code="agent_not_found",
+            message=f"Agent '{agent_id}' not found",
+            timestamp=timestamp,
+        )
+
+    def http_status(self) -> int:
+        return 404
+
+
+class AgentDeleteError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="agent_delete_failed", message=message, timestamp=timestamp, cause=cause
+        )
+
+    def http_status(self) -> int:
+        return 500
 
 
 # ---------------------------------------------------------------------------
@@ -216,5 +244,65 @@ def make_agents_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                 raise err2
 
         return JSONResponse(content=agent_record, status_code=201)
+
+    @router.delete("/v1/agents/{agent_id}", status_code=204)
+    async def delete_agent(agent_id: str) -> Response:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "agent.delete",
+            attributes={"agent.id": agent_id},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="agent.delete.invocation",
+                    code="agent_delete",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                agent_file = agents_dir / f"{agent_id}.json"
+                if not agent_file.exists():
+                    raise AgentNotFoundError(agent_id=agent_id, timestamp=now)
+
+                agent_record = json.loads(agent_file.read_text())
+                agent_record["deleted_at"] = now
+                agent_file.write_text(json.dumps(agent_record))
+
+            except AgentNotFoundError as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="agent.delete.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={"agent_id": agent_id, "message": err.message},
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = AgentDeleteError(
+                    message=f"Failed to delete agent: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="agent.delete.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={"agent_id": agent_id, "message": err2.message},
+                    )
+                )
+                raise err2
+
+        return Response(status_code=204)
 
     return router

@@ -36,6 +36,16 @@ Tests cover:
   - Span carries agent.id and agent.name attributes.
   - create_app wires agents router when storage_root is supplied.
   - create_app omits agents route when storage_root is None.
+  - DELETE /v1/agents/{id} returns 204 on success.
+  - Soft-delete sets deleted_at on the persisted agent JSON.
+  - Agent file is retained after soft-delete (not removed).
+  - Agent version files are retained after soft-delete.
+  - Unknown agent id returns 404 with code "agent_not_found".
+  - 404 writes audit entry with event "agent.delete.failed".
+  - Audit entry on failure has level "error" and detail.agent_id.
+  - OTel span "agent.delete" emitted on success and failure.
+  - Failure span has ERROR status.
+  - Span carries agent.id attribute.
 """
 
 from __future__ import annotations
@@ -470,3 +480,151 @@ class TestAgentAppWiring:
             app = create_app(audit_log, storage_root=None)
             routes = [r.path for r in app.routes if hasattr(r, "path")]
             assert "/v1/agents" not in routes
+
+
+# ---------------------------------------------------------------------------
+# Delete – success
+# ---------------------------------------------------------------------------
+
+
+class TestAgentDeleteSuccess:
+    def test_returns_204(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body()).json()["id"]
+        resp = client.delete(f"/v1/agents/{agent_id}")
+        assert resp.status_code == 204
+
+    def test_agent_file_still_exists(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body()).json()["id"]
+        client.delete(f"/v1/agents/{agent_id}")
+        assert (storage_root / "agents" / f"{agent_id}.json").exists()
+
+    def test_deleted_at_set_in_agent_file(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body()).json()["id"]
+        client.delete(f"/v1/agents/{agent_id}")
+        record = _agent_resource(storage_root, agent_id)
+        assert "deleted_at" in record
+        assert isinstance(record["deleted_at"], str)
+        assert len(record["deleted_at"]) > 0
+
+    def test_version_file_retained_after_delete(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp_body = client.post("/v1/agents", json=_body()).json()
+        agent_id = resp_body["id"]
+        version_id = resp_body["version"]["id"]
+        client.delete(f"/v1/agents/{agent_id}")
+        assert (storage_root / "agent_versions" / f"{version_id}.json").exists()
+
+    def test_no_audit_entry_on_success(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body()).json()["id"]
+        client.delete(f"/v1/agents/{agent_id}")
+        records = _audit_records(storage_root)
+        assert not any(r.get("event") == "agent.delete.failed" for r in records)
+
+
+# ---------------------------------------------------------------------------
+# Delete – not found
+# ---------------------------------------------------------------------------
+
+
+class TestAgentDeleteNotFound:
+    def test_unknown_id_returns_404(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.delete("/v1/agents/agent_unknown")
+        assert resp.status_code == 404
+
+    def test_not_found_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.delete("/v1/agents/agent_unknown").json()
+        assert body["error"]["code"] == "agent_not_found"
+
+    def test_not_found_error_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.delete("/v1/agents/agent_unknown").json()
+        assert "message" in body["error"]
+        assert len(body["error"]["message"]) > 0
+
+    def test_not_found_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.delete("/v1/agents/agent_unknown")
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "agent.delete.failed" for r in records)
+
+    def test_not_found_audit_level_is_error(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.delete("/v1/agents/agent_unknown")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.delete.failed"
+        )
+        assert record["level"] == "error"
+
+    def test_not_found_audit_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.delete("/v1/agents/agent_unknown")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.delete.failed"
+        )
+        assert record["code"] == "agent_not_found"
+
+    def test_not_found_audit_detail_has_agent_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.delete("/v1/agents/agent_unknown")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.delete.failed"
+        )
+        assert record["detail"]["agent_id"] == "agent_unknown"
+
+    def test_not_found_audit_detail_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.delete("/v1/agents/agent_unknown")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.delete.failed"
+        )
+        assert "message" in record["detail"]
+        assert len(record["detail"]["message"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# Delete – OTel spans
+# ---------------------------------------------------------------------------
+
+
+class TestAgentDeleteOtel:
+    def setup_method(self) -> None:
+        _otel_exporter.clear()
+
+    def _client(self, storage_root: Path) -> TestClient:
+        app = create_app(FileAuditLog(storage_root), storage_root=storage_root)
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_success_emits_agent_delete_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body()).json()["id"]
+        _otel_exporter.clear()
+        client.delete(f"/v1/agents/{agent_id}")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "agent.delete" in span_names
+
+    def test_failure_emits_agent_delete_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        client.delete("/v1/agents/agent_unknown")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "agent.delete" in span_names
+
+    def test_failure_span_has_error_status(self, storage_root: Path) -> None:
+        from opentelemetry.trace import StatusCode
+        client = self._client(storage_root)
+        client.delete("/v1/agents/agent_unknown")
+        spans = [s for s in _otel_exporter.get_finished_spans() if s.name == "agent.delete"]
+        assert any(s.status.status_code == StatusCode.ERROR for s in spans)
+
+    def test_span_has_agent_id_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body()).json()["id"]
+        _otel_exporter.clear()
+        client.delete(f"/v1/agents/{agent_id}")
+        spans = [s for s in _otel_exporter.get_finished_spans() if s.name == "agent.delete"]
+        assert any(s.attributes.get("agent.id") == agent_id for s in spans)
