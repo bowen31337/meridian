@@ -15,6 +15,16 @@ ignore        : continues silently (no audit write).
 On any failure: the error message is available on HookDispatchBlockedError.message
 and/or in HookDispatchResult.error_message; the audit log is written before the
 error is raised.
+
+Verdict types (returned by hook via JSON stdout / return value)
+---------------------------------------------------------------
+continue            : no-op; harness proceeds unchanged.
+continue + mutations: harness applies mutations["args"] and/or mutations["messages"]
+                      before proceeding.
+veto (pre_* only)   : harness raises HookVetoError with the reason; audit written
+                      at info level.
+fail                : harness treats as hook error and applies failure_mode
+                      semantics; reason becomes the error message.
 """
 
 from __future__ import annotations
@@ -24,7 +34,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import sdk_sandbox as _sb
 from core_errors import (
@@ -99,6 +109,34 @@ class HookDispatchBlockedError(MeridianError):
         return 502
 
 
+class HookVetoError(MeridianError):
+    """
+    Raised when a hook returns verdict=veto.
+
+    Valid only for pre_* events; the reason is surfaced to the caller and
+    the audit log is written before the exception propagates.
+    """
+
+    def __init__(
+        self,
+        *,
+        hook_id: str,
+        hook_name: str,
+        reason: str,
+        timestamp: str,
+    ) -> None:
+        super().__init__(
+            code="hook_veto",
+            message=reason,
+            timestamp=timestamp,
+        )
+        self.hook_id = hook_id
+        self.hook_name = hook_name
+
+    def http_status(self) -> int:
+        return 422
+
+
 # ---------------------------------------------------------------------------
 # Result type
 # ---------------------------------------------------------------------------
@@ -109,8 +147,53 @@ class HookDispatchResult:
     hook_id: str
     hook_name: str
     is_error: bool
+    verdict: Literal["continue", "veto", "fail"] = "continue"
+    mutations: dict[str, Any] | None = None
     error_code: str | None = None
     error_message: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Internal: verdict parsing
+# ---------------------------------------------------------------------------
+
+
+def _parse_verdict(
+    content: Any,
+) -> tuple[Literal["continue", "veto", "fail"], dict[str, Any] | None, str]:
+    """
+    Parse a hook's output into (verdict, mutations, reason).
+
+    Accepts either a dict (in_process handler return) or a JSON string
+    (subprocess stdout).  Any non-dict / non-JSON-object content is treated
+    as continue (no-op).
+    """
+    data: dict[str, Any] | None = None
+    if isinstance(content, dict):
+        data = content
+    elif isinstance(content, str):
+        try:
+            parsed = json.loads(content)
+            if isinstance(parsed, dict):
+                data = parsed
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    if data is None:
+        return "continue", None, ""
+
+    raw_verdict = data.get("verdict", "continue")
+
+    if raw_verdict == "veto":
+        return "veto", None, data.get("reason") or ""
+
+    if raw_verdict == "fail":
+        return "fail", None, data.get("reason") or ""
+
+    # "continue" or anything unrecognised → no-op, propagate mutations if any
+    raw_mutations = data.get("mutations")
+    mutations = raw_mutations if isinstance(raw_mutations, dict) else None
+    return "continue", mutations, ""
 
 
 # ---------------------------------------------------------------------------
@@ -335,10 +418,54 @@ async def dispatch_hooks(
                     in_process_handlers=in_process_handlers,
                 )
 
+                # Parse verdict from hook output when the sandbox call itself succeeded.
+                verdict: Literal["continue", "veto", "fail"] = "continue"
+                mutations: dict[str, Any] | None = None
+
+                if not result.is_error:
+                    verdict, mutations, reason = _parse_verdict(result.content)
+
+                    if verdict == "veto":
+                        audit_log.write(
+                            AuditLogEntry(
+                                level="info",
+                                event="hook.verdict.veto",
+                                code="hook_veto",
+                                timestamp=hook_now,
+                                detail={
+                                    "hook_id": hook_id,
+                                    "hook_name": hook_name,
+                                    "reason": reason,
+                                },
+                            )
+                        )
+                        exc = HookVetoError(
+                            hook_id=hook_id,
+                            hook_name=hook_name,
+                            reason=reason,
+                            timestamp=hook_now,
+                        )
+                        record_error(hook_span, exc)
+                        raise exc
+
+                    elif verdict == "fail":
+                        # Convert to a synthetic sandbox error so failure_mode
+                        # semantics apply uniformly below.
+                        result = _sb.SandboxResult(
+                            content=result.content,
+                            is_error=True,
+                            error_code="hook_verdict_fail",
+                            error_message=reason or "Hook returned fail verdict",
+                        )
+                else:
+                    verdict = "fail"
+
                 hook_result = HookDispatchResult(
                     hook_id=hook_id,
                     hook_name=hook_name,
                     is_error=result.is_error,
+                    verdict=verdict,
+                    mutations=mutations,
                     error_code=result.error_code,
                     error_message=result.error_message,
                 )

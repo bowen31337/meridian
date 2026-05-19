@@ -37,6 +37,24 @@ Tests cover:
   - OTel span "hook.dispatch" has hook.event attribute.
   - OTel span "hook.dispatch" has hook.count attribute.
   - dispatch_hooks: sandbox dispatch via same Sandbox.execute() surface — OTel child spans present.
+  Verdict types:
+  - verdict=continue (no-op): result.verdict is "continue", is_error is False.
+  - verdict=continue (no JSON output): treated as continue.
+  - verdict=continue with mutations: result.mutations carries the mutations dict.
+  - verdict=continue with non-dict mutations ignored: result.mutations is None.
+  - verdict=veto: raises HookVetoError.
+  - verdict=veto: HookVetoError.code is "hook_veto".
+  - verdict=veto: HookVetoError.message carries the reason.
+  - verdict=veto: HookVetoError.http_status() is 422.
+  - verdict=veto: audit entry written at info level with event "hook.verdict.veto".
+  - verdict=veto: audit entry detail contains hook_id.
+  - verdict=veto: audit entry detail contains reason.
+  - verdict=fail + failure_mode=block: raises HookDispatchBlockedError.
+  - verdict=fail + failure_mode=warn: audit entry written, no raise.
+  - verdict=fail + failure_mode=ignore: no raise, no audit entry.
+  - verdict=fail: error_message carries the reason from the hook.
+  - verdict=fail: HookDispatchResult.verdict is "fail".
+  - sandbox error (is_error=True): HookDispatchResult.verdict is "fail".
 """
 
 from __future__ import annotations
@@ -55,6 +73,7 @@ from sdk_sandbox import ExecutionContext
 from meridiand._hook_dispatch import (
     HookDispatchBlockedError,
     HookDispatchResult,
+    HookVetoError,
     _SandboxAuditBridge,
     dispatch_hooks,
 )
@@ -121,6 +140,26 @@ async def _fail_handler(input: dict, context: ExecutionContext) -> Any:
 async def _slow_handler(input: dict, context: ExecutionContext) -> Any:
     await asyncio.sleep(30)
     return "never"
+
+
+async def _continue_handler(input: dict, context: ExecutionContext) -> Any:
+    return {"verdict": "continue"}
+
+
+async def _mutate_handler(input: dict, context: ExecutionContext) -> Any:
+    return {"verdict": "continue", "mutations": {"args": {"key": "new_value"}}}
+
+
+async def _bad_mutations_handler(input: dict, context: ExecutionContext) -> Any:
+    return {"verdict": "continue", "mutations": "not-a-dict"}
+
+
+async def _veto_handler(input: dict, context: ExecutionContext) -> Any:
+    return {"verdict": "veto", "reason": "operation not permitted by policy"}
+
+
+async def _fail_verdict_handler(input: dict, context: ExecutionContext) -> Any:
+    return {"verdict": "fail", "reason": "hook encountered an internal error"}
 
 
 # ---------------------------------------------------------------------------
@@ -799,3 +838,250 @@ class TestOtelSpans:
         )
         span_names = [s.name for s in _otel_exporter.get_finished_spans()]
         assert "sandbox.execute" in span_names
+
+
+# ---------------------------------------------------------------------------
+# Verdict types
+# ---------------------------------------------------------------------------
+
+
+class TestVerdictTypes:
+    async def test_continue_noop_verdict_is_continue(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hook = _write_hook(hooks_dir)
+        results = await dispatch_hooks(
+            "tool_call.requested",
+            {},
+            _context(),
+            hooks_dir=hooks_dir,
+            audit_log=_CapturingAuditLog(),
+            in_process_handlers={hook["id"]: _continue_handler},
+        )
+        assert results[0].verdict == "continue"
+        assert results[0].is_error is False
+
+    async def test_continue_noop_no_json_treated_as_continue(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hook = _write_hook(hooks_dir)
+        results = await dispatch_hooks(
+            "tool_call.requested",
+            {},
+            _context(),
+            hooks_dir=hooks_dir,
+            audit_log=_CapturingAuditLog(),
+            in_process_handlers={hook["id"]: _ok_handler},
+        )
+        assert results[0].verdict == "continue"
+        assert results[0].is_error is False
+
+    async def test_continue_with_mutations_propagated(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hook = _write_hook(hooks_dir)
+        results = await dispatch_hooks(
+            "tool_call.requested",
+            {},
+            _context(),
+            hooks_dir=hooks_dir,
+            audit_log=_CapturingAuditLog(),
+            in_process_handlers={hook["id"]: _mutate_handler},
+        )
+        assert results[0].mutations == {"args": {"key": "new_value"}}
+
+    async def test_continue_with_non_dict_mutations_ignored(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hook = _write_hook(hooks_dir)
+        results = await dispatch_hooks(
+            "tool_call.requested",
+            {},
+            _context(),
+            hooks_dir=hooks_dir,
+            audit_log=_CapturingAuditLog(),
+            in_process_handlers={hook["id"]: _bad_mutations_handler},
+        )
+        assert results[0].mutations is None
+
+    async def test_veto_raises_hook_veto_error(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hook = _write_hook(hooks_dir)
+        with pytest.raises(HookVetoError):
+            await dispatch_hooks(
+                "tool_call.requested",
+                {},
+                _context(),
+                hooks_dir=hooks_dir,
+                audit_log=_CapturingAuditLog(),
+                in_process_handlers={hook["id"]: _veto_handler},
+            )
+
+    async def test_veto_error_code_is_hook_veto(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hook = _write_hook(hooks_dir)
+        with pytest.raises(HookVetoError) as exc_info:
+            await dispatch_hooks(
+                "tool_call.requested",
+                {},
+                _context(),
+                hooks_dir=hooks_dir,
+                audit_log=_CapturingAuditLog(),
+                in_process_handlers={hook["id"]: _veto_handler},
+            )
+        assert exc_info.value.code == "hook_veto"
+
+    async def test_veto_error_message_carries_reason(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hook = _write_hook(hooks_dir)
+        with pytest.raises(HookVetoError) as exc_info:
+            await dispatch_hooks(
+                "tool_call.requested",
+                {},
+                _context(),
+                hooks_dir=hooks_dir,
+                audit_log=_CapturingAuditLog(),
+                in_process_handlers={hook["id"]: _veto_handler},
+            )
+        assert exc_info.value.message == "operation not permitted by policy"
+
+    async def test_veto_http_status_is_422(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hook = _write_hook(hooks_dir)
+        with pytest.raises(HookVetoError) as exc_info:
+            await dispatch_hooks(
+                "tool_call.requested",
+                {},
+                _context(),
+                hooks_dir=hooks_dir,
+                audit_log=_CapturingAuditLog(),
+                in_process_handlers={hook["id"]: _veto_handler},
+            )
+        assert exc_info.value.http_status() == 422
+
+    async def test_veto_audit_entry_at_info_level(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hook = _write_hook(hooks_dir)
+        audit = _CapturingAuditLog()
+        with pytest.raises(HookVetoError):
+            await dispatch_hooks(
+                "tool_call.requested",
+                {},
+                _context(),
+                hooks_dir=hooks_dir,
+                audit_log=audit,
+                in_process_handlers={hook["id"]: _veto_handler},
+            )
+        entry = next(e for e in audit.entries if e.event == "hook.verdict.veto")
+        assert entry.level == "info"
+
+    async def test_veto_audit_entry_detail_has_hook_id(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hook = _write_hook(hooks_dir)
+        audit = _CapturingAuditLog()
+        with pytest.raises(HookVetoError):
+            await dispatch_hooks(
+                "tool_call.requested",
+                {},
+                _context(),
+                hooks_dir=hooks_dir,
+                audit_log=audit,
+                in_process_handlers={hook["id"]: _veto_handler},
+            )
+        entry = next(e for e in audit.entries if e.event == "hook.verdict.veto")
+        assert entry.detail is not None
+        assert entry.detail["hook_id"] == hook["id"]
+
+    async def test_veto_audit_entry_detail_has_reason(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hook = _write_hook(hooks_dir)
+        audit = _CapturingAuditLog()
+        with pytest.raises(HookVetoError):
+            await dispatch_hooks(
+                "tool_call.requested",
+                {},
+                _context(),
+                hooks_dir=hooks_dir,
+                audit_log=audit,
+                in_process_handlers={hook["id"]: _veto_handler},
+            )
+        entry = next(e for e in audit.entries if e.event == "hook.verdict.veto")
+        assert entry.detail is not None
+        assert entry.detail["reason"] == "operation not permitted by policy"
+
+    async def test_fail_verdict_block_raises(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hook = _write_hook(hooks_dir, failure_mode="block")
+        with pytest.raises(HookDispatchBlockedError):
+            await dispatch_hooks(
+                "tool_call.requested",
+                {},
+                _context(),
+                hooks_dir=hooks_dir,
+                audit_log=_CapturingAuditLog(),
+                in_process_handlers={hook["id"]: _fail_verdict_handler},
+            )
+
+    async def test_fail_verdict_warn_audit_no_raise(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hook = _write_hook(hooks_dir, failure_mode="warn")
+        audit = _CapturingAuditLog()
+        await dispatch_hooks(
+            "tool_call.requested",
+            {},
+            _context(),
+            hooks_dir=hooks_dir,
+            audit_log=audit,
+            in_process_handlers={hook["id"]: _fail_verdict_handler},
+        )
+        assert any(e.event == "hook.dispatch.failed" for e in audit.entries)
+
+    async def test_fail_verdict_ignore_no_raise_no_audit(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hook = _write_hook(hooks_dir, failure_mode="ignore")
+        audit = _CapturingAuditLog()
+        await dispatch_hooks(
+            "tool_call.requested",
+            {},
+            _context(),
+            hooks_dir=hooks_dir,
+            audit_log=audit,
+            in_process_handlers={hook["id"]: _fail_verdict_handler},
+        )
+        hook_dispatch_entries = [e for e in audit.entries if e.event == "hook.dispatch.failed"]
+        assert hook_dispatch_entries == []
+
+    async def test_fail_verdict_error_message_carries_reason(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hook = _write_hook(hooks_dir, failure_mode="ignore")
+        results = await dispatch_hooks(
+            "tool_call.requested",
+            {},
+            _context(),
+            hooks_dir=hooks_dir,
+            audit_log=_CapturingAuditLog(),
+            in_process_handlers={hook["id"]: _fail_verdict_handler},
+        )
+        assert results[0].error_message == "hook encountered an internal error"
+
+    async def test_fail_verdict_result_verdict_is_fail(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hook = _write_hook(hooks_dir, failure_mode="ignore")
+        results = await dispatch_hooks(
+            "tool_call.requested",
+            {},
+            _context(),
+            hooks_dir=hooks_dir,
+            audit_log=_CapturingAuditLog(),
+            in_process_handlers={hook["id"]: _fail_verdict_handler},
+        )
+        assert results[0].verdict == "fail"
+
+    async def test_sandbox_error_result_verdict_is_fail(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hook = _write_hook(hooks_dir, failure_mode="ignore")
+        results = await dispatch_hooks(
+            "tool_call.requested",
+            {},
+            _context(),
+            hooks_dir=hooks_dir,
+            audit_log=_CapturingAuditLog(),
+            in_process_handlers={hook["id"]: _fail_handler},
+        )
+        assert results[0].verdict == "fail"
