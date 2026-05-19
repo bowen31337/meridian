@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -346,3 +347,35 @@ def migrate(config_path: Path | None) -> None:
                 "applied": result.applied,
             },
         )
+
+
+# ---------------------------------------------------------------------------
+# Schema command
+# ---------------------------------------------------------------------------
+
+
+@meridianconfig.command()
+def schema() -> None:
+    """Emit the MeridianConfig JSON Schema to stdout for editor autocomplete."""
+    tracer = get_tracer()
+
+    with tracer.start_as_current_span("meridianconfig.schema") as span:
+        record_invocation_event(
+            span,
+            {"event.name": "meridianconfig.schema.invocation"},
+        )
+
+        try:
+            json_schema = _MeridianConfig.model_json_schema()
+            click.echo(json.dumps(json_schema, indent=2))
+            span.add_event("meridianconfig.schema.ok")
+        except Exception as exc:
+            message = f"failed to generate config schema: {exc}"
+            click.echo(message)
+            record_failure(span, "config_schema_failed", message)  # type: ignore[arg-type]
+            write_audit(
+                "error",
+                "meridianconfig.schema.failed",
+                {"error": str(exc)},
+            )
+            sys.exit(1)
