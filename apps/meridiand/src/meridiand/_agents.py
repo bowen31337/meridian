@@ -98,6 +98,34 @@ class AgentVersionCreateError(MeridianError):
         return 500
 
 
+class AgentVersionNotFoundError(MeridianError):
+    def __init__(self, *, agent_id: str, version_id: str, timestamp: str) -> None:
+        super().__init__(
+            code="agent_version_not_found",
+            message=f"Version '{version_id}' not found for agent '{agent_id}'",
+            timestamp=timestamp,
+        )
+
+    def http_status(self) -> int:
+        return 404
+
+
+class AgentVersionGetError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="agent_version_get_failed", message=message, timestamp=timestamp, cause=cause
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
 # ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
@@ -442,5 +470,82 @@ def make_agents_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                 raise err2
 
         return JSONResponse(content=version_record, status_code=status_code)
+
+    @router.get("/v1/agents/{agent_id}/versions/{version_id}", status_code=200)
+    async def get_agent_version(agent_id: str, version_id: str) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+        version_record: dict[str, Any] = {}
+
+        with tracer.start_as_current_span(
+            "agent.version.get",
+            attributes={"agent.id": agent_id, "agent.version.id": version_id},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="agent.version.get.invocation",
+                    code="agent_version_get",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                agent_file = agents_dir / f"{agent_id}.json"
+                if not agent_file.exists():
+                    raise AgentNotFoundError(agent_id=agent_id, timestamp=now)
+
+                version_file = versions_dir / f"{version_id}.json"
+                if not version_file.exists():
+                    raise AgentVersionNotFoundError(
+                        agent_id=agent_id, version_id=version_id, timestamp=now
+                    )
+
+                version_record = json.loads(version_file.read_text())
+                if version_record.get("agent_id") != agent_id:
+                    raise AgentVersionNotFoundError(
+                        agent_id=agent_id, version_id=version_id, timestamp=now
+                    )
+
+            except MeridianError as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="agent.version.get.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "agent_id": agent_id,
+                            "version_id": version_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = AgentVersionGetError(
+                    message=f"Failed to get agent version: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="agent.version.get.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={
+                            "agent_id": agent_id,
+                            "version_id": version_id,
+                            "message": err2.message,
+                        },
+                    )
+                )
+                raise err2
+
+        return JSONResponse(content=version_record, status_code=200)
 
     return router

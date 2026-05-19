@@ -2,6 +2,17 @@
 Agents endpoint conformance suite.
 
 Tests cover:
+  - GET /v1/agents/{id}/versions/{ver} returns 200 with version record on success.
+  - Response fields match the stored AgentVersionRecord.
+  - Unknown agent id returns 404 with code "agent_not_found".
+  - Unknown version id returns 404 with code "agent_version_not_found".
+  - Version belonging to a different agent returns 404 with code "agent_version_not_found".
+  - On failure, audit log entry written with event "agent.version.get.failed".
+  - Audit entry level is "error" on failure.
+  - Audit entry detail includes agent_id, version_id, message.
+  - OTel span "agent.version.get" emitted on success and failure.
+  - Failure span has ERROR status.
+  - Span carries agent.id and agent.version.id attributes.
   - POST /v1/agents returns 201 on success.
   - Response has id with "agent_" prefix.
   - IDs are unique across calls.
@@ -1032,3 +1043,295 @@ class TestAgentVersionCreateOtel:
             if s.name == "agent.version.create"
         ]
         assert any(s.attributes.get("agent.id") == agent_id for s in spans)
+
+
+# ---------------------------------------------------------------------------
+# Version get – helpers
+# ---------------------------------------------------------------------------
+
+
+def _create_agent_with_version(client: TestClient) -> tuple[str, str]:
+    """Returns (agent_id, version_id)."""
+    resp = client.post("/v1/agents", json=_body()).json()
+    return resp["id"], resp["version"]["id"]
+
+
+# ---------------------------------------------------------------------------
+# Version get – success
+# ---------------------------------------------------------------------------
+
+
+class TestAgentVersionGetSuccess:
+    def test_returns_200(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id, version_id = _create_agent_with_version(client)
+        resp = client.get(f"/v1/agents/{agent_id}/versions/{version_id}")
+        assert resp.status_code == 200
+
+    def test_response_has_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id, version_id = _create_agent_with_version(client)
+        body = client.get(f"/v1/agents/{agent_id}/versions/{version_id}").json()
+        assert body["id"] == version_id
+
+    def test_response_has_agent_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id, version_id = _create_agent_with_version(client)
+        body = client.get(f"/v1/agents/{agent_id}/versions/{version_id}").json()
+        assert body["agent_id"] == agent_id
+
+    def test_response_has_name(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/agents", json=_body(name="named-agent")).json()
+        agent_id, version_id = resp["id"], resp["version"]["id"]
+        body = client.get(f"/v1/agents/{agent_id}/versions/{version_id}").json()
+        assert body["name"] == "named-agent"
+
+    def test_response_has_kind(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/agents", json=_body(kind="openai")).json()
+        agent_id, version_id = resp["id"], resp["version"]["id"]
+        body = client.get(f"/v1/agents/{agent_id}/versions/{version_id}").json()
+        assert body["kind"] == "openai"
+
+    def test_response_has_version_number(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id, version_id = _create_agent_with_version(client)
+        body = client.get(f"/v1/agents/{agent_id}/versions/{version_id}").json()
+        assert isinstance(body.get("version_number"), int)
+
+    def test_response_has_created_at(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id, version_id = _create_agent_with_version(client)
+        body = client.get(f"/v1/agents/{agent_id}/versions/{version_id}").json()
+        assert isinstance(body.get("created_at"), str)
+        assert len(body["created_at"]) > 0
+
+    def test_response_has_config(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        cfg = {"model": "claude-3-opus"}
+        resp = client.post("/v1/agents", json=_body(config=cfg)).json()
+        agent_id, version_id = resp["id"], resp["version"]["id"]
+        body = client.get(f"/v1/agents/{agent_id}/versions/{version_id}").json()
+        assert body["config"] == cfg
+
+    def test_response_has_capabilities(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        caps = ["read", "write"]
+        resp = client.post("/v1/agents", json=_body(capabilities=caps)).json()
+        agent_id, version_id = resp["id"], resp["version"]["id"]
+        body = client.get(f"/v1/agents/{agent_id}/versions/{version_id}").json()
+        assert body["capabilities"] == caps
+
+    def test_response_matches_stored_record(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id, version_id = _create_agent_with_version(client)
+        body = client.get(f"/v1/agents/{agent_id}/versions/{version_id}").json()
+        stored = _version_resource(storage_root, version_id)
+        assert body == stored
+
+    def test_returns_version_created_via_version_endpoint(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        create_resp = client.post(
+            f"/v1/agents/{agent_id}/versions", json=_ver_body(name="v2")
+        ).json()
+        version_id = create_resp["id"]
+        get_resp = client.get(f"/v1/agents/{agent_id}/versions/{version_id}").json()
+        assert get_resp == create_resp
+
+
+# ---------------------------------------------------------------------------
+# Version get – not found
+# ---------------------------------------------------------------------------
+
+
+class TestAgentVersionGetNotFound:
+    def test_unknown_agent_returns_404(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.get("/v1/agents/agent_unknown/versions/agentver_abc123")
+        assert resp.status_code == 404
+
+    def test_unknown_agent_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.get("/v1/agents/agent_unknown/versions/agentver_abc123").json()
+        assert body["error"]["code"] == "agent_not_found"
+
+    def test_unknown_agent_error_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.get("/v1/agents/agent_unknown/versions/agentver_abc123").json()
+        assert len(body["error"]["message"]) > 0
+
+    def test_unknown_version_returns_404(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        resp = client.get(f"/v1/agents/{agent_id}/versions/agentver_doesnotexist")
+        assert resp.status_code == 404
+
+    def test_unknown_version_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        body = client.get(f"/v1/agents/{agent_id}/versions/agentver_doesnotexist").json()
+        assert body["error"]["code"] == "agent_version_not_found"
+
+    def test_unknown_version_error_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        body = client.get(f"/v1/agents/{agent_id}/versions/agentver_doesnotexist").json()
+        assert len(body["error"]["message"]) > 0
+
+    def test_version_from_other_agent_returns_404(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id_a, version_id_a = _create_agent_with_version(client)
+        agent_id_b = _create_agent(client)
+        resp = client.get(f"/v1/agents/{agent_id_b}/versions/{version_id_a}")
+        assert resp.status_code == 404
+
+    def test_version_from_other_agent_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id_a, version_id_a = _create_agent_with_version(client)
+        agent_id_b = _create_agent(client)
+        body = client.get(f"/v1/agents/{agent_id_b}/versions/{version_id_a}").json()
+        assert body["error"]["code"] == "agent_version_not_found"
+
+
+# ---------------------------------------------------------------------------
+# Version get – audit log
+# ---------------------------------------------------------------------------
+
+
+class TestAgentVersionGetAuditLog:
+    def test_unknown_agent_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/agents/agent_unknown/versions/agentver_abc123")
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "agent.version.get.failed" for r in records)
+
+    def test_unknown_version_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        client.get(f"/v1/agents/{agent_id}/versions/agentver_doesnotexist")
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "agent.version.get.failed" for r in records)
+
+    def test_audit_level_is_error(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/agents/agent_unknown/versions/agentver_abc123")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "agent.version.get.failed"
+        )
+        assert record["level"] == "error"
+
+    def test_audit_code_agent_not_found(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/agents/agent_unknown/versions/agentver_abc123")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "agent.version.get.failed"
+        )
+        assert record["code"] == "agent_not_found"
+
+    def test_audit_code_version_not_found(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        client.get(f"/v1/agents/{agent_id}/versions/agentver_doesnotexist")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "agent.version.get.failed"
+        )
+        assert record["code"] == "agent_version_not_found"
+
+    def test_audit_detail_has_agent_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/agents/agent_unknown/versions/agentver_abc123")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "agent.version.get.failed"
+        )
+        assert record["detail"]["agent_id"] == "agent_unknown"
+
+    def test_audit_detail_has_version_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/agents/agent_unknown/versions/agentver_abc123")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "agent.version.get.failed"
+        )
+        assert record["detail"]["version_id"] == "agentver_abc123"
+
+    def test_audit_detail_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/agents/agent_unknown/versions/agentver_abc123")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "agent.version.get.failed"
+        )
+        assert len(record["detail"]["message"]) > 0
+
+    def test_no_audit_on_success(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id, version_id = _create_agent_with_version(client)
+        client.get(f"/v1/agents/{agent_id}/versions/{version_id}")
+        records = _audit_records(storage_root)
+        assert not any(r.get("event") == "agent.version.get.failed" for r in records)
+
+
+# ---------------------------------------------------------------------------
+# Version get – OTel spans
+# ---------------------------------------------------------------------------
+
+
+class TestAgentVersionGetOtel:
+    def setup_method(self) -> None:
+        _otel_exporter.clear()
+
+    def _client(self, storage_root: Path) -> TestClient:
+        app = create_app(FileAuditLog(storage_root), storage_root=storage_root)
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_success_emits_version_get_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        agent_id, version_id = _create_agent_with_version(client)
+        _otel_exporter.clear()
+        client.get(f"/v1/agents/{agent_id}/versions/{version_id}")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "agent.version.get" in span_names
+
+    def test_failure_emits_version_get_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        client.get("/v1/agents/agent_unknown/versions/agentver_abc123")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "agent.version.get" in span_names
+
+    def test_failure_span_has_error_status(self, storage_root: Path) -> None:
+        from opentelemetry.trace import StatusCode
+        client = self._client(storage_root)
+        client.get("/v1/agents/agent_unknown/versions/agentver_abc123")
+        spans = [
+            s for s in _otel_exporter.get_finished_spans()
+            if s.name == "agent.version.get"
+        ]
+        assert any(s.status.status_code == StatusCode.ERROR for s in spans)
+
+    def test_span_has_agent_id_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        agent_id, version_id = _create_agent_with_version(client)
+        _otel_exporter.clear()
+        client.get(f"/v1/agents/{agent_id}/versions/{version_id}")
+        spans = [
+            s for s in _otel_exporter.get_finished_spans()
+            if s.name == "agent.version.get"
+        ]
+        assert any(s.attributes.get("agent.id") == agent_id for s in spans)
+
+    def test_span_has_version_id_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        agent_id, version_id = _create_agent_with_version(client)
+        _otel_exporter.clear()
+        client.get(f"/v1/agents/{agent_id}/versions/{version_id}")
+        spans = [
+            s for s in _otel_exporter.get_finished_spans()
+            if s.name == "agent.version.get"
+        ]
+        assert any(s.attributes.get("agent.version.id") == version_id for s in spans)

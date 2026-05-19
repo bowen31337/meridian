@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/agents-resource-api-post-v1-agents-id-versions-content/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/agents-resource-api-get-v1-agents-id-versions-ver-retur/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
