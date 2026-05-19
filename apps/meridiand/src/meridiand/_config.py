@@ -22,6 +22,8 @@ MERIDIAN_CONFIG_VERSION = 2
 
 _DEFAULT_CORS_METHODS = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 _DEFAULT_CORS_HEADERS = ["*"]
+_VALID_LOG_LEVELS = {"debug", "info", "warning", "error", "critical"}
+_VALID_VAULT_BACKENDS = {"os_keychain", "encrypted_file"}
 
 
 def _now() -> str:
@@ -29,7 +31,7 @@ def _now() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Error type
+# Error types
 # ---------------------------------------------------------------------------
 
 
@@ -43,6 +45,22 @@ class ConfigLoadError(MeridianError):
     ) -> None:
         super().__init__(
             code="config_load_failed",
+            message=message,
+            timestamp=timestamp,
+            cause=cause,
+        )
+
+
+class ConfigValidateError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="config_validate_failed",
             message=message,
             timestamp=timestamp,
             cause=cause,
@@ -119,6 +137,34 @@ class AuthConfig(BaseModel):
     bearer_token: str | None = None
 
 
+class VaultConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    backend: str = "os_keychain"
+
+
+class DaemonConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    bind: BindConfig = Field(default_factory=BindConfig)
+    workspace_root: Path = Field(default_factory=lambda: Path.home() / ".meridian")
+    log_level: str = "info"
+
+    @field_validator("workspace_root", mode="before")
+    @classmethod
+    def _expand_workspace_root(cls, v: object) -> Path:
+        return Path(str(v)).expanduser()
+
+
+class StorageConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    database: str | None = None
+    event_log: str | None = None
+    blob_store: str | None = None
+
+
 class MeridianConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -132,6 +178,9 @@ class MeridianConfig(BaseModel):
     webhook_sender: WebhookSenderConfig = Field(default_factory=WebhookSenderConfig)
     skill_forge: SkillForgeConfig = Field(default_factory=SkillForgeConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
+    vaults: list[VaultConfig] = Field(default_factory=list)
+    daemon: DaemonConfig | None = None
+    storage: StorageConfig | None = None
 
     @field_validator("storage_root", mode="before")
     @classmethod
@@ -197,6 +246,70 @@ def load_config(path: Path, audit_log: AuditLog | None = None) -> MeridianConfig
                         "path": str(path),
                         "message": str(exc),
                     },
+                )
+            )
+            raise err
+
+
+def validate_config(config: MeridianConfig, audit_log: AuditLog | None = None) -> None:
+    """Validate vaults, daemon, and storage sections; raise ConfigValidateError on failure."""
+    _audit = audit_log if audit_log is not None else NoopAuditLog()
+    now = _now()
+    tracer = get_tracer()
+
+    with tracer.start_as_current_span("config.validate") as span:
+        record_invocation_event(
+            span,
+            StructuredEvent(
+                name="config.validate.invocation",
+                code="config_validate",
+                timestamp=now,
+            ),
+        )
+
+        errors: list[str] = []
+
+        # Validate vaults section
+        seen_ids: set[str] = set()
+        for i, vault in enumerate(config.vaults):
+            prefix = f"vaults[{i}]"
+            if not vault.id.strip():
+                errors.append(f"{prefix}.id must not be empty")
+                continue
+            if vault.id in seen_ids:
+                errors.append(f"{prefix}.id: duplicate vault id {vault.id!r}")
+            else:
+                seen_ids.add(vault.id)
+            if vault.backend not in _VALID_VAULT_BACKENDS:
+                errors.append(
+                    f"{prefix}.backend: {vault.backend!r} is not valid; "
+                    f"expected one of {sorted(_VALID_VAULT_BACKENDS)}"
+                )
+
+        # Validate daemon section
+        if config.daemon is not None:
+            if config.daemon.log_level.lower() not in _VALID_LOG_LEVELS:
+                errors.append(
+                    f"daemon.log_level: {config.daemon.log_level!r} is not valid; "
+                    f"expected one of {sorted(_VALID_LOG_LEVELS)}"
+                )
+            port = config.daemon.bind.port
+            if not (1 <= port <= 65535):
+                errors.append(f"daemon.bind.port: {port} is not in range 1-65535")
+
+        if errors:
+            err = ConfigValidateError(
+                message=f"Config validation failed: {'; '.join(errors)}",
+                timestamp=_now(),
+            )
+            record_error(span, err)
+            _audit.write(
+                AuditLogEntry(
+                    level="error",
+                    event="config.validate.failed",
+                    code=err.code,
+                    timestamp=err.timestamp,
+                    detail={"errors": errors},
                 )
             )
             raise err

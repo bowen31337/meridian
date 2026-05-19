@@ -23,6 +23,15 @@ Coverage:
   - validate: span has config.path attribute.
   - validate: span adds ok event on success.
   - validate: calls record_failure on span on failure.
+  - validate: exits 1 when a vault has an empty id.
+  - validate: prints vault id error message.
+  - validate: exits 1 when vault ids are duplicated.
+  - validate: exits 1 when a vault backend is invalid.
+  - validate: exits 0 with valid vault entries.
+  - validate: exits 1 when daemon.log_level is invalid.
+  - validate: prints daemon log_level error message.
+  - validate: exits 0 with valid daemon section.
+  - validate: exits 0 with valid storage section.
 """
 
 from __future__ import annotations
@@ -282,3 +291,133 @@ class TestValidateOtel:
         result = _run(["meridianconfig", "validate", "--config", str(tmp_path / "missing.yml")])
         assert result.exit_code == 1
         _otel_mock.set_status.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Vault section validation
+# ---------------------------------------------------------------------------
+
+
+class TestValidateVaultSection:
+    def test_exits_1_on_empty_vault_id(self, tmp_path: Path) -> None:
+        cfg = _valid_cfg(tmp_path, vaults=[{"id": "", "backend": "os_keychain"}])
+        result = _run(["meridianconfig", "validate", "--config", str(cfg)])
+        assert result.exit_code == 1
+
+    def test_prints_vault_id_error(self, tmp_path: Path) -> None:
+        cfg = _valid_cfg(tmp_path, vaults=[{"id": "", "backend": "os_keychain"}])
+        result = _run(["meridianconfig", "validate", "--config", str(cfg)])
+        assert "id" in result.output
+
+    def test_exits_1_on_duplicate_vault_ids(self, tmp_path: Path) -> None:
+        cfg = _valid_cfg(
+            tmp_path,
+            vaults=[
+                {"id": "dup", "backend": "os_keychain"},
+                {"id": "dup", "backend": "encrypted_file"},
+            ],
+        )
+        result = _run(["meridianconfig", "validate", "--config", str(cfg)])
+        assert result.exit_code == 1
+
+    def test_prints_duplicate_vault_id_error(self, tmp_path: Path) -> None:
+        cfg = _valid_cfg(
+            tmp_path,
+            vaults=[
+                {"id": "dup", "backend": "os_keychain"},
+                {"id": "dup", "backend": "encrypted_file"},
+            ],
+        )
+        result = _run(["meridianconfig", "validate", "--config", str(cfg)])
+        assert "dup" in result.output
+
+    def test_exits_1_on_invalid_vault_backend(self, tmp_path: Path) -> None:
+        cfg = _valid_cfg(tmp_path, vaults=[{"id": "v1", "backend": "bad_backend"}])
+        result = _run(["meridianconfig", "validate", "--config", str(cfg)])
+        assert result.exit_code == 1
+
+    def test_prints_invalid_backend_message(self, tmp_path: Path) -> None:
+        cfg = _valid_cfg(tmp_path, vaults=[{"id": "v1", "backend": "bad_backend"}])
+        result = _run(["meridianconfig", "validate", "--config", str(cfg)])
+        assert "backend" in result.output
+
+    def test_exits_0_with_valid_vaults(self, tmp_path: Path) -> None:
+        cfg = _valid_cfg(
+            tmp_path,
+            vaults=[
+                {"id": "v1", "backend": "os_keychain"},
+                {"id": "v2", "backend": "encrypted_file"},
+            ],
+        )
+        result = _run(["meridianconfig", "validate", "--config", str(cfg)])
+        assert result.exit_code == 0
+
+    def test_writes_audit_on_vault_error(self, tmp_path: Path) -> None:
+        cfg = _valid_cfg(tmp_path, vaults=[{"id": "", "backend": "os_keychain"}])
+        with patch("meridian_cli.meridianconfig.write_audit") as mock_audit:
+            _run(["meridianconfig", "validate", "--config", str(cfg)])
+        mock_audit.assert_called_once()
+        assert mock_audit.call_args[0][1] == "meridianconfig.validate.failed"
+
+
+# ---------------------------------------------------------------------------
+# Daemon section validation
+# ---------------------------------------------------------------------------
+
+
+class TestValidateDaemonSection:
+    def test_exits_1_on_invalid_daemon_log_level(self, tmp_path: Path) -> None:
+        cfg = _valid_cfg(tmp_path, daemon={"log_level": "verbose"})
+        result = _run(["meridianconfig", "validate", "--config", str(cfg)])
+        assert result.exit_code == 1
+
+    def test_prints_daemon_log_level_error(self, tmp_path: Path) -> None:
+        cfg = _valid_cfg(tmp_path, daemon={"log_level": "verbose"})
+        result = _run(["meridianconfig", "validate", "--config", str(cfg)])
+        assert "log_level" in result.output
+
+    def test_exits_0_with_valid_daemon_section(self, tmp_path: Path) -> None:
+        cfg = _valid_cfg(tmp_path, daemon={"log_level": "debug"})
+        result = _run(["meridianconfig", "validate", "--config", str(cfg)])
+        assert result.exit_code == 0
+
+    def test_exits_0_without_daemon_section(self, tmp_path: Path) -> None:
+        cfg = _valid_cfg(tmp_path)
+        result = _run(["meridianconfig", "validate", "--config", str(cfg)])
+        assert result.exit_code == 0
+
+    def test_writes_audit_on_daemon_log_level_error(self, tmp_path: Path) -> None:
+        cfg = _valid_cfg(tmp_path, daemon={"log_level": "verbose"})
+        with patch("meridian_cli.meridianconfig.write_audit") as mock_audit:
+            _run(["meridianconfig", "validate", "--config", str(cfg)])
+        mock_audit.assert_called_once()
+        assert mock_audit.call_args[0][0] == "error"
+
+
+# ---------------------------------------------------------------------------
+# Storage section validation
+# ---------------------------------------------------------------------------
+
+
+class TestValidateStorageSection:
+    def test_exits_0_with_valid_storage_section(self, tmp_path: Path) -> None:
+        cfg = _valid_cfg(
+            tmp_path,
+            storage={
+                "database": str(tmp_path / "db.sqlite"),
+                "event_log": str(tmp_path / "events"),
+                "blob_store": str(tmp_path / "blobs"),
+            },
+        )
+        result = _run(["meridianconfig", "validate", "--config", str(cfg)])
+        assert result.exit_code == 0
+
+    def test_exits_0_without_storage_section(self, tmp_path: Path) -> None:
+        cfg = _valid_cfg(tmp_path)
+        result = _run(["meridianconfig", "validate", "--config", str(cfg)])
+        assert result.exit_code == 0
+
+    def test_exits_0_with_partial_storage_paths(self, tmp_path: Path) -> None:
+        cfg = _valid_cfg(tmp_path, storage={"database": str(tmp_path / "db.sqlite")})
+        result = _run(["meridianconfig", "validate", "--config", str(cfg)])
+        assert result.exit_code == 0

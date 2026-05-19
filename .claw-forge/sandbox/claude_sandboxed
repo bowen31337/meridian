@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/yaml-configurat-system-secret-ref-vault-vault-id-key-re/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/yaml-configurat-system-config-validates-vaults-daemon-b/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

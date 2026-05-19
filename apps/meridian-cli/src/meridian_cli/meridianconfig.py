@@ -85,6 +85,34 @@ class _AuthConfig(BaseModel):
     bearer_token: str | None = None
 
 
+class _VaultConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    backend: str = "os_keychain"
+
+
+class _DaemonConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    bind: _BindConfig = Field(default_factory=_BindConfig)
+    workspace_root: Path = Field(default_factory=lambda: Path.home() / ".meridian")
+    log_level: str = "info"
+
+    @field_validator("workspace_root", mode="before")
+    @classmethod
+    def _expand_workspace_root(cls, v: object) -> Path:
+        return Path(str(v)).expanduser()
+
+
+class _StorageConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    database: str | None = None
+    event_log: str | None = None
+    blob_store: str | None = None
+
+
 class _MeridianConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -98,6 +126,9 @@ class _MeridianConfig(BaseModel):
     webhook_sender: _WebhookSenderConfig = Field(default_factory=_WebhookSenderConfig)
     skill_forge: _SkillForgeConfig = Field(default_factory=_SkillForgeConfig)
     auth: _AuthConfig = Field(default_factory=_AuthConfig)
+    vaults: list[_VaultConfig] = Field(default_factory=list)
+    daemon: _DaemonConfig | None = None
+    storage: _StorageConfig | None = None
 
     @field_validator("storage_root", mode="before")
     @classmethod
@@ -153,6 +184,10 @@ def validate(config_path: Path | None) -> None:
         sys.exit(1)
 
 
+_VALID_LOG_LEVELS = {"debug", "info", "warning", "error", "critical"}
+_VALID_VAULT_BACKENDS = {"os_keychain", "encrypted_file"}
+
+
 def _run_validate(path: Path) -> list[str]:
     """Return a list of human-readable error strings, or [] on success."""
     if not path.exists():
@@ -174,14 +209,44 @@ def _run_validate(path: Path) -> list[str]:
         ]
 
     try:
-        _MeridianConfig.model_validate(raw)
+        config = _MeridianConfig.model_validate(raw)
     except ValidationError as exc:
         return [
             f"  {'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}"
             for e in exc.errors()
         ]
 
-    return []
+    errors: list[str] = []
+
+    # Validate vaults section
+    seen_ids: set[str] = set()
+    for i, vault in enumerate(config.vaults):
+        prefix = f"vaults[{i}]"
+        if not vault.id.strip():
+            errors.append(f"{prefix}.id must not be empty")
+            continue
+        if vault.id in seen_ids:
+            errors.append(f"{prefix}.id: duplicate vault id {vault.id!r}")
+        else:
+            seen_ids.add(vault.id)
+        if vault.backend not in _VALID_VAULT_BACKENDS:
+            errors.append(
+                f"{prefix}.backend: {vault.backend!r} is not valid; "
+                f"expected one of {sorted(_VALID_VAULT_BACKENDS)}"
+            )
+
+    # Validate daemon section
+    if config.daemon is not None:
+        if config.daemon.log_level.lower() not in _VALID_LOG_LEVELS:
+            errors.append(
+                f"daemon.log_level: {config.daemon.log_level!r} is not valid; "
+                f"expected one of {sorted(_VALID_LOG_LEVELS)}"
+            )
+        port = config.daemon.bind.port
+        if not (1 <= port <= 65535):
+            errors.append(f"daemon.bind.port: {port} is not in range 1-65535")
+
+    return errors
 
 
 def _emit_failure(span: object, path: Path, errors: list[str]) -> None:
