@@ -18,6 +18,8 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from storage_reposit import LocalEventLogReader, PhaseProjection
 
+from ._system_prompt_template import expand_system_prompt
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -185,12 +187,43 @@ def make_wake_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                 # Step 3: Load active skills
                 active_skills = _load_active_skills(storage_root, agent_id) if agent_id else []
 
-                # Step 4: Tail event log to determine current phase
+                # Step 4: Expand {{ memory.* }} templates in agent config strings
+                if agent_version is not None:
+                    config = agent_version.get("version", {}).get("config") or {}
+                    if isinstance(config, dict):
+                        for cfg_key, cfg_val in list(config.items()):
+                            if isinstance(cfg_val, str) and "{{" in cfg_val:
+                                config[cfg_key] = expand_system_prompt(
+                                    cfg_val,
+                                    storage_root=storage_root,
+                                    audit_log=audit_log,
+                                )
+
+                # Step 5: Load skill versions and expand {{ memory.* }} in instructions
+                versions_dir = storage_root / "skill_versions"
+                for activation in active_skills:
+                    skill_version_id = activation.get("skill_version_id")
+                    if not skill_version_id:
+                        continue
+                    version_path = versions_dir / f"{skill_version_id}.json"
+                    if not version_path.exists():
+                        continue
+                    skill_version: dict[str, Any] = json.loads(version_path.read_text())
+                    instructions = skill_version.get("instructions", "")
+                    if instructions and "{{" in instructions:
+                        skill_version["instructions"] = expand_system_prompt(
+                            instructions,
+                            storage_root=storage_root,
+                            audit_log=audit_log,
+                        )
+                    activation["skill_version"] = skill_version
+
+                # Step 6: Tail event log to determine current phase
                 reader = LocalEventLogReader(storage_root)
                 projection = PhaseProjection(reader)
                 phase = projection.current_phase(session_id)
 
-                # Step 5: Rebuild model context from messages in most recent Thread
+                # Step 7: Rebuild model context from messages in most recent Thread
                 thread_id, messages = _load_most_recent_thread(storage_root, session_id)
 
             except (WakeSessionNotFoundError, WakeError):

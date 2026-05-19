@@ -24,6 +24,12 @@ Tests cover:
   - OTel span is set to ERROR status on failure.
   - create_app wires the wake router when storage_root is supplied.
   - create_app omits the wake route when storage_root is None.
+  - Agent config string values containing {{ memory.KEY }} are expanded at wake time.
+  - Skill version instructions containing {{ memory.KEY }} are expanded at wake time.
+  - Expanded skill version is embedded in each active_skills activation record.
+  - Wake returns 500 when a memory key referenced in agent config is missing.
+  - Wake returns 500 when a memory key referenced in skill instructions is missing.
+  - Skill version is embedded even when instructions contain no template refs.
 """
 
 from __future__ import annotations
@@ -552,3 +558,212 @@ class TestWakeOtel:
         wake_span = spans.get("session.wake")
         assert wake_span is not None
         assert wake_span.status.status_code == StatusCode.ERROR
+
+
+# ---------------------------------------------------------------------------
+# System prompt template expansion at wake time
+# ---------------------------------------------------------------------------
+
+
+def _write_memory(storage_root: Path, key: str, value: str) -> None:
+    mem_dir = storage_root / "memory"
+    mem_dir.mkdir(parents=True, exist_ok=True)
+    safe_key = key.replace("/", "_").replace("\x00", "_")
+    (mem_dir / f"{safe_key}.json").write_text(
+        json.dumps({"key": key, "value": value, "type": "text"})
+    )
+
+
+def _write_skill_version(
+    storage_root: Path, version_id: str, skill_id: str, instructions: str
+) -> None:
+    versions_dir = storage_root / "skill_versions"
+    versions_dir.mkdir(parents=True, exist_ok=True)
+    (versions_dir / f"{version_id}.json").write_text(
+        json.dumps(
+            {
+                "id": version_id,
+                "skill_id": skill_id,
+                "version_number": 1,
+                "instructions": instructions,
+                "tools": [],
+                "tests": [],
+                "source_type": "api",
+                "source_url": None,
+                "source": "authored",
+                "derived_from_session_ids": None,
+            }
+        )
+    )
+
+
+class TestTemplateExpansionInAgentConfig:
+    def test_agent_config_system_prompt_expanded(self, storage_root: Path) -> None:
+        _write_memory(storage_root, "user.preferences.commit_style", "conventional-commits")
+        agent_data = {
+            "id": "agent-tpl-1",
+            "name": "Template Agent",
+            "version": {
+                "config": {
+                    "system_prompt": (
+                        "Use {{ memory.user.preferences.commit_style }} for commits."
+                    )
+                }
+            },
+        }
+        _write_agent(storage_root, "agent-tpl-1", agent_data)
+        _write_session(
+            storage_root,
+            "tpl-sess1",
+            {"session_id": "tpl-sess1", "agent_id": "agent-tpl-1", "status": "active"},
+        )
+        audit = FileAuditLog(storage_root)
+        client = _make_client(storage_root, audit)
+        body = client.post("/v1/x/sessions/tpl-sess1/wake").json()
+        assert body["agent_version"]["version"]["config"]["system_prompt"] == (
+            "Use conventional-commits for commits."
+        )
+
+    def test_agent_config_non_template_string_unchanged(self, storage_root: Path) -> None:
+        agent_data = {
+            "id": "agent-tpl-2",
+            "name": "Plain Agent",
+            "version": {"config": {"system_prompt": "You are helpful."}},
+        }
+        _write_agent(storage_root, "agent-tpl-2", agent_data)
+        _write_session(
+            storage_root,
+            "tpl-sess2",
+            {"session_id": "tpl-sess2", "agent_id": "agent-tpl-2", "status": "active"},
+        )
+        audit = FileAuditLog(storage_root)
+        client = _make_client(storage_root, audit)
+        body = client.post("/v1/x/sessions/tpl-sess2/wake").json()
+        assert body["agent_version"]["version"]["config"]["system_prompt"] == "You are helpful."
+
+    def test_missing_memory_in_agent_config_returns_error(self, storage_root: Path) -> None:
+        agent_data = {
+            "id": "agent-tpl-3",
+            "name": "Bad Agent",
+            "version": {
+                "config": {"system_prompt": "{{ memory.user.no_such_key }}"}
+            },
+        }
+        _write_agent(storage_root, "agent-tpl-3", agent_data)
+        _write_session(
+            storage_root,
+            "tpl-sess3",
+            {"session_id": "tpl-sess3", "agent_id": "agent-tpl-3", "status": "active"},
+        )
+        audit = FileAuditLog(storage_root)
+        client = _make_client(storage_root, audit)
+        resp = client.post("/v1/x/sessions/tpl-sess3/wake")
+        assert resp.status_code >= 400
+
+
+class TestTemplateExpansionInSkillInstructions:
+    def test_skill_instructions_expanded(self, storage_root: Path) -> None:
+        _write_memory(storage_root, "user.lang", "Python")
+        _write_skill_version(
+            storage_root,
+            "skillver_001",
+            "skill-bash",
+            "Write code in {{ memory.user.lang }}.",
+        )
+        _write_skill_activation(
+            storage_root,
+            "act-tpl-1",
+            {
+                "id": "act-tpl-1",
+                "agent_id": "agent-sk-tpl-1",
+                "skill_id": "skill-bash",
+                "skill_version_id": "skillver_001",
+                "status": "active",
+                "requested_at": "2024-01-01T00:00:00+00:00",
+            },
+        )
+        _write_session(
+            storage_root,
+            "sk-tpl-sess1",
+            {
+                "session_id": "sk-tpl-sess1",
+                "agent_id": "agent-sk-tpl-1",
+                "status": "active",
+            },
+        )
+        audit = FileAuditLog(storage_root)
+        client = _make_client(storage_root, audit)
+        body = client.post("/v1/x/sessions/sk-tpl-sess1/wake").json()
+        skills = body["active_skills"]
+        assert len(skills) == 1
+        assert skills[0]["skill_version"]["instructions"] == "Write code in Python."
+
+    def test_skill_version_embedded_without_templates(self, storage_root: Path) -> None:
+        _write_skill_version(
+            storage_root,
+            "skillver_002",
+            "skill-net",
+            "Make HTTP requests.",
+        )
+        _write_skill_activation(
+            storage_root,
+            "act-tpl-2",
+            {
+                "id": "act-tpl-2",
+                "agent_id": "agent-sk-tpl-2",
+                "skill_id": "skill-net",
+                "skill_version_id": "skillver_002",
+                "status": "active",
+                "requested_at": "2024-01-01T00:00:00+00:00",
+            },
+        )
+        _write_session(
+            storage_root,
+            "sk-tpl-sess2",
+            {
+                "session_id": "sk-tpl-sess2",
+                "agent_id": "agent-sk-tpl-2",
+                "status": "active",
+            },
+        )
+        audit = FileAuditLog(storage_root)
+        client = _make_client(storage_root, audit)
+        body = client.post("/v1/x/sessions/sk-tpl-sess2/wake").json()
+        skills = body["active_skills"]
+        assert len(skills) == 1
+        assert skills[0]["skill_version"]["instructions"] == "Make HTTP requests."
+
+    def test_missing_memory_in_skill_instructions_returns_error(
+        self, storage_root: Path
+    ) -> None:
+        _write_skill_version(
+            storage_root,
+            "skillver_003",
+            "skill-fail",
+            "{{ memory.user.no_such_key }}",
+        )
+        _write_skill_activation(
+            storage_root,
+            "act-tpl-3",
+            {
+                "id": "act-tpl-3",
+                "agent_id": "agent-sk-tpl-3",
+                "skill_id": "skill-fail",
+                "skill_version_id": "skillver_003",
+                "status": "active",
+                "requested_at": "2024-01-01T00:00:00+00:00",
+            },
+        )
+        _write_session(
+            storage_root,
+            "sk-tpl-sess3",
+            {
+                "session_id": "sk-tpl-sess3",
+                "agent_id": "agent-sk-tpl-3",
+                "status": "active",
+            },
+        )
+        audit = FileAuditLog(storage_root)
+        client = _make_client(storage_root, audit)
+        resp = client.post("/v1/x/sessions/sk-tpl-sess3/wake")
+        assert resp.status_code >= 400
