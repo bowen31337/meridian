@@ -8,6 +8,7 @@ from ._contract import EnvironmentDriver
 # Built-in drivers
 from ._docker_driver import DockerBackendDriver
 from ._http_driver import HttpBackendDriver, VaultCredentialResolver
+from ._local_driver import LocalBackendDriver
 from ._mcp_driver import McpBackendDriver
 from ._ssh_driver import SshBackendDriver
 
@@ -58,6 +59,7 @@ __all__ = [
     # Built-in drivers
     "DockerBackendDriver",
     "HttpBackendDriver",
+    "LocalBackendDriver",
     "McpBackendDriver",
     "SshBackendDriver",
     "VaultCredentialResolver",
