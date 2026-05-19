@@ -184,6 +184,37 @@ class ChannelInboundHmacError(MeridianError):
         return 401
 
 
+class SessionOutboundNotFoundError(MeridianError):
+    def __init__(self, *, session_id: str, timestamp: str) -> None:
+        super().__init__(
+            code="session_outbound_not_found",
+            message=f"No channels attached to session '{session_id}'",
+            timestamp=timestamp,
+        )
+
+    def http_status(self) -> int:
+        return 404
+
+
+class SessionOutboundError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="session_outbound_failed",
+            message=message,
+            timestamp=timestamp,
+            cause=cause,
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
 # ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
@@ -214,6 +245,11 @@ class InboundMessageRequest(BaseModel):
 class OutboundMessageRequest(BaseModel):
     session_id: str
     recipient: str
+    content: str
+    content_type: str = "text/plain"
+
+
+class SessionOutboundRequest(BaseModel):
     content: str
     content_type: str = "text/plain"
 
@@ -607,6 +643,173 @@ def make_system_channel_router(
                 "message_id": result.message_id,
                 "delivered": result.delivered,
                 "timestamp": result.timestamp,
+            },
+            status_code=200,
+        )
+
+    # -----------------------------------------------------------------------
+    # POST /v1/sessions/{session_id}/outbound
+    # -----------------------------------------------------------------------
+
+    @router.post("/v1/sessions/{session_id}/outbound", status_code=200)
+    async def session_outbound(
+        session_id: str, body: SessionOutboundRequest
+    ) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "session.outbound",
+            attributes={"session.id": session_id},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="session.outbound.invocation",
+                    code="session_outbound",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                # Scan all channel_sessions dirs to find channels attached to this session.
+                session_records: list[dict[str, Any]] = []
+                if channel_sessions_dir.exists():
+                    for channel_dir in channel_sessions_dir.iterdir():
+                        if channel_dir.is_dir():
+                            sess_file = channel_dir / f"{session_id}.json"
+                            if sess_file.exists():
+                                session_records.append(json.loads(sess_file.read_text()))
+
+                if not session_records:
+                    raise SessionOutboundNotFoundError(session_id=session_id, timestamp=now)
+
+                span.set_attribute("session.channel_count", len(session_records))
+
+                results: list[dict[str, Any]] = []
+                channels_skipped = 0
+
+                for sess_rec in session_records:
+                    ch_id: str = sess_rec["channel_id"]
+                    recipient: str = sess_rec["sender_id"]
+
+                    channel_file = channels_dir / f"{ch_id}.json"
+                    if not channel_file.exists():
+                        channels_skipped += 1
+                        continue
+
+                    channel = json.loads(channel_file.read_text())
+
+                    if channel.get("egress_policy") == "disabled":
+                        channels_skipped += 1
+                        continue
+
+                    send_request = SendRequest(
+                        channel_id=ch_id,
+                        channel_kind=channel["kind"],
+                        session_id=session_id,
+                        recipient=recipient,
+                        content=body.content,
+                        content_type=body.content_type,
+                    )
+
+                    try:
+                        result = await channel_runtime.send(
+                            send_request,
+                            RuntimeOptions(audit_log=NoopAuditLog()),
+                        )
+                        results.append(
+                            {
+                                "channel_id": ch_id,
+                                "message_id": result.message_id,
+                                "delivered": result.delivered,
+                                "timestamp": result.timestamp,
+                            }
+                        )
+                    except ChannelFailure as cf:
+                        send_err = SessionOutboundError(
+                            message=cf.message,
+                            timestamp=now,
+                            cause=cf,
+                        )
+                        record_error(span, send_err)
+                        audit_log.write(
+                            AuditLogEntry(
+                                level="error",
+                                event="session.outbound.failed",
+                                code=send_err.code,
+                                timestamp=send_err.timestamp,
+                                detail={
+                                    "session_id": session_id,
+                                    "channel_id": ch_id,
+                                    "channel_kind": cf.channel_kind,
+                                    "message": send_err.message,
+                                },
+                            )
+                        )
+                        results.append(
+                            {"channel_id": ch_id, "delivered": False, "error": send_err.code}
+                        )
+                    except Exception as exc:
+                        send_err = SessionOutboundError(
+                            message=f"Outbound delivery failed: {exc}",
+                            timestamp=_now(),
+                            cause=exc,
+                        )
+                        record_error(span, send_err)
+                        audit_log.write(
+                            AuditLogEntry(
+                                level="error",
+                                event="session.outbound.failed",
+                                code=send_err.code,
+                                timestamp=send_err.timestamp,
+                                detail={
+                                    "session_id": session_id,
+                                    "channel_id": ch_id,
+                                    "message": send_err.message,
+                                },
+                            )
+                        )
+                        results.append(
+                            {"channel_id": ch_id, "delivered": False, "error": send_err.code}
+                        )
+
+            except SessionOutboundNotFoundError as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="session.outbound.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={"session_id": session_id, "message": err.message},
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = SessionOutboundError(
+                    message=f"Session outbound failed: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="session.outbound.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={"session_id": session_id, "message": err2.message},
+                    )
+                )
+                raise err2
+
+        return JSONResponse(
+            content={
+                "session_id": session_id,
+                "results": results,
+                "channels_skipped": channels_skipped,
             },
             status_code=200,
         )

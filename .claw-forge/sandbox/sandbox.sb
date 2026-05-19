@@ -1,7 +1,7 @@
 (version 1)
 (allow default)
 (deny file-write* (subpath "/Users/bowenli/development/meridian"))
-(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/channels-gatewa-system-channel-inbound-latency-target-i"))
+(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/channels-gatewa-system-outbound-messages-from-a-session"))
 (allow file-write* (subpath "/Users/bowenli/development/meridian/.git"))
 (deny file-write* (subpath "/Users/bowenli/.ssh"))
 (deny file-write* (subpath "/Users/bowenli/.aws"))

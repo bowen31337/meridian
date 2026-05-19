@@ -162,6 +162,42 @@ def _audit_records(storage_root: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
+def _session_outbound(
+    client: TestClient,
+    session_id: str,
+    *,
+    content: str = "reply",
+    content_type: str = "text/plain",
+) -> dict:
+    resp = client.post(
+        f"/v1/sessions/{session_id}/outbound",
+        json={"content": content, "content_type": content_type},
+    )
+    return resp.json() | {"_status": resp.status_code}
+
+
+def _attach_session(
+    storage_root: Path,
+    channel_id: str,
+    session_id: str,
+    *,
+    sender_id: str = "ext-user-1",
+    user_profile_id: str = "user_1",
+    agent_id: str = "agent_1",
+) -> None:
+    s_dir = storage_root / "channel_sessions" / channel_id
+    s_dir.mkdir(parents=True, exist_ok=True)
+    record = {
+        "id": session_id,
+        "channel_id": channel_id,
+        "user_profile_id": user_profile_id,
+        "agent_id": agent_id,
+        "sender_id": sender_id,
+        "created_at": "2026-01-01T00:00:00+00:00",
+    }
+    (s_dir / f"{session_id}.json").write_text(json.dumps(record))
+
+
 # ---------------------------------------------------------------------------
 # Pairing round-trip
 # ---------------------------------------------------------------------------
@@ -980,6 +1016,245 @@ class TestInboundLatencyTarget:
 
 
 # ---------------------------------------------------------------------------
+# Session outbound fan-out
+# ---------------------------------------------------------------------------
+
+
+class TestSessionOutbound:
+    def test_delivers_to_single_channel_returns_200(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = _create_channel(client)
+        _attach_session(storage_root, channel_id, "sess_abc")
+        result = _session_outbound(client, "sess_abc")
+        assert result["_status"] == 200
+
+    def test_response_has_session_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = _create_channel(client)
+        _attach_session(storage_root, channel_id, "sess_abc")
+        result = _session_outbound(client, "sess_abc")
+        assert result["session_id"] == "sess_abc"
+
+    def test_response_has_results_list(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = _create_channel(client)
+        _attach_session(storage_root, channel_id, "sess_abc")
+        result = _session_outbound(client, "sess_abc")
+        assert isinstance(result["results"], list)
+
+    def test_result_contains_channel_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = _create_channel(client)
+        _attach_session(storage_root, channel_id, "sess_abc")
+        result = _session_outbound(client, "sess_abc")
+        assert result["results"][0]["channel_id"] == channel_id
+
+    def test_result_contains_delivered_true(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = _create_channel(client)
+        _attach_session(storage_root, channel_id, "sess_abc")
+        result = _session_outbound(client, "sess_abc")
+        assert result["results"][0]["delivered"] is True
+
+    def test_result_contains_message_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = _create_channel(client)
+        _attach_session(storage_root, channel_id, "sess_abc")
+        result = _session_outbound(client, "sess_abc")
+        assert "message_id" in result["results"][0]
+
+    def test_delivers_to_multiple_channels(self, storage_root: Path) -> None:
+        driver = StubDriver()
+        client = _make_client(storage_root, _make_runtime(driver))
+        ch_a = _create_channel(client)
+        ch_b = _create_channel(client)
+        _attach_session(storage_root, ch_a, "sess_multi", sender_id="user-a")
+        _attach_session(storage_root, ch_b, "sess_multi", sender_id="user-b")
+        result = _session_outbound(client, "sess_multi")
+        assert result["_status"] == 200
+        assert len(result["results"]) == 2
+
+    def test_driver_called_once_per_channel(self, storage_root: Path) -> None:
+        driver = StubDriver()
+        client = _make_client(storage_root, _make_runtime(driver))
+        ch_a = _create_channel(client)
+        ch_b = _create_channel(client)
+        _attach_session(storage_root, ch_a, "sess_multi2", sender_id="user-a")
+        _attach_session(storage_root, ch_b, "sess_multi2", sender_id="user-b")
+        _session_outbound(client, "sess_multi2")
+        assert len(driver.sends) == 2
+
+    def test_driver_called_with_sender_id_as_recipient(self, storage_root: Path) -> None:
+        driver = StubDriver()
+        client = _make_client(storage_root, _make_runtime(driver))
+        channel_id = _create_channel(client)
+        _attach_session(storage_root, channel_id, "sess_recip", sender_id="the-sender")
+        _session_outbound(client, "sess_recip")
+        assert driver.sends[0].recipient == "the-sender"
+
+    def test_skips_disabled_channel(self, storage_root: Path) -> None:
+        driver = StubDriver()
+        client = _make_client(storage_root, _make_runtime(driver))
+        disabled_ch = _create_channel(client, egress_policy="disabled")
+        enabled_ch = _create_channel(client)
+        _attach_session(storage_root, disabled_ch, "sess_skip", sender_id="user-a")
+        _attach_session(storage_root, enabled_ch, "sess_skip", sender_id="user-b")
+        result = _session_outbound(client, "sess_skip")
+        assert result["_status"] == 200
+        assert len(result["results"]) == 1
+        assert result["results"][0]["channel_id"] == enabled_ch
+
+    def test_disabled_channel_increments_channels_skipped(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        disabled_ch = _create_channel(client, egress_policy="disabled")
+        _attach_session(storage_root, disabled_ch, "sess_skip2")
+        result = _session_outbound(client, "sess_skip2")
+        assert result["channels_skipped"] == 1
+
+    def test_unknown_session_returns_404(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post(
+            "/v1/sessions/sess_nonexistent/outbound",
+            json={"content": "hello"},
+        )
+        assert resp.status_code == 404
+
+    def test_unknown_session_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post(
+            "/v1/sessions/sess_nonexistent/outbound",
+            json={"content": "hello"},
+        ).json()
+        assert body["error"]["code"] == "session_outbound_not_found"
+
+    def test_unknown_session_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/sessions/sess_nonexistent/outbound", json={"content": "hello"})
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "session.outbound.failed" for r in records)
+
+    def test_unknown_session_audit_level_is_error(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/sessions/sess_nonexistent/outbound", json={"content": "hello"})
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "session.outbound.failed"
+        )
+        assert record["level"] == "error"
+
+    def test_partial_failure_delivers_to_remaining_channels(self, storage_root: Path) -> None:
+        class PartiallyFailingDriver(ChannelDriver):
+            kind = "test.partial"
+
+            def __init__(self) -> None:
+                self._call_count = 0
+
+            async def start(self, r: StartRequest) -> None:
+                pass
+
+            async def send(self, r: SendRequest) -> SendResult:
+                self._call_count += 1
+                if self._call_count == 1:
+                    raise RuntimeError("first channel down")
+                return SendResult(
+                    message_id="msg-ok",
+                    timestamp="2026-01-01T00:00:00+00:00",
+                    delivered=True,
+                )
+
+            async def stop(self, r: StopRequest) -> None:
+                pass
+
+            def capabilities(self) -> ChannelCapabilities:
+                return ChannelCapabilities(can_send_text=True)
+
+        rt = ChannelRuntime()
+        rt.register(PartiallyFailingDriver())
+        app = create_app(FileAuditLog(storage_root), storage_root=storage_root, channel_runtime=rt)
+        client = TestClient(app, raise_server_exceptions=False)
+        ch_a = _create_channel(client, kind="test.partial")
+        ch_b = _create_channel(client, kind="test.partial")
+        _attach_session(storage_root, ch_a, "sess_partial", sender_id="user-a")
+        _attach_session(storage_root, ch_b, "sess_partial", sender_id="user-b")
+        resp = client.post("/v1/sessions/sess_partial/outbound", json={"content": "hi"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["results"]) == 2
+        assert any(r.get("delivered") for r in data["results"])
+
+    def test_partial_failure_writes_audit(self, storage_root: Path) -> None:
+        class AlwaysFailingDriver(ChannelDriver):
+            kind = "test.fail3"
+
+            async def start(self, r: StartRequest) -> None:
+                pass
+
+            async def send(self, r: SendRequest) -> SendResult:
+                raise RuntimeError("always fails")
+
+            async def stop(self, r: StopRequest) -> None:
+                pass
+
+            def capabilities(self) -> ChannelCapabilities:
+                return ChannelCapabilities()
+
+        rt = ChannelRuntime()
+        rt.register(AlwaysFailingDriver())
+        app = create_app(FileAuditLog(storage_root), storage_root=storage_root, channel_runtime=rt)
+        client = TestClient(app, raise_server_exceptions=False)
+        channel_id = _create_channel(client, kind="test.fail3")
+        _attach_session(storage_root, channel_id, "sess_fail")
+        client.post("/v1/sessions/sess_fail/outbound", json={"content": "hi"})
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "session.outbound.failed" for r in records)
+
+    def test_emits_session_outbound_span(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = _create_channel(client)
+        _attach_session(storage_root, channel_id, "sess_otel1")
+        _otel_exporter.clear()
+        _session_outbound(client, "sess_otel1")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "session.outbound" in span_names
+
+    def test_span_has_session_id_attribute(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = _create_channel(client)
+        _attach_session(storage_root, channel_id, "sess_otel2")
+        _otel_exporter.clear()
+        _session_outbound(client, "sess_otel2")
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("session.outbound")
+        assert span is not None
+        assert span.attributes["session.id"] == "sess_otel2"
+
+    def test_span_has_invocation_event(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = _create_channel(client)
+        _attach_session(storage_root, channel_id, "sess_otel3")
+        _otel_exporter.clear()
+        _session_outbound(client, "sess_otel3")
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("session.outbound")
+        assert span is not None
+        assert "meridian.error.invocation" in [e.name for e in span.events]
+
+    def test_span_has_channel_count_attribute(self, storage_root: Path) -> None:
+        driver = StubDriver()
+        client = _make_client(storage_root, _make_runtime(driver))
+        ch_a = _create_channel(client)
+        ch_b = _create_channel(client)
+        _attach_session(storage_root, ch_a, "sess_otel4", sender_id="user-a")
+        _attach_session(storage_root, ch_b, "sess_otel4", sender_id="user-b")
+        _otel_exporter.clear()
+        _session_outbound(client, "sess_otel4")
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("session.outbound")
+        assert span is not None
+        assert span.attributes["session.channel_count"] == 2
+
+
+# ---------------------------------------------------------------------------
 # Route wiring
 # ---------------------------------------------------------------------------
 
@@ -1038,5 +1313,24 @@ class TestRouteWiring:
             json={"sender_id": "ext-1"},
         )
         # FastAPI routing 404 has no structured error envelope.
+        assert resp.status_code == 404
+        assert "error" not in resp.json()
+
+    def test_session_outbound_route_present_with_runtime(self, storage_root: Path) -> None:
+        # Route exists: session not found gives a structured error, not a routing 404.
+        client = _make_client(storage_root, _make_runtime())
+        resp = client.post(
+            "/v1/sessions/sess_any/outbound",
+            json={"content": "hi"},
+        )
+        assert resp.json().get("error", {}).get("code") == "session_outbound_not_found"
+
+    def test_session_outbound_route_absent_without_runtime(self, storage_root: Path) -> None:
+        app = create_app(FileAuditLog(storage_root), storage_root=storage_root)
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post(
+            "/v1/sessions/sess_any/outbound",
+            json={"content": "hi"},
+        )
         assert resp.status_code == 404
         assert "error" not in resp.json()
