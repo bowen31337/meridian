@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/channel-drivers-system-generic-webhook-channel-driver-i/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/channel-drivers-system-discord-channel-driver-gateway-i/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
