@@ -11,13 +11,21 @@ from ._enforcer import NetworkEnforcer
 # Filesystem policy enforcement
 from ._fs_enforcer import FilesystemEnforcer
 from ._fs_gate import FilesystemGate
+
+# Worker pool (lifecycle: provision-on-first-use, warm pool, TTL reaper, on-demand)
+from ._pool import WorkerPool
 from ._proxy import OutboundProxyTransport
 
 # Runtime
 from ._runtime import EnvironmentRuntime, RuntimeOptions, default_runtime
 
 # Telemetry
-from ._telemetry import get_tracer, record_environment_failure, record_invocation_event
+from ._telemetry import (
+    get_tracer,
+    record_environment_failure,
+    record_invocation_event,
+    record_pool_event,
+)
 from ._types import (
     AgentFilesystemPolicy,
     AgentNetworkPolicy,
@@ -30,6 +38,8 @@ from ._types import (
     FilesystemViolation,
     NetworkPolicy,
     NetworkViolation,
+    PoolEvent,
+    PoolOptions,
     ProvisionRequest,
     ReclaimRequest,
     StructuredEvent,
@@ -51,6 +61,8 @@ __all__ = [
     "FilesystemViolation",
     "NetworkPolicy",
     "NetworkViolation",
+    "PoolEvent",
+    "PoolOptions",
     "ProvisionRequest",
     "ReclaimRequest",
     "StructuredEvent",
@@ -63,6 +75,7 @@ __all__ = [
     "get_tracer",
     "record_environment_failure",
     "record_invocation_event",
+    "record_pool_event",
     # Network policy
     "NetworkEnforcer",
     "OutboundProxyTransport",
@@ -73,6 +86,8 @@ __all__ = [
     "EnvironmentRuntime",
     "RuntimeOptions",
     "default_runtime",
+    # Pool (lifecycle)
+    "WorkerPool",
     # Version
     "ENVIRONMENT_SDK_VERSION",
 ]

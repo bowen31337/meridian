@@ -57,3 +57,13 @@ class EnvironmentDriver(ABC):
     @abstractmethod
     def capability_envelope(self) -> CapabilityEnvelope:
         """Return the resource limits and permission set this driver enforces."""
+
+    @property
+    def on_demand(self) -> bool:
+        """Return True for container/serverless backends that provision per tool-call.
+
+        When True, WorkerPool will provision → execute → reclaim inline for every
+        call rather than keeping the worker alive in the warm pool.
+        Defaults to False (pool-backed, provision-on-first-use).
+        """
+        return False

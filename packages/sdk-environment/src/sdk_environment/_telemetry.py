@@ -3,7 +3,7 @@ from __future__ import annotations
 from opentelemetry import trace
 from opentelemetry.trace import Span, Status, StatusCode
 
-from ._types import EnvironmentFailure, StructuredEvent
+from ._types import EnvironmentFailure, PoolEvent, StructuredEvent
 from ._version import ENVIRONMENT_SDK_VERSION
 
 _TRACER_NAME = "meridian.sdk-environment"
@@ -23,6 +23,18 @@ def record_invocation_event(span: Span, event: StructuredEvent) -> None:
         if isinstance(v, (str, int, float, bool)):
             attrs[k] = v
     span.add_event("environment.invocation", attrs)
+
+
+def record_pool_event(span: Span, event: PoolEvent) -> None:
+    """
+    Attaches a structured "environment.pool.event" event to a pool lifecycle span.
+    Called once per pool operation: provision_first_use, on_demand_provision, idle_reclaim.
+    """
+    attrs: dict[str, str | int | float | bool] = {}
+    for k, v in vars(event).items():
+        if isinstance(v, (str, int, float, bool)):
+            attrs[k] = v
+    span.add_event("environment.pool.event", attrs)
 
 
 def record_environment_failure(span: Span, failure: EnvironmentFailure) -> None:

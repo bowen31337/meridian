@@ -193,3 +193,24 @@ class StructuredEvent:
     session_id: str
     timestamp: str
     operation: str
+
+
+@dataclass(frozen=True)
+class PoolEvent:
+    """Structured event attached to pool lifecycle spans (provision-first-use, idle-reclaim, on-demand)."""
+
+    name: str
+    environment_id: str
+    environment_kind: str
+    session_id: str
+    timestamp: str
+    operation: str
+    reason: str | None = None
+
+
+@dataclass
+class PoolOptions:
+    """Configuration for WorkerPool lifecycle management."""
+
+    idle_ttl_seconds: int = 300
+    reap_interval_seconds: int = 60
