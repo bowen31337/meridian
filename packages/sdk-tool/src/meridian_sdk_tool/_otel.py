@@ -52,6 +52,30 @@ def record_tool_call_error(
     span.add_event("tool_call.error", attrs)
 
 
+def record_tool_call_result(
+    *,
+    stderr_tail: str | None = None,
+) -> None:
+    """Add a ``tool_call.result`` event to the active span.
+
+    Emitted on every successful subprocess invocation. When *stderr_tail* is
+    non-empty it is attached as ``subprocess.stderr_tail`` so operators can
+    inspect subprocess output from successful runs without needing to hit
+    crash-only paths.
+
+    Safe to call with no active span — degrades to a no-op when
+    opentelemetry-api is absent or no span is active in the current context.
+    """
+    if not _OTEL_AVAILABLE:
+        return
+
+    span = trace.get_current_span()
+    attrs: dict[str, str] = {}
+    if stderr_tail:
+        attrs["subprocess.stderr_tail"] = stderr_tail
+    span.add_event("tool_call.result", attrs)
+
+
 @asynccontextmanager
 async def tool_span(
     tool_name: str,

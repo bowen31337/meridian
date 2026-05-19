@@ -17,6 +17,7 @@ import json
 from typing import Any
 
 from ._execution import execute_tool
+from ._otel import record_tool_call_result
 from ._types import Capability, SubprocessHandler, ToolContext, ToolDefinition, ToolResult
 
 _MAX_STDERR_BYTES = 64 * 1024  # 64 KB cap per Architecture §11.2
@@ -89,12 +90,16 @@ async def _call_subprocess(path: str, args: Any, ctx: ToolContext, timeout_ms: i
             stderr_tail=stderr_text,
         ) from exc
 
+    # Capture stderr for debugging even on success — truncated to 64 KB
+    stderr_text = stderr[:_MAX_STDERR_BYTES].decode("utf-8", errors="replace")
+
     if "error" in response:
         err = response["error"]
         code = err.get("code", "subprocess_error")
         message = err.get("message", "unknown error from subprocess")
-        raise RuntimeError(f"{code}: {message}")
+        raise SubprocessCrashError(f"{code}: {message}", stderr_tail=stderr_text)
 
+    record_tool_call_result(stderr_tail=stderr_text or None)
     return response.get("result")
 
 

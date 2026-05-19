@@ -27,7 +27,7 @@ from opentelemetry.trace import StatusCode
 
 from meridian_sdk_tool import ToolContext, subprocess_tool
 from meridian_sdk_tool._execution import execute_tool
-from meridian_sdk_tool._otel import record_tool_call_error
+from meridian_sdk_tool._otel import record_tool_call_error, record_tool_call_result
 from meridian_sdk_tool._types import ToolDefinition, ToolError, ToolResult
 from meridian_sdk_tool.subprocess_tool import SubprocessCrashError
 
@@ -373,3 +373,216 @@ class TestSubprocessCrashIsolation:
         spans = otel_exporter.get_finished_spans()
         tool_span = next(s for s in spans if s.name == "tool.call")
         assert tool_span.status.status_code == StatusCode.ERROR
+
+
+# ---------------------------------------------------------------------------
+# record_tool_call_result unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestRecordToolCallResult:
+    def test_adds_tool_call_result_event(self, otel_exporter: InMemorySpanExporter) -> None:
+        import opentelemetry.trace as otel_trace
+
+        tracer = otel_trace.get_tracer("test")
+        with tracer.start_as_current_span("test.span"):
+            record_tool_call_result()
+
+        spans = otel_exporter.get_finished_spans()
+        assert len(spans) == 1
+        event_names = [e.name for e in spans[0].events]
+        assert "tool_call.result" in event_names
+
+    def test_event_contains_stderr_tail_when_provided(
+        self, otel_exporter: InMemorySpanExporter
+    ) -> None:
+        import opentelemetry.trace as otel_trace
+
+        tracer = otel_trace.get_tracer("test")
+        with tracer.start_as_current_span("test.span"):
+            record_tool_call_result(stderr_tail="some debug output")
+
+        spans = otel_exporter.get_finished_spans()
+        event = next(e for e in spans[0].events if e.name == "tool_call.result")
+        assert event.attributes["subprocess.stderr_tail"] == "some debug output"
+
+    def test_event_omits_stderr_tail_when_absent(
+        self, otel_exporter: InMemorySpanExporter
+    ) -> None:
+        import opentelemetry.trace as otel_trace
+
+        tracer = otel_trace.get_tracer("test")
+        with tracer.start_as_current_span("test.span"):
+            record_tool_call_result()
+
+        spans = otel_exporter.get_finished_spans()
+        event = next(e for e in spans[0].events if e.name == "tool_call.result")
+        assert "subprocess.stderr_tail" not in event.attributes
+
+    def test_no_active_span_does_not_raise(self) -> None:
+        record_tool_call_result(stderr_tail="some output")
+
+
+# ---------------------------------------------------------------------------
+# Success-path stderr capture — integration tests (real subprocesses)
+# ---------------------------------------------------------------------------
+
+
+def _write_noisy_success_script(tmp_path: Path) -> Path:
+    """Write a subprocess that writes to stderr but exits successfully."""
+    script = tmp_path / "noisy_tool.py"
+    script.write_text(
+        textwrap.dedent(f"""\
+            #!{sys.executable}
+            import json, sys
+            sys.stderr.write("debug output from subprocess\\n")
+            sys.stderr.flush()
+            _ = sys.stdin.read()
+            sys.stdout.write(json.dumps({{"result": "ok"}}))
+            sys.stdout.flush()
+        """)
+    )
+    script.chmod(0o755)
+    return script
+
+
+class TestSubprocessSuccessStderr:
+    @pytest.mark.anyio
+    async def test_success_emits_tool_call_result_otel_event(
+        self, tmp_path: Path, otel_exporter: InMemorySpanExporter
+    ) -> None:
+        script = _write_noisy_success_script(tmp_path)
+        tool = subprocess_tool(
+            name="noisy",
+            description="writes stderr on success",
+            path=str(script),
+            input_schema={"type": "object"},
+            timeout_ms=5_000,
+        )
+
+        result = await tool.execute({}, _CTX)
+        assert not result.is_error, result.error
+
+        spans = otel_exporter.get_finished_spans()
+        assert spans, "expected at least one OTel span"
+        found = next((s for s in spans if s.name == "tool.call"), None)
+        assert found is not None
+        event_names = [e.name for e in found.events]
+        assert "tool_call.result" in event_names
+
+    @pytest.mark.anyio
+    async def test_success_otel_event_has_stderr_tail(
+        self, tmp_path: Path, otel_exporter: InMemorySpanExporter
+    ) -> None:
+        script = _write_noisy_success_script(tmp_path)
+        tool = subprocess_tool(
+            name="noisy",
+            description="writes stderr on success",
+            path=str(script),
+            input_schema={"type": "object"},
+            timeout_ms=5_000,
+        )
+
+        await tool.execute({}, _CTX)
+
+        spans = otel_exporter.get_finished_spans()
+        found = next(s for s in spans if s.name == "tool.call")
+        event = next(e for e in found.events if e.name == "tool_call.result")
+        assert "subprocess.stderr_tail" in event.attributes
+        assert "debug output from subprocess" in event.attributes["subprocess.stderr_tail"]
+
+    @pytest.mark.anyio
+    async def test_success_with_empty_stderr_emits_event_without_stderr_tail(
+        self, tmp_path: Path, otel_exporter: InMemorySpanExporter
+    ) -> None:
+        script = tmp_path / "quiet_tool.py"
+        script.write_text(
+            textwrap.dedent(f"""\
+                #!{sys.executable}
+                import json, sys
+                _ = sys.stdin.read()
+                sys.stdout.write(json.dumps({{"result": "ok"}}))
+                sys.stdout.flush()
+            """)
+        )
+        script.chmod(0o755)
+        tool = subprocess_tool(
+            name="quiet",
+            description="no stderr",
+            path=str(script),
+            input_schema={"type": "object"},
+            timeout_ms=5_000,
+        )
+
+        result = await tool.execute({}, _CTX)
+        assert not result.is_error, result.error
+
+        spans = otel_exporter.get_finished_spans()
+        found = next(s for s in spans if s.name == "tool.call")
+        event = next((e for e in found.events if e.name == "tool_call.result"), None)
+        assert event is not None, "tool_call.result event should always be emitted on success"
+        assert "subprocess.stderr_tail" not in event.attributes
+
+    @pytest.mark.anyio
+    async def test_application_error_response_has_stderr_in_details(
+        self, tmp_path: Path
+    ) -> None:
+        """Subprocess returning {"error": ...} includes stderr_tail in error details."""
+        script = tmp_path / "app_error_tool.py"
+        script.write_text(
+            textwrap.dedent(f"""\
+                #!{sys.executable}
+                import json, sys
+                sys.stderr.write("app error context\\n")
+                sys.stderr.flush()
+                _ = sys.stdin.read()
+                sys.stdout.write(json.dumps({{"error": {{"code": "not_found", "message": "item missing"}}}}))
+                sys.stdout.flush()
+            """)
+        )
+        script.chmod(0o755)
+        tool = subprocess_tool(
+            name="app_err",
+            description="returns structured error",
+            path=str(script),
+            input_schema={"type": "object"},
+            timeout_ms=5_000,
+        )
+
+        result = await tool.execute({}, _CTX)
+        assert result.is_error
+        assert result.error is not None
+        assert "stderr_tail" in result.error.details
+        assert "app error context" in result.error.details["stderr_tail"]
+
+    @pytest.mark.anyio
+    async def test_application_error_response_writes_audit_log(
+        self, tmp_path: Path
+    ) -> None:
+        """Subprocess returning {"error": ...} writes to the audit log."""
+        script = tmp_path / "app_error_tool2.py"
+        script.write_text(
+            textwrap.dedent(f"""\
+                #!{sys.executable}
+                import json, sys
+                _ = sys.stdin.read()
+                sys.stdout.write(json.dumps({{"error": {{"code": "bad_state", "message": "oops"}}}}))
+                sys.stdout.flush()
+            """)
+        )
+        script.chmod(0o755)
+        audit_path = tmp_path / "audit.ndjson"
+        tool = subprocess_tool(
+            name="app_err2",
+            description="returns structured error",
+            path=str(script),
+            input_schema={"type": "object"},
+            timeout_ms=5_000,
+            audit_log_path=str(audit_path),
+        )
+
+        await tool.execute({}, _CTX)
+        assert audit_path.exists()
+        record = json.loads(audit_path.read_text().strip())
+        assert record["tool_name"] == "app_err2"
+        assert "execution_failed" in record["type"]
