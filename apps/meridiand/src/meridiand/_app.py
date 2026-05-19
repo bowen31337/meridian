@@ -39,6 +39,7 @@ from ._system_channel import make_system_channel_router
 from ._skill_activations import make_skill_activations_router
 from ._skills import make_skills_router
 from ._user_profiles import make_user_profiles_router
+from ._hooks import make_hooks_router
 from ._webhooks import make_webhooks_router
 from ._events import make_events_router
 from ._files import make_files_router
@@ -254,6 +255,9 @@ def create_app(
                 )
                 app.include_router(
                     make_cron_router(audit_log=audit_log, storage_root=storage_root)
+                )
+                app.include_router(
+                    make_hooks_router(audit_log=audit_log, storage_root=storage_root)
                 )
                 app.include_router(
                     make_webhooks_router(audit_log=audit_log, storage_root=storage_root)

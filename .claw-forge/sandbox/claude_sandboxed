@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/testing-conform-system-integration-test-full-post-v1-se/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/lifecycle-hooks-api-post-v1-x-hooks-registers-a-hookbin/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
