@@ -6,6 +6,7 @@ from ._audit import AuditLog, NoopAuditLog
 from ._contract import EnvironmentDriver
 
 # Built-in drivers
+from ._docker_driver import DockerBackendDriver
 from ._http_driver import HttpBackendDriver, VaultCredentialResolver
 from ._mcp_driver import McpBackendDriver
 from ._ssh_driver import SshBackendDriver
@@ -55,6 +56,7 @@ from ._version import ENVIRONMENT_SDK_VERSION
 
 __all__ = [
     # Built-in drivers
+    "DockerBackendDriver",
     "HttpBackendDriver",
     "McpBackendDriver",
     "SshBackendDriver",
