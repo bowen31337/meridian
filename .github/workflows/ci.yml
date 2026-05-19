@@ -63,6 +63,13 @@ jobs:
             exit 1
           }
 
+      - name: provider-imports
+        run: |
+          uv run python scripts/check-provider-imports.py || {
+            echo "::error::STAGE FAILED: provider-imports — move provider SDK calls behind the sdk-provider abstraction layer"
+            exit 1
+          }
+
       - name: biome check
         run: |
           node_modules/.bin/biome check . || {

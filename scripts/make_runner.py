@@ -52,6 +52,12 @@ _LINT_STEPS: list[_Step] = [
         "fix import boundary violations shown above",
     ),
     (
+        "lint:provider-imports",
+        ["uv", "run", "python", "scripts/check-provider-imports.py"],
+        None,
+        "move provider SDK calls behind the sdk-provider abstraction layer",
+    ),
+    (
         "lint:db-imports",
         ["uv", "run", "python", "scripts/check-db-imports.py"],
         None,
