@@ -11,6 +11,9 @@ from ._local import LocalEventLogWriter
 # Runtime
 from ._runtime import EventLogOptions, EventLogRuntime
 
+# Subscriber bus (in-process fan-out for live SSE)
+from ._subscriber_bus import SUBSCRIBER_CHANNEL_SIZE, SubscriberBus
+
 # Telemetry
 from ._telemetry import get_tracer, record_event_log_failure, record_fsync_event, record_invocation_event
 from ._types import (
@@ -37,6 +40,9 @@ __all__ = [
     "EventLogWriter",
     # Local implementation
     "LocalEventLogWriter",
+    # Subscriber bus
+    "SUBSCRIBER_CHANNEL_SIZE",
+    "SubscriberBus",
     # Audit
     "AuditLog",
     "NoopAuditLog",

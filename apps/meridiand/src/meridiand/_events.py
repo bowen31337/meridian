@@ -17,7 +17,7 @@ from core_errors import (
 )
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from storage_event_log import SessionEvent
+from storage_event_log import SUBSCRIBER_CHANNEL_SIZE, SessionEvent, SubscriberBus
 from storage_reposit import LocalEventLogReader
 
 
@@ -76,7 +76,12 @@ def _format_sse(event: SessionEvent) -> str:
 # ---------------------------------------------------------------------------
 
 
-def make_events_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
+def make_events_router(
+    *,
+    audit_log: AuditLog,
+    storage_root: Path,
+    subscriber_bus: SubscriberBus | None = None,
+) -> APIRouter:
     router = APIRouter()
 
     @router.get("/v1/sessions/{session_id}/events")
@@ -116,6 +121,91 @@ def make_events_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                     ),
                 )
 
+            if subscriber_bus is not None:
+                # Live streaming: subscribe first, replay history from disk, then
+                # follow the in-process queue.  The harness never blocks: if the
+                # queue fills up the subscriber is dropped with a subscriber_lagged
+                # sentinel and this generator terminates.
+                queue = subscriber_bus.subscribe(session_id)
+
+                async def _sse_live() -> AsyncIterator[str]:
+                    try:
+                        reader = LocalEventLogReader(storage_root)
+                        watermark = effective_since
+                        try:
+                            async for event in reader.read_events(
+                                session_id, effective_since, follow=False
+                            ):
+                                if type_set is None or event.type in type_set:
+                                    yield _format_sse(event)
+                                watermark = event.seq
+                        except Exception as exc:
+                            err = SessionEventsError(
+                                message=f"Failed to stream events for session {session_id!r}: {exc}",
+                                timestamp=_now(),
+                                cause=exc,
+                            )
+                            audit_log.write(
+                                AuditLogEntry(
+                                    level="error",
+                                    event="session.events.stream.failed",
+                                    code=err.code,
+                                    timestamp=err.timestamp,
+                                    detail={
+                                        "session_id": session_id,
+                                        "since": effective_since,
+                                        "message": err.message,
+                                    },
+                                )
+                            )
+                            error_data = json.dumps({"code": err.code, "message": err.message})
+                            yield f"event: error\ndata: {error_data}\n\n"
+                            return
+
+                        # Follow live events from the in-process queue.
+                        while True:
+                            item = await queue.get()
+                            if item is None:
+                                # Subscriber was dropped because the queue overflowed.
+                                # Durable log is the truth; client must re-subscribe.
+                                err_ts = _now()
+                                audit_log.write(
+                                    AuditLogEntry(
+                                        level="warn",
+                                        event="session.events.stream.subscriber_lagged",
+                                        code="subscriber_lagged",
+                                        timestamp=err_ts,
+                                        detail={
+                                            "session_id": session_id,
+                                            "since": effective_since,
+                                            "capacity": SUBSCRIBER_CHANNEL_SIZE,
+                                        },
+                                    )
+                                )
+                                lagged_data = json.dumps({
+                                    "code": "subscriber_lagged",
+                                    "message": (
+                                        f"Subscriber dropped: in-process queue overflowed "
+                                        f"(capacity={SUBSCRIBER_CHANNEL_SIZE}). "
+                                        "Re-subscribe using the last received seq as since."
+                                    ),
+                                })
+                                yield f"event: subscriber_lagged\ndata: {lagged_data}\n\n"
+                                return
+
+                            event: SessionEvent = item
+                            if event.seq <= watermark:
+                                # Already delivered during history replay; skip.
+                                continue
+                            watermark = event.seq
+                            if type_set is None or event.type in type_set:
+                                yield _format_sse(event)
+                    finally:
+                        subscriber_bus.unsubscribe(session_id, queue)
+
+                return StreamingResponse(_sse_live(), media_type="text/event-stream")  # type: ignore[return-value]
+
+            # No subscriber bus: historical-only streaming (original behaviour).
             async def _sse() -> AsyncIterator[str]:
                 reader = LocalEventLogReader(storage_root)
                 try:

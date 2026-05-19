@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from meridian_plugin_loader import PluginLoader
-from storage_event_log import EventLogWriter
+from storage_event_log import EventLogWriter, SubscriberBus
 
 from meridian_sdk_provider import ModelRouter
 from sdk_channel import ChannelRuntime
@@ -90,6 +90,7 @@ def create_app(
     secret_resolver: SecretResolver | None = None,
     vault_backend: EncryptedFileVaultBackend | None = None,
     os_keychain_backend: OsKeychainVaultBackend | None = None,
+    subscriber_bus: SubscriberBus | None = None,
 ) -> FastAPI:
     """
     Application factory for the meridiand HTTP API.
@@ -225,7 +226,11 @@ def create_app(
                     make_files_router(audit_log=audit_log, storage_root=storage_root)
                 )
                 app.include_router(
-                    make_events_router(audit_log=audit_log, storage_root=storage_root)
+                    make_events_router(
+                        audit_log=audit_log,
+                        storage_root=storage_root,
+                        subscriber_bus=subscriber_bus,
+                    )
                 )
                 app.include_router(
                     make_replay_router(audit_log=audit_log, storage_root=storage_root)

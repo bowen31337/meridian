@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/harness-run-loo-system-harness-run-loop-iterates-while/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/sessions-event--system-sse-backpressure-bounded-in-proc/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

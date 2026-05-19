@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ._contract import EventLogWriter
+from ._subscriber_bus import SubscriberBus
 from ._telemetry import get_tracer, record_event_log_failure, record_fsync_event
 from ._types import EventLogFailure, EventType, FsyncPolicy, SessionEvent, StructuredEvent
 
@@ -36,12 +37,19 @@ class LocalEventLogWriter(EventLogWriter):
     span is marked ERROR.
     """
 
-    def __init__(self, storage_root: str | Path, *, fsync_policy: FsyncPolicy | None = None) -> None:
+    def __init__(
+        self,
+        storage_root: str | Path,
+        *,
+        fsync_policy: FsyncPolicy | None = None,
+        subscriber_bus: SubscriberBus | None = None,
+    ) -> None:
         self._root = Path(storage_root)
         self._seq: dict[str, int] = {}
         self._fsync_policy: FsyncPolicy = fsync_policy or FsyncPolicy()
         self._events_since_fsync: int = 0
         self._last_fsync_mono: float = time.monotonic()
+        self._bus = subscriber_bus
 
     def _validate_session_id(self, session_id: str, timestamp: str) -> None:
         if not session_id or "/" in session_id or "\\" in session_id or ".." in session_id:
@@ -144,5 +152,10 @@ class LocalEventLogWriter(EventLogWriter):
                 self._do_fsync(fd, session_id, timestamp)
         finally:
             os.close(fd)
+
+        # Fan out to live subscribers after the durable write succeeds.
+        # Non-blocking: overflow drops the subscriber rather than blocking the harness.
+        if self._bus is not None:
+            self._bus.publish(session_id, event)
 
         return seq
