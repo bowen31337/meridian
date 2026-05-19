@@ -5,6 +5,9 @@ from ._audit import AuditLog, NoopAuditLog
 # Contract
 from ._contract import EnvironmentDriver
 
+# Built-in drivers
+from ._http_driver import HttpBackendDriver, VaultCredentialResolver
+
 # Network policy enforcement
 from ._enforcer import NetworkEnforcer
 
@@ -49,6 +52,9 @@ from ._types import (
 from ._version import ENVIRONMENT_SDK_VERSION
 
 __all__ = [
+    # Built-in drivers
+    "HttpBackendDriver",
+    "VaultCredentialResolver",
     # Types
     "AgentFilesystemPolicy",
     "AgentNetworkPolicy",
