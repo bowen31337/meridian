@@ -49,6 +49,7 @@ from ._parallel_runs import make_parallel_runs_router
 from ._phase import make_phase_router
 from ._replay import make_replay_router
 from ._resume import make_resume_router
+from ._sessions import make_sessions_router
 from ._wake import make_wake_router
 from ._auth_middleware import AuthMiddleware
 from ._cursor_middleware import CursorPaginationMiddleware
@@ -209,6 +210,9 @@ def create_app(
             app.include_router(make_openapi_export_router(audit_log=audit_log))
 
             if storage_root is not None:
+                app.include_router(
+                    make_sessions_router(audit_log=audit_log, storage_root=storage_root)
+                )
                 app.include_router(
                     make_files_router(audit_log=audit_log, storage_root=storage_root)
                 )
