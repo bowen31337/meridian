@@ -15,7 +15,7 @@ from core_errors import (
     record_error,
     record_invocation_event,
 )
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
@@ -120,6 +120,80 @@ class VaultListError(MeridianError):
         return 500
 
 
+class VaultSecretStoreError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="vault_secret_store_failed",
+            message=message,
+            timestamp=timestamp,
+            cause=cause,
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
+class VaultSecretInvalidRequestError(MeridianError):
+    def __init__(self, *, message: str, timestamp: str) -> None:
+        super().__init__(
+            code="vault_secret_invalid_request",
+            message=message,
+            timestamp=timestamp,
+        )
+
+    def http_status(self) -> int:
+        return 422
+
+
+class VaultSecretConflictError(MeridianError):
+    def __init__(self, *, vault_id: str, key: str, timestamp: str) -> None:
+        super().__init__(
+            code="vault_secret_conflict",
+            message=f"Secret '{key}' already exists in vault '{vault_id}'",
+            timestamp=timestamp,
+        )
+
+    def http_status(self) -> int:
+        return 409
+
+
+class VaultSecretNotFoundError(MeridianError):
+    def __init__(self, *, vault_id: str, name: str, timestamp: str) -> None:
+        super().__init__(
+            code="vault_secret_not_found",
+            message=f"Secret '{name}' not found in vault '{vault_id}'",
+            timestamp=timestamp,
+        )
+
+    def http_status(self) -> int:
+        return 404
+
+
+class VaultSecretMetaError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="vault_secret_meta_failed",
+            message=message,
+            timestamp=timestamp,
+            cause=cause,
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
 # ---------------------------------------------------------------------------
 # Request model
 # ---------------------------------------------------------------------------
@@ -136,6 +210,22 @@ def _validate_request(body: VaultCreateRequest) -> VaultInvalidRequestError | No
     if not body.name.strip():
         return VaultInvalidRequestError(
             message="'name' must not be empty",
+            timestamp=_now(),
+        )
+    return None
+
+
+class VaultSecretStoreRequest(BaseModel):
+    key: str
+    value: str
+
+
+def _validate_secret_request(
+    body: VaultSecretStoreRequest,
+) -> VaultSecretInvalidRequestError | None:
+    if not body.key.strip():
+        return VaultSecretInvalidRequestError(
+            message="'key' must not be empty",
             timestamp=_now(),
         )
     return None
@@ -371,5 +461,196 @@ def make_vaults_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                 raise err2 from exc
 
         return Response(status_code=204)
+
+    @router.post("/v1/vaults/{vault_id}/secrets", status_code=201)
+    async def store_secret(
+        vault_id: str, body: VaultSecretStoreRequest
+    ) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "vault.secret.store",
+            attributes={"vault.id": vault_id, "secret.key": body.key},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="vault.secret.store.invocation",
+                    code="vault_secret_store",
+                    timestamp=now,
+                ),
+            )
+
+            secret_record: dict[str, Any] = {}
+            try:
+                vault_file = vaults_dir / f"{vault_id}.json"
+                if not vault_file.exists():
+                    raise VaultNotFoundError(vault_id=vault_id, timestamp=now)
+
+                validation_err = _validate_secret_request(body)
+                if validation_err is not None:
+                    raise validation_err
+
+                secrets_dir = vaults_dir / vault_id / "secrets"
+                secret_file = secrets_dir / f"{body.key}.json"
+                if secret_file.exists():
+                    raise VaultSecretConflictError(
+                        vault_id=vault_id, key=body.key, timestamp=now
+                    )
+
+                secrets_dir.mkdir(parents=True, exist_ok=True)
+                secret_record = {
+                    "vault_id": vault_id,
+                    "key": body.key,
+                    "value": body.value,
+                    "created_at": now,
+                    "last_accessed_at": None,
+                    "requester_counts": {},
+                }
+                secret_file.write_text(json.dumps(secret_record))
+
+            except (
+                VaultNotFoundError,
+                VaultSecretInvalidRequestError,
+                VaultSecretConflictError,
+            ) as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="vault.secret.store.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "vault_id": vault_id,
+                            "key": body.key,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = VaultSecretStoreError(
+                    message=f"Failed to store secret: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="vault.secret.store.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={
+                            "vault_id": vault_id,
+                            "key": body.key,
+                            "message": err2.message,
+                        },
+                    )
+                )
+                raise err2
+
+        return JSONResponse(
+            content={
+                "vault_id": secret_record["vault_id"],
+                "key": secret_record["key"],
+                "created_at": secret_record["created_at"],
+            },
+            status_code=201,
+        )
+
+    @router.get("/v1/vaults/{vault_id}/secrets/{name}/meta", status_code=200)
+    async def get_secret_meta(
+        vault_id: str, name: str, request: Request
+    ) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+        requester = (
+            request.client.host if request.client else None
+        ) or "unknown"
+
+        with tracer.start_as_current_span(
+            "vault.secret.meta",
+            attributes={"vault.id": vault_id, "secret.key": name},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="vault.secret.meta.invocation",
+                    code="vault_secret_meta",
+                    timestamp=now,
+                ),
+            )
+
+            meta: dict[str, Any] = {}
+            try:
+                vault_file = vaults_dir / f"{vault_id}.json"
+                if not vault_file.exists():
+                    raise VaultNotFoundError(vault_id=vault_id, timestamp=now)
+
+                secret_file = vaults_dir / vault_id / "secrets" / f"{name}.json"
+                if not secret_file.exists():
+                    raise VaultSecretNotFoundError(
+                        vault_id=vault_id, name=name, timestamp=now
+                    )
+
+                record = json.loads(secret_file.read_text())
+                record["last_accessed_at"] = now
+                counts: dict[str, int] = record.get("requester_counts") or {}
+                counts[requester] = counts.get(requester, 0) + 1
+                record["requester_counts"] = counts
+                secret_file.write_text(json.dumps(record))
+
+                meta = {
+                    "vault_id": vault_id,
+                    "key": record["key"],
+                    "created_at": record["created_at"],
+                    "last_accessed_at": record["last_accessed_at"],
+                    "requester_counts": record["requester_counts"],
+                }
+
+            except (VaultNotFoundError, VaultSecretNotFoundError) as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="vault.secret.meta.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "vault_id": vault_id,
+                            "name": name,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = VaultSecretMetaError(
+                    message=f"Failed to get secret metadata: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="vault.secret.meta.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={
+                            "vault_id": vault_id,
+                            "name": name,
+                            "message": err2.message,
+                        },
+                    )
+                )
+                raise err2
+
+        return JSONResponse(content=meta, status_code=200)
 
     return router
