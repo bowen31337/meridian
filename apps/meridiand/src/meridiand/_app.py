@@ -36,6 +36,7 @@ from ._skill_forge import run_skill_forge_loop
 from ._agents import make_agents_router
 from ._channels import make_channels_router
 from ._system_channel import make_system_channel_router
+from ._webhook_channel_driver import SecretResolver
 from ._skill_activations import make_skill_activations_router
 from ._skill_suggestions import make_skill_suggestions_router
 from ._skills import make_skills_router
@@ -84,6 +85,7 @@ def create_app(
     skill_forge: SkillForgeConfig | None = None,
     auth_config: AuthConfig | None = None,
     channel_runtime: ChannelRuntime | None = None,
+    secret_resolver: SecretResolver | None = None,
 ) -> FastAPI:
     """
     Application factory for the meridiand HTTP API.
@@ -284,6 +286,7 @@ def create_app(
                             audit_log=audit_log,
                             storage_root=storage_root,
                             channel_runtime=channel_runtime,
+                            secret_resolver=secret_resolver,
                         )
                     )
                 app.include_router(

@@ -18,6 +18,8 @@ Instrumentation:
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import uuid
 from datetime import UTC, datetime
@@ -33,7 +35,7 @@ from core_errors import (
     record_error,
     record_invocation_event,
 )
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sdk_channel import (
@@ -43,6 +45,8 @@ from sdk_channel import (
     RuntimeOptions,
     SendRequest,
 )
+
+from ._webhook_channel_driver import SecretResolver, NoopSecretResolver, _sign_payload
 
 
 def _now() -> str:
@@ -164,9 +168,33 @@ class ChannelOutboundError(MeridianError):
         return 500
 
 
+class ChannelInboundHmacError(MeridianError):
+    def __init__(self, *, channel_id: str, timestamp: str) -> None:
+        super().__init__(
+            code="channel_inbound_hmac_invalid",
+            message=f"HMAC signature verification failed for channel '{channel_id}'",
+            timestamp=timestamp,
+        )
+
+    def http_status(self) -> int:
+        return 401
+
+
 # ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
+
+
+def _check_hmac_signature(raw_body: bytes, secret: str, signature_header: str | None) -> bool:
+    """Return True if signature_header is a valid sha256 HMAC of raw_body."""
+    if signature_header is None:
+        return False
+    prefix = "sha256="
+    if not signature_header.startswith(prefix):
+        return False
+    provided = signature_header[len(prefix):]
+    expected = _sign_payload(raw_body, secret)
+    return hmac.compare_digest(provided.encode(), expected.encode())
 
 
 class RedeemPairingTokenRequest(BaseModel):
@@ -196,8 +224,10 @@ def make_system_channel_router(
     audit_log: AuditLog,
     storage_root: Path,
     channel_runtime: ChannelRuntime,
+    secret_resolver: SecretResolver | None = None,
 ) -> APIRouter:
     router = APIRouter()
+    _resolver: SecretResolver = secret_resolver if secret_resolver is not None else NoopSecretResolver()
 
     channels_dir = storage_root / "channels"
     pairing_tokens_dir = storage_root / "pairing_tokens"
@@ -307,7 +337,7 @@ def make_system_channel_router(
 
     @router.post("/v1/channels/{channel_id}/inbound", status_code=200)
     async def channel_inbound(
-        channel_id: str, body: InboundMessageRequest
+        channel_id: str, body: InboundMessageRequest, request: Request
     ) -> JSONResponse:
         now = _now()
         tracer = get_tracer()
@@ -334,6 +364,20 @@ def make_system_channel_router(
                     raise ChannelInboundNotFoundError(channel_id=channel_id, timestamp=now)
 
                 channel: dict[str, Any] = json.loads(channel_file.read_text())
+
+                # HMAC verification for webhook channels with hmac_secret_ref configured.
+                if channel.get("kind") == "meridian.webhook":
+                    hmac_secret_ref: str | None = channel.get("config", {}).get("hmac_secret_ref")
+                    if hmac_secret_ref is not None:
+                        secret = _resolver.resolve(hmac_secret_ref)
+                        if secret is not None:
+                            raw_body = await request.body()
+                            sig_header = request.headers.get("X-Meridian-Signature")
+                            if not _check_hmac_signature(raw_body, secret, sig_header):
+                                raise ChannelInboundHmacError(
+                                    channel_id=channel_id, timestamp=now
+                                )
+
                 inbound_policy: str = channel.get("inbound_policy", "open")
 
                 user_profile_id: str | None = None
@@ -383,7 +427,7 @@ def make_system_channel_router(
                 }
                 (s_dir / f"{session_id}.json").write_text(json.dumps(session_record))
 
-            except ChannelInboundNotFoundError as err:
+            except (ChannelInboundNotFoundError, ChannelInboundHmacError) as err:
                 record_error(span, err)
                 audit_log.write(
                     AuditLogEntry(
