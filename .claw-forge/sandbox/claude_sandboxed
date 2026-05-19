@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/storage-reposit-system-migration-0001-creates-agents-ag/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/yaml-configurat-system-command-meridianconfig-validate/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
