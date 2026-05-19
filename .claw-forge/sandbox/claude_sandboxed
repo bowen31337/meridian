@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/vaults-credenti-api-post-v1-vaults-id-secrets-stores-a/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/vaults-credenti-system-encrypted-file-vault-backend-age/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

@@ -19,6 +19,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
+from ._vault_backend_encrypted_file import EncryptedFileVaultBackend
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -268,7 +270,12 @@ def _vault_is_referenced(vault_id: str, storage_root: Path) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def make_vaults_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
+def make_vaults_router(
+    *,
+    audit_log: AuditLog,
+    storage_root: Path,
+    vault_backend: EncryptedFileVaultBackend | None = None,
+) -> APIRouter:
     router = APIRouter()
     vaults_dir = storage_root / "vaults"
 
@@ -492,23 +499,38 @@ def make_vaults_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                 if validation_err is not None:
                     raise validation_err
 
-                secrets_dir = vaults_dir / vault_id / "secrets"
-                secret_file = secrets_dir / f"{body.key}.json"
-                if secret_file.exists():
-                    raise VaultSecretConflictError(
-                        vault_id=vault_id, key=body.key, timestamp=now
+                vault_meta = json.loads(vault_file.read_text())
+                if vault_meta.get("backend") == "encrypted_file":
+                    if vault_backend is None:
+                        raise VaultSecretStoreError(
+                            message="encrypted_file backend is not configured; "
+                            "start the daemon with a passphrase or key file",
+                            timestamp=now,
+                        )
+                    if vault_backend.secret_exists(vault_id, body.key):
+                        raise VaultSecretConflictError(
+                            vault_id=vault_id, key=body.key, timestamp=now
+                        )
+                    secret_record = vault_backend.store_secret(
+                        vault_id, body.key, body.value, now
                     )
-
-                secrets_dir.mkdir(parents=True, exist_ok=True)
-                secret_record = {
-                    "vault_id": vault_id,
-                    "key": body.key,
-                    "value": body.value,
-                    "created_at": now,
-                    "last_accessed_at": None,
-                    "requester_counts": {},
-                }
-                secret_file.write_text(json.dumps(secret_record))
+                else:
+                    secrets_dir = vaults_dir / vault_id / "secrets"
+                    secret_file = secrets_dir / f"{body.key}.json"
+                    if secret_file.exists():
+                        raise VaultSecretConflictError(
+                            vault_id=vault_id, key=body.key, timestamp=now
+                        )
+                    secrets_dir.mkdir(parents=True, exist_ok=True)
+                    secret_record = {
+                        "vault_id": vault_id,
+                        "key": body.key,
+                        "value": body.value,
+                        "created_at": now,
+                        "last_accessed_at": None,
+                        "requester_counts": {},
+                    }
+                    secret_file.write_text(json.dumps(secret_record))
 
             except (
                 VaultNotFoundError,
@@ -591,18 +613,37 @@ def make_vaults_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                 if not vault_file.exists():
                     raise VaultNotFoundError(vault_id=vault_id, timestamp=now)
 
-                secret_file = vaults_dir / vault_id / "secrets" / f"{name}.json"
-                if not secret_file.exists():
-                    raise VaultSecretNotFoundError(
-                        vault_id=vault_id, name=name, timestamp=now
-                    )
-
-                record = json.loads(secret_file.read_text())
-                record["last_accessed_at"] = now
-                counts: dict[str, int] = record.get("requester_counts") or {}
-                counts[requester] = counts.get(requester, 0) + 1
-                record["requester_counts"] = counts
-                secret_file.write_text(json.dumps(record))
+                vault_meta = json.loads(vault_file.read_text())
+                if vault_meta.get("backend") == "encrypted_file":
+                    if vault_backend is None:
+                        raise VaultSecretMetaError(
+                            message="encrypted_file backend is not configured; "
+                            "start the daemon with a passphrase or key file",
+                            timestamp=now,
+                        )
+                    enc_record = vault_backend.get_secret(vault_id, name)
+                    if enc_record is None:
+                        raise VaultSecretNotFoundError(
+                            vault_id=vault_id, name=name, timestamp=now
+                        )
+                    record: dict[str, Any] = dict(enc_record)
+                    record["last_accessed_at"] = now
+                    counts: dict[str, int] = dict(record.get("requester_counts") or {})
+                    counts[requester] = counts.get(requester, 0) + 1
+                    record["requester_counts"] = counts
+                    vault_backend.update_secret(vault_id, name, record)
+                else:
+                    secret_file = vaults_dir / vault_id / "secrets" / f"{name}.json"
+                    if not secret_file.exists():
+                        raise VaultSecretNotFoundError(
+                            vault_id=vault_id, name=name, timestamp=now
+                        )
+                    record = json.loads(secret_file.read_text())
+                    record["last_accessed_at"] = now
+                    counts = record.get("requester_counts") or {}
+                    counts[requester] = counts.get(requester, 0) + 1
+                    record["requester_counts"] = counts
+                    secret_file.write_text(json.dumps(record))
 
                 meta = {
                     "vault_id": vault_id,
