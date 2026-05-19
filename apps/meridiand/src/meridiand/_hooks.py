@@ -42,6 +42,7 @@ class FailureMode(str, Enum):
     ignore = "ignore"
     warn = "warn"
     abort = "abort"
+    block = "block"
 
 
 # ---------------------------------------------------------------------------

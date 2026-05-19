@@ -134,6 +134,11 @@ class TestHookCreateSuccess:
         resp = client.post("/v1/x/hooks", json=_body(failure_mode="abort"))
         assert resp.status_code == 201
 
+    def test_failure_mode_block_returns_201(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/hooks", json=_body(failure_mode="block"))
+        assert resp.status_code == 201
+
 
 # ---------------------------------------------------------------------------
 # Response fields
