@@ -13,7 +13,7 @@ from core_errors import AuditLogEntry, StructuredEvent, record_invocation_event
 from storage_repository import RepositoryFailure, SqliteRepositoryDriver
 
 from ._app import create_app
-from ._config import DEFAULT_CONFIG_PATH, load_config
+from ._config import load_config, resolve_config_location
 from ._services import init_services
 from ._telemetry import get_tracer, record_daemon_failure, record_daemon_start_event
 
@@ -39,10 +39,20 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         metavar="PATH",
-        help=f"Path to YAML config file (default: {DEFAULT_CONFIG_PATH})",
+        help=(
+            "Path to YAML config file. "
+            "When omitted, searched in order: $MERIDIAN_CONFIG, "
+            "~/.meridian/config.yml, /etc/meridian/config.yml"
+        ),
     )
     args = parser.parse_args(argv)
-    config_path: Path = args.config or DEFAULT_CONFIG_PATH
+    config_path: Path | None = args.config
+    if config_path is None:
+        try:
+            config_path = resolve_config_location()
+        except Exception as exc:
+            print(f"meridiand: config location error: {exc}", file=sys.stderr)
+            return 1
 
     try:
         config = load_config(config_path)

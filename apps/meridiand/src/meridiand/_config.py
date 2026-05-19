@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -19,6 +20,10 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 DEFAULT_CONFIG_PATH = Path.home() / ".meridian" / "config.yaml"
 DEFAULT_SOCKET_PATH = Path.home() / ".meridian" / "meridiand.sock"
 MERIDIAN_CONFIG_VERSION = 2
+
+_MERIDIAN_CONFIG_ENV = "MERIDIAN_CONFIG"
+_USER_CONFIG_PATH = Path.home() / ".meridian" / "config.yml"
+SYSTEM_CONFIG_PATH = Path("/etc/meridian/config.yml")
 
 _DEFAULT_CORS_METHODS = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 _DEFAULT_CORS_HEADERS = ["*"]
@@ -63,6 +68,22 @@ class ConfigValidateError(MeridianError):
     ) -> None:
         super().__init__(
             code="config_validate_failed",
+            message=message,
+            timestamp=timestamp,
+            cause=cause,
+        )
+
+
+class ConfigResolveError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="config_resolve_failed",
             message=message,
             timestamp=timestamp,
             cause=cause,
@@ -259,6 +280,77 @@ def load_config(path: Path, audit_log: AuditLog | None = None) -> MeridianConfig
                         "path": str(path),
                         "message": str(exc),
                     },
+                )
+            )
+            raise err
+
+
+def resolve_config_location(audit_log: AuditLog | None = None) -> Path:
+    """Return the config file path using first-match order:
+    $MERIDIAN_CONFIG → ~/.meridian/config.yml → /etc/meridian/config.yml.
+
+    If $MERIDIAN_CONFIG is set but the path does not exist the search stops
+    and ConfigResolveError is raised — it does not fall through.
+    """
+    _audit = audit_log if audit_log is not None else NoopAuditLog()
+    now = _now()
+    tracer = get_tracer()
+
+    with tracer.start_as_current_span("config.resolve_location") as span:
+        record_invocation_event(
+            span,
+            StructuredEvent(
+                name="config.resolve_location.invocation",
+                code="config_resolve_location",
+                timestamp=now,
+            ),
+        )
+
+        try:
+            env_val = os.environ.get(_MERIDIAN_CONFIG_ENV)
+            if env_val is not None:
+                path = Path(env_val).expanduser()
+                if not path.exists():
+                    raise FileNotFoundError(
+                        f"${_MERIDIAN_CONFIG_ENV} is set but path does not exist: {path}"
+                    )
+                span.set_attribute("config.source", "env")
+                span.set_attribute("config.path", str(path))
+                return path
+
+            if _USER_CONFIG_PATH.exists():
+                span.set_attribute("config.source", "user")
+                span.set_attribute("config.path", str(_USER_CONFIG_PATH))
+                return _USER_CONFIG_PATH
+
+            if SYSTEM_CONFIG_PATH.exists():
+                span.set_attribute("config.source", "system")
+                span.set_attribute("config.path", str(SYSTEM_CONFIG_PATH))
+                return SYSTEM_CONFIG_PATH
+
+            searched = (
+                f"${_MERIDIAN_CONFIG_ENV} (not set), "
+                f"{_USER_CONFIG_PATH} (not found), "
+                f"{SYSTEM_CONFIG_PATH} (not found)"
+            )
+            raise FileNotFoundError(f"No config file found; searched: {searched}")
+
+        except ConfigResolveError:
+            raise
+        except Exception as exc:
+            err = ConfigResolveError(
+                message=f"Failed to resolve config location: {exc}",
+                timestamp=_now(),
+                cause=exc,
+            )
+            record_error(span, err)
+            _audit.write(
+                AuditLogEntry(
+                    level="error",
+                    event="config.resolve_location.failed",
+                    code=err.code,
+                    timestamp=err.timestamp,
+                    detail={"message": str(exc)},
                 )
             )
             raise err

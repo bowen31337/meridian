@@ -40,6 +40,20 @@ Tests cover:
   - validate_config: failure writes audit log entry with event "config.validate.failed".
   - validate_config: failure audit detail contains errors list.
   - validate_config: success does not write to audit log.
+  - resolve_config_location: emits OTel span "config.resolve_location" on every invocation.
+  - resolve_config_location: invocation event has code "config_resolve_location".
+  - resolve_config_location: returns $MERIDIAN_CONFIG path when env var is set and file exists.
+  - resolve_config_location: span has config.source="env" and config.path when env var used.
+  - resolve_config_location: returns user path when env unset and user file exists.
+  - resolve_config_location: span has config.source="user" when user path used.
+  - resolve_config_location: returns system path when env unset and user file absent.
+  - resolve_config_location: span has config.source="system" when system path used.
+  - resolve_config_location: raises ConfigResolveError when no config file found.
+  - resolve_config_location: $MERIDIAN_CONFIG set to missing path raises ConfigResolveError (no fallthrough).
+  - resolve_config_location: failure writes audit log entry with event "config.resolve_location.failed".
+  - resolve_config_location: failure sets span status to ERROR.
+  - resolve_config_location: accepts optional audit_log; uses NoopAuditLog when None.
+  - resolve_config_location: ConfigResolveError has code "config_resolve_failed".
 """
 
 from __future__ import annotations
@@ -55,6 +69,7 @@ from opentelemetry.trace import StatusCode
 from meridiand._config import (
     BindConfig,
     ConfigLoadError,
+    ConfigResolveError,
     ConfigValidateError,
     CorsConfig,
     DaemonConfig,
@@ -65,6 +80,7 @@ from meridiand._config import (
     StorageConfig,
     VaultConfig,
     load_config,
+    resolve_config_location,
     validate_config,
 )
 
@@ -974,3 +990,223 @@ class TestValidateConfigStorage:
             storage=StorageConfig(database=str(tmp_path / "db.sqlite")),
         )
         validate_config(config)
+
+
+# ---------------------------------------------------------------------------
+# TestResolveConfigLocation
+# ---------------------------------------------------------------------------
+
+
+class TestResolveConfigLocation:
+    def setup_method(self) -> None:
+        _otel_exporter.clear()
+
+    # --- OTel span emission ---
+
+    def test_emits_resolve_location_span(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        cfg = tmp_path / "config.yml"
+        cfg.write_text("storage_root: /tmp/storage\n")
+        monkeypatch.setattr("meridiand._config._USER_CONFIG_PATH", cfg)
+        resolve_config_location()
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "config.resolve_location" in span_names
+
+    def test_span_has_invocation_event(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        cfg = tmp_path / "config.yml"
+        cfg.write_text("storage_root: /tmp/storage\n")
+        monkeypatch.setattr("meridiand._config._USER_CONFIG_PATH", cfg)
+        resolve_config_location()
+        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "config.resolve_location")
+        event_names = [e.name for e in span.events]
+        assert "meridian.error.invocation" in event_names
+
+    def test_invocation_event_has_code(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        cfg = tmp_path / "config.yml"
+        cfg.write_text("storage_root: /tmp/storage\n")
+        monkeypatch.setattr("meridiand._config._USER_CONFIG_PATH", cfg)
+        resolve_config_location()
+        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "config.resolve_location")
+        evt = next(e for e in span.events if e.name == "meridian.error.invocation")
+        assert evt.attributes["code"] == "config_resolve_location"
+
+    # --- env var ($MERIDIAN_CONFIG) ---
+
+    def test_env_var_returns_that_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        cfg = tmp_path / "env-config.yml"
+        cfg.write_text("storage_root: /tmp/s\n")
+        monkeypatch.setenv("MERIDIAN_CONFIG", str(cfg))
+        assert resolve_config_location() == cfg
+
+    def test_env_var_span_source_is_env(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        cfg = tmp_path / "env-config.yml"
+        cfg.write_text("storage_root: /tmp/s\n")
+        monkeypatch.setenv("MERIDIAN_CONFIG", str(cfg))
+        resolve_config_location()
+        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "config.resolve_location")
+        assert span.attributes["config.source"] == "env"
+
+    def test_env_var_span_has_config_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        cfg = tmp_path / "env-config.yml"
+        cfg.write_text("storage_root: /tmp/s\n")
+        monkeypatch.setenv("MERIDIAN_CONFIG", str(cfg))
+        resolve_config_location()
+        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "config.resolve_location")
+        assert span.attributes["config.path"] == str(cfg)
+
+    def test_env_var_missing_file_raises_config_resolve_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MERIDIAN_CONFIG", str(tmp_path / "missing.yml"))
+        with pytest.raises(ConfigResolveError):
+            resolve_config_location()
+
+    def test_env_var_missing_file_does_not_fall_through_to_user(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        user_cfg = tmp_path / "config.yml"
+        user_cfg.write_text("storage_root: /tmp/s\n")
+        monkeypatch.setenv("MERIDIAN_CONFIG", str(tmp_path / "missing.yml"))
+        monkeypatch.setattr("meridiand._config._USER_CONFIG_PATH", user_cfg)
+        with pytest.raises(ConfigResolveError):
+            resolve_config_location()
+
+    def test_env_var_missing_file_error_code(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MERIDIAN_CONFIG", str(tmp_path / "missing.yml"))
+        with pytest.raises(ConfigResolveError) as exc_info:
+            resolve_config_location()
+        assert exc_info.value.code == "config_resolve_failed"
+
+    def test_env_var_missing_file_sets_span_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MERIDIAN_CONFIG", str(tmp_path / "missing.yml"))
+        with pytest.raises(ConfigResolveError):
+            resolve_config_location()
+        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "config.resolve_location")
+        assert span.status.status_code == StatusCode.ERROR
+
+    # --- user path (~/.meridian/config.yml) ---
+
+    def test_user_path_returned_when_env_unset(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        user_cfg = tmp_path / "config.yml"
+        user_cfg.write_text("storage_root: /tmp/s\n")
+        monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
+        monkeypatch.setattr("meridiand._config._USER_CONFIG_PATH", user_cfg)
+        assert resolve_config_location() == user_cfg
+
+    def test_user_path_span_source_is_user(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        user_cfg = tmp_path / "config.yml"
+        user_cfg.write_text("storage_root: /tmp/s\n")
+        monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
+        monkeypatch.setattr("meridiand._config._USER_CONFIG_PATH", user_cfg)
+        resolve_config_location()
+        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "config.resolve_location")
+        assert span.attributes["config.source"] == "user"
+
+    def test_user_path_span_has_config_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        user_cfg = tmp_path / "config.yml"
+        user_cfg.write_text("storage_root: /tmp/s\n")
+        monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
+        monkeypatch.setattr("meridiand._config._USER_CONFIG_PATH", user_cfg)
+        resolve_config_location()
+        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "config.resolve_location")
+        assert span.attributes["config.path"] == str(user_cfg)
+
+    # --- system path (/etc/meridian/config.yml) ---
+
+    def test_system_path_returned_when_user_absent(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        system_cfg = tmp_path / "system-config.yml"
+        system_cfg.write_text("storage_root: /tmp/s\n")
+        monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
+        monkeypatch.setattr("meridiand._config._USER_CONFIG_PATH", tmp_path / "nonexistent.yml")
+        monkeypatch.setattr("meridiand._config.SYSTEM_CONFIG_PATH", system_cfg)
+        assert resolve_config_location() == system_cfg
+
+    def test_system_path_span_source_is_system(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        system_cfg = tmp_path / "system-config.yml"
+        system_cfg.write_text("storage_root: /tmp/s\n")
+        monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
+        monkeypatch.setattr("meridiand._config._USER_CONFIG_PATH", tmp_path / "nonexistent.yml")
+        monkeypatch.setattr("meridiand._config.SYSTEM_CONFIG_PATH", system_cfg)
+        resolve_config_location()
+        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "config.resolve_location")
+        assert span.attributes["config.source"] == "system"
+
+    def test_system_path_span_has_config_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        system_cfg = tmp_path / "system-config.yml"
+        system_cfg.write_text("storage_root: /tmp/s\n")
+        monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
+        monkeypatch.setattr("meridiand._config._USER_CONFIG_PATH", tmp_path / "nonexistent.yml")
+        monkeypatch.setattr("meridiand._config.SYSTEM_CONFIG_PATH", system_cfg)
+        resolve_config_location()
+        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "config.resolve_location")
+        assert span.attributes["config.path"] == str(system_cfg)
+
+    # --- no config found ---
+
+    def test_no_config_found_raises_config_resolve_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
+        monkeypatch.setattr("meridiand._config._USER_CONFIG_PATH", tmp_path / "nonexistent.yml")
+        monkeypatch.setattr("meridiand._config.SYSTEM_CONFIG_PATH", tmp_path / "nonexistent-sys.yml")
+        with pytest.raises(ConfigResolveError):
+            resolve_config_location()
+
+    def test_no_config_found_error_code(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
+        monkeypatch.setattr("meridiand._config._USER_CONFIG_PATH", tmp_path / "nonexistent.yml")
+        monkeypatch.setattr("meridiand._config.SYSTEM_CONFIG_PATH", tmp_path / "nonexistent-sys.yml")
+        with pytest.raises(ConfigResolveError) as exc_info:
+            resolve_config_location()
+        assert exc_info.value.code == "config_resolve_failed"
+
+    def test_no_config_found_sets_span_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
+        monkeypatch.setattr("meridiand._config._USER_CONFIG_PATH", tmp_path / "nonexistent.yml")
+        monkeypatch.setattr("meridiand._config.SYSTEM_CONFIG_PATH", tmp_path / "nonexistent-sys.yml")
+        with pytest.raises(ConfigResolveError):
+            resolve_config_location()
+        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "config.resolve_location")
+        assert span.status.status_code == StatusCode.ERROR
+
+    def test_no_config_found_writes_audit_log(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
+        monkeypatch.setattr("meridiand._config._USER_CONFIG_PATH", tmp_path / "nonexistent.yml")
+        monkeypatch.setattr("meridiand._config.SYSTEM_CONFIG_PATH", tmp_path / "nonexistent-sys.yml")
+        audit = _CapturingAuditLog()
+        with pytest.raises(ConfigResolveError):
+            resolve_config_location(audit_log=audit)
+        assert any(e.event == "config.resolve_location.failed" for e in audit.entries)
+
+    def test_failure_audit_level_is_error(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
+        monkeypatch.setattr("meridiand._config._USER_CONFIG_PATH", tmp_path / "nonexistent.yml")
+        monkeypatch.setattr("meridiand._config.SYSTEM_CONFIG_PATH", tmp_path / "nonexistent-sys.yml")
+        audit = _CapturingAuditLog()
+        with pytest.raises(ConfigResolveError):
+            resolve_config_location(audit_log=audit)
+        entry = next(e for e in audit.entries if e.event == "config.resolve_location.failed")
+        assert entry.level == "error"
+
+    def test_failure_audit_code(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
+        monkeypatch.setattr("meridiand._config._USER_CONFIG_PATH", tmp_path / "nonexistent.yml")
+        monkeypatch.setattr("meridiand._config.SYSTEM_CONFIG_PATH", tmp_path / "nonexistent-sys.yml")
+        audit = _CapturingAuditLog()
+        with pytest.raises(ConfigResolveError):
+            resolve_config_location(audit_log=audit)
+        entry = next(e for e in audit.entries if e.event == "config.resolve_location.failed")
+        assert entry.code == "config_resolve_failed"
+
+    def test_no_audit_log_arg_does_not_raise(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
+        monkeypatch.setattr("meridiand._config._USER_CONFIG_PATH", tmp_path / "nonexistent.yml")
+        monkeypatch.setattr("meridiand._config.SYSTEM_CONFIG_PATH", tmp_path / "nonexistent-sys.yml")
+        with pytest.raises(ConfigResolveError):
+            resolve_config_location()
+
+    def test_noop_audit_log_accepted(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
+        monkeypatch.setattr("meridiand._config._USER_CONFIG_PATH", tmp_path / "nonexistent.yml")
+        monkeypatch.setattr("meridiand._config.SYSTEM_CONFIG_PATH", tmp_path / "nonexistent-sys.yml")
+        with pytest.raises(ConfigResolveError):
+            resolve_config_location(audit_log=NoopAuditLog())
