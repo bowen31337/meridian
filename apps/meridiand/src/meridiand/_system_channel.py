@@ -21,10 +21,14 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+# PRD §6.1: channel inbound → harness wake must be < 1 s p95 end-to-end.
+_INBOUND_LATENCY_TARGET_MS = 1000.0
 
 from core_errors import (
     AuditLog,
@@ -349,6 +353,7 @@ def make_system_channel_router(
                 "channel.sender_id": body.sender_id,
             },
         ) as span:
+            t0 = time.perf_counter()
             record_invocation_event(
                 span,
                 StructuredEvent(
@@ -473,6 +478,12 @@ def make_system_channel_router(
                     )
                 )
                 raise err2
+
+            finally:
+                latency_ms = (time.perf_counter() - t0) * 1000
+                span.set_attribute("channel.inbound.latency_ms", latency_ms)
+                if latency_ms > _INBOUND_LATENCY_TARGET_MS:
+                    span.set_attribute("channel.inbound.latency_target_exceeded", True)
 
         return JSONResponse(
             content={

@@ -906,6 +906,80 @@ class TestOtelSpans:
 
 
 # ---------------------------------------------------------------------------
+# Inbound latency target (PRD §6.1)
+# ---------------------------------------------------------------------------
+
+
+class TestInboundLatencyTarget:
+    """channel.inbound span records latency_ms on every code path (PRD §6.1 < 1 s p95)."""
+
+    def setup_method(self) -> None:
+        _otel_exporter.clear()
+
+    def _client(self, storage_root: Path) -> TestClient:
+        return _make_client(storage_root)
+
+    def test_success_span_has_latency_ms(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        channel_id = _create_channel(client)
+        _otel_exporter.clear()
+        client.post(
+            f"/v1/channels/{channel_id}/inbound",
+            json={"sender_id": "s", "content": "hi"},
+        )
+        span = {s.name: s for s in _otel_exporter.get_finished_spans()}.get("channel.inbound")
+        assert span is not None
+        assert "channel.inbound.latency_ms" in span.attributes
+
+    def test_latency_ms_is_non_negative(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        channel_id = _create_channel(client)
+        _otel_exporter.clear()
+        client.post(
+            f"/v1/channels/{channel_id}/inbound",
+            json={"sender_id": "s", "content": "hi"},
+        )
+        span = {s.name: s for s in _otel_exporter.get_finished_spans()}.get("channel.inbound")
+        assert span is not None
+        assert span.attributes["channel.inbound.latency_ms"] >= 0
+
+    def test_channel_not_found_span_has_latency_ms(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        _otel_exporter.clear()
+        client.post(
+            "/v1/channels/ch_nonexistent/inbound",
+            json={"sender_id": "s", "content": "hi"},
+        )
+        span = {s.name: s for s in _otel_exporter.get_finished_spans()}.get("channel.inbound")
+        assert span is not None
+        assert "channel.inbound.latency_ms" in span.attributes
+
+    def test_policy_rejected_span_has_latency_ms(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        channel_id = _create_channel(client, inbound_policy="paired_only")
+        _otel_exporter.clear()
+        client.post(
+            f"/v1/channels/{channel_id}/inbound",
+            json={"sender_id": "stranger", "content": "hi"},
+        )
+        span = {s.name: s for s in _otel_exporter.get_finished_spans()}.get("channel.inbound")
+        assert span is not None
+        assert "channel.inbound.latency_ms" in span.attributes
+
+    def test_quarantine_span_has_latency_ms(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        channel_id = _create_channel(client, inbound_policy="quarantine")
+        _otel_exporter.clear()
+        client.post(
+            f"/v1/channels/{channel_id}/inbound",
+            json={"sender_id": "untrusted", "content": "hi"},
+        )
+        span = {s.name: s for s in _otel_exporter.get_finished_spans()}.get("channel.inbound")
+        assert span is not None
+        assert "channel.inbound.latency_ms" in span.attributes
+
+
+# ---------------------------------------------------------------------------
 # Route wiring
 # ---------------------------------------------------------------------------
 
