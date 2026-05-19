@@ -11,6 +11,8 @@ Tests cover:
   - All three failure_mode values accepted: ignore, warn, abort.
   - match is null when omitted; stored when provided.
   - metadata is null when omitted; stored when provided.
+  - secret_reads is null when omitted; stored when provided.
+  - secret_reads list is persisted in the hook resource JSON.
   - Empty event returns 422 with code "hook_invalid_request".
   - Empty name returns 422 with code "hook_invalid_request".
   - Zero timeout_ms returns 422 with code "hook_invalid_request".
@@ -500,6 +502,46 @@ class TestHookOtel:
         span = spans.get("hook.create")
         assert span is not None
         assert span.attributes["hook.handler"] == "mcp"
+
+
+# ---------------------------------------------------------------------------
+# secret_reads field
+# ---------------------------------------------------------------------------
+
+
+class TestHookSecretReads:
+    def test_secret_reads_null_when_omitted(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/hooks", json=_body()).json()
+        assert body["secret_reads"] is None
+
+    def test_secret_reads_stored_when_provided(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post(
+            "/v1/x/hooks",
+            json=_body(secret_reads=["api_key", "db_pass"]),
+        ).json()
+        assert body["secret_reads"] == ["api_key", "db_pass"]
+
+    def test_secret_reads_persisted(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        hook_id = client.post(
+            "/v1/x/hooks",
+            json=_body(secret_reads=["my_secret"]),
+        ).json()["id"]
+        resource = _hook_resource(storage_root, hook_id)
+        assert resource["secret_reads"] == ["my_secret"]
+
+    def test_secret_reads_null_persisted_when_omitted(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        hook_id = client.post("/v1/x/hooks", json=_body()).json()["id"]
+        resource = _hook_resource(storage_root, hook_id)
+        assert resource["secret_reads"] is None
+
+    def test_secret_reads_empty_list_stored(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/hooks", json=_body(secret_reads=[])).json()
+        assert body["secret_reads"] == []
 
 
 # ---------------------------------------------------------------------------

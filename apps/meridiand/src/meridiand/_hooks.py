@@ -92,6 +92,7 @@ class HookCreateRequest(BaseModel):
     match: MatchFilter | None = None
     timeout_ms: int
     failure_mode: FailureMode
+    secret_reads: list[str] | None = None
     metadata: dict[str, Any] | None = None
 
 
@@ -161,6 +162,7 @@ def make_hooks_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                     "match": body.match.model_dump() if body.match is not None else None,
                     "timeout_ms": body.timeout_ms,
                     "failure_mode": body.failure_mode.value,
+                    "secret_reads": body.secret_reads,
                     "status": "active",
                     "created_at": now,
                     "metadata": body.metadata,
