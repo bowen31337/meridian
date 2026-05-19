@@ -2,6 +2,23 @@
 Agents endpoint conformance suite.
 
 Tests cover:
+  - GET /v1/agents/{id}/versions returns 200 with items list.
+  - Items list is empty for unknown agent id.
+  - Items list contains all versions for the agent.
+  - Items are sorted newest first (descending created_at, id).
+  - Items only include versions belonging to the requested agent.
+  - Response has next_cursor null when no more pages.
+  - Response has next_cursor token when more pages exist.
+  - Link response header set when next_cursor is present (middleware converts X-Next-Cursor).
+  - Cursor-based pagination returns the correct next page.
+  - limit query parameter controls page size.
+  - Invalid cursor returns 400 with code "cursor_invalid".
+  - Invalid cursor writes audit entry with event "agent.versions.list.failed".
+  - Audit entry level is "error" on cursor failure.
+  - Audit entry detail includes agent_id and message.
+  - OTel span "agent.versions.list" emitted on success and failure.
+  - Failure span has ERROR status.
+  - Span carries agent.id attribute.
   - GET /v1/agents/{id}/versions/{ver} returns 200 with version record on success.
   - Response fields match the stored AgentVersionRecord.
   - Unknown agent id returns 404 with code "agent_not_found".
@@ -1335,3 +1352,268 @@ class TestAgentVersionGetOtel:
             if s.name == "agent.version.get"
         ]
         assert any(s.attributes.get("agent.version.id") == version_id for s in spans)
+
+
+# ---------------------------------------------------------------------------
+# Version list – success
+# ---------------------------------------------------------------------------
+
+
+class TestAgentVersionListSuccess:
+    def test_returns_200(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        resp = client.get(f"/v1/agents/{agent_id}/versions")
+        assert resp.status_code == 200
+
+    def test_returns_200_for_unknown_agent(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.get("/v1/agents/agent_unknown/versions")
+        assert resp.status_code == 200
+
+    def test_response_has_items(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        body = client.get(f"/v1/agents/{agent_id}/versions").json()
+        assert "items" in body
+        assert isinstance(body["items"], list)
+
+    def test_empty_items_for_unknown_agent(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.get("/v1/agents/agent_unknown/versions").json()
+        assert body["items"] == []
+
+    def test_response_has_next_cursor(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        body = client.get(f"/v1/agents/{agent_id}/versions").json()
+        assert "next_cursor" in body
+
+    def test_response_has_limit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        body = client.get(f"/v1/agents/{agent_id}/versions").json()
+        assert "limit" in body
+        assert isinstance(body["limit"], int)
+
+    def test_next_cursor_null_when_no_more_pages(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        body = client.get(f"/v1/agents/{agent_id}/versions").json()
+        assert body["next_cursor"] is None
+
+    def test_items_contain_initial_version(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id, version_id = _create_agent_with_version(client)
+        body = client.get(f"/v1/agents/{agent_id}/versions").json()
+        ids = [item["id"] for item in body["items"]]
+        assert version_id in ids
+
+    def test_items_contain_all_versions_for_agent(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        v1_id = client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name="v2")).json()["id"]
+        v2_id = client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name="v3")).json()["id"]
+        body = client.get(f"/v1/agents/{agent_id}/versions").json()
+        ids = {item["id"] for item in body["items"]}
+        assert v1_id in ids
+        assert v2_id in ids
+
+    def test_items_only_include_versions_for_requested_agent(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id_a, version_id_a = _create_agent_with_version(client)
+        agent_id_b, version_id_b = _create_agent_with_version(client)
+        body = client.get(f"/v1/agents/{agent_id_a}/versions").json()
+        ids = {item["id"] for item in body["items"]}
+        assert version_id_a in ids
+        assert version_id_b not in ids
+
+    def test_items_sorted_newest_first(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name="va"))
+        client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name="vb"))
+        client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name="vc"))
+        body = client.get(f"/v1/agents/{agent_id}/versions").json()
+        created_ats = [item["created_at"] for item in body["items"]]
+        assert created_ats == sorted(created_ats, reverse=True)
+
+    def test_item_fields_match_stored_record(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id, version_id = _create_agent_with_version(client)
+        body = client.get(f"/v1/agents/{agent_id}/versions").json()
+        item = next(i for i in body["items"] if i["id"] == version_id)
+        stored = _version_resource(storage_root, version_id)
+        assert item == stored
+
+
+# ---------------------------------------------------------------------------
+# Version list – pagination
+# ---------------------------------------------------------------------------
+
+
+class TestAgentVersionListPagination:
+    def test_next_cursor_set_when_more_pages(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name="va"))
+        client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name="vb"))
+        client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name="vc"))
+        body = client.get(f"/v1/agents/{agent_id}/versions?limit=2").json()
+        assert body["next_cursor"] is not None
+
+    def test_link_header_set_when_next_cursor_present(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name="va"))
+        client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name="vb"))
+        client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name="vc"))
+        resp = client.get(f"/v1/agents/{agent_id}/versions?limit=2")
+        assert "link" in resp.headers
+
+    def test_limit_controls_page_size(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name="va"))
+        client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name="vb"))
+        client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name="vc"))
+        body = client.get(f"/v1/agents/{agent_id}/versions?limit=2").json()
+        assert len(body["items"]) == 2
+
+    def test_cursor_returns_next_page(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name="va"))
+        client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name="vb"))
+        client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name="vc"))
+        first = client.get(f"/v1/agents/{agent_id}/versions?limit=2").json()
+        cursor = first["next_cursor"]
+        second = client.get(f"/v1/agents/{agent_id}/versions?limit=2&cursor={cursor}").json()
+        assert len(second["items"]) >= 1
+        first_ids = {i["id"] for i in first["items"]}
+        second_ids = {i["id"] for i in second["items"]}
+        assert first_ids.isdisjoint(second_ids)
+
+    def test_invalid_cursor_returns_400(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        resp = client.get(f"/v1/agents/{agent_id}/versions?cursor=not-valid-base64!!!")
+        assert resp.status_code == 400
+
+    def test_invalid_cursor_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        body = client.get(f"/v1/agents/{agent_id}/versions?cursor=not-valid-base64!!!").json()
+        assert body["error"]["code"] == "cursor_invalid"
+
+
+# ---------------------------------------------------------------------------
+# Version list – audit log
+# ---------------------------------------------------------------------------
+
+
+class TestAgentVersionListAuditLog:
+    def test_invalid_cursor_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        client.get(f"/v1/agents/{agent_id}/versions?cursor=bad!!!")
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "agent.versions.list.failed" for r in records)
+
+    def test_invalid_cursor_audit_level_is_error(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        client.get(f"/v1/agents/{agent_id}/versions?cursor=bad!!!")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "agent.versions.list.failed"
+        )
+        assert record["level"] == "error"
+
+    def test_invalid_cursor_audit_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        client.get(f"/v1/agents/{agent_id}/versions?cursor=bad!!!")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "agent.versions.list.failed"
+        )
+        assert record["code"] == "cursor_invalid"
+
+    def test_invalid_cursor_audit_detail_has_agent_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        client.get(f"/v1/agents/{agent_id}/versions?cursor=bad!!!")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "agent.versions.list.failed"
+        )
+        assert record["detail"]["agent_id"] == agent_id
+
+    def test_invalid_cursor_audit_detail_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        client.get(f"/v1/agents/{agent_id}/versions?cursor=bad!!!")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "agent.versions.list.failed"
+        )
+        assert len(record["detail"]["message"]) > 0
+
+    def test_no_audit_on_success(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        client.get(f"/v1/agents/{agent_id}/versions")
+        records = _audit_records(storage_root)
+        assert not any(r.get("event") == "agent.versions.list.failed" for r in records)
+
+
+# ---------------------------------------------------------------------------
+# Version list – OTel spans
+# ---------------------------------------------------------------------------
+
+
+class TestAgentVersionListOtel:
+    def setup_method(self) -> None:
+        _otel_exporter.clear()
+
+    def _client(self, storage_root: Path) -> TestClient:
+        app = create_app(FileAuditLog(storage_root), storage_root=storage_root)
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_success_emits_versions_list_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body()).json()["id"]
+        _otel_exporter.clear()
+        client.get(f"/v1/agents/{agent_id}/versions")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "agent.versions.list" in span_names
+
+    def test_failure_emits_versions_list_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body()).json()["id"]
+        client.get(f"/v1/agents/{agent_id}/versions?cursor=bad!!!")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "agent.versions.list" in span_names
+
+    def test_failure_span_has_error_status(self, storage_root: Path) -> None:
+        from opentelemetry.trace import StatusCode
+        client = self._client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body()).json()["id"]
+        client.get(f"/v1/agents/{agent_id}/versions?cursor=bad!!!")
+        spans = [
+            s for s in _otel_exporter.get_finished_spans()
+            if s.name == "agent.versions.list"
+        ]
+        assert any(s.status.status_code == StatusCode.ERROR for s in spans)
+
+    def test_span_has_agent_id_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body()).json()["id"]
+        _otel_exporter.clear()
+        client.get(f"/v1/agents/{agent_id}/versions")
+        spans = [
+            s for s in _otel_exporter.get_finished_spans()
+            if s.name == "agent.versions.list"
+        ]
+        assert any(s.attributes.get("agent.id") == agent_id for s in spans)

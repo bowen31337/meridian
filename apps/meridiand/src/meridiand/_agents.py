@@ -16,9 +16,17 @@ from core_errors import (
     record_error,
     record_invocation_event,
 )
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
+
+from meridiand._pagination import (
+    CursorDecodeError,
+    DEFAULT_PAGE_SIZE,
+    apply_cursor_filter,
+    decode_cursor,
+    make_cursor_page,
+)
 
 
 def _now() -> str:
@@ -120,6 +128,22 @@ class AgentVersionGetError(MeridianError):
     ) -> None:
         super().__init__(
             code="agent_version_get_failed", message=message, timestamp=timestamp, cause=cause
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
+class AgentVersionsListError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="agent_versions_list_failed", message=message, timestamp=timestamp, cause=cause
         )
 
     def http_status(self) -> int:
@@ -470,6 +494,88 @@ def make_agents_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                 raise err2
 
         return JSONResponse(content=version_record, status_code=status_code)
+
+    @router.get("/v1/agents/{agent_id}/versions")
+    async def list_agent_versions(
+        agent_id: str,
+        cursor: str | None = Query(default=None),
+        limit: int = Query(default=DEFAULT_PAGE_SIZE),
+    ) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "agent.versions.list",
+            attributes={"agent.id": agent_id},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="agent.versions.list.invocation",
+                    code="agent_versions_list",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                all_versions: list[dict[str, Any]] = []
+                if versions_dir.exists():
+                    for path in versions_dir.glob("*.json"):
+                        record = json.loads(path.read_text())
+                        if record.get("agent_id") == agent_id:
+                            all_versions.append(record)
+
+                all_versions.sort(
+                    key=lambda r: (r.get("created_at", ""), r.get("id", "")),
+                    reverse=True,
+                )
+
+                if cursor is not None:
+                    c_created_at, c_id = decode_cursor(cursor, timestamp=now)
+                    all_versions = apply_cursor_filter(all_versions, c_created_at, c_id)
+
+                page, next_cursor = make_cursor_page(all_versions, limit)
+
+            except CursorDecodeError as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="agent.versions.list.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={"agent_id": agent_id, "message": err.message},
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = AgentVersionsListError(
+                    message=f"Failed to list agent versions: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="agent.versions.list.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={"agent_id": agent_id, "message": err2.message},
+                    )
+                )
+                raise err2
+
+        response_headers: dict[str, str] = {}
+        if next_cursor is not None:
+            response_headers["X-Next-Cursor"] = next_cursor
+
+        return JSONResponse(
+            content={"items": page, "next_cursor": next_cursor, "limit": limit},
+            status_code=200,
+            headers=response_headers,
+        )
 
     @router.get("/v1/agents/{agent_id}/versions/{version_id}", status_code=200)
     async def get_agent_version(agent_id: str, version_id: str) -> JSONResponse:
