@@ -1047,3 +1047,86 @@ class TestEnvironmentDeleteRouteWiring:
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.delete("/v1/environments/env_any")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# DELETE 409 conflict (agent reference)
+# ---------------------------------------------------------------------------
+
+
+def _write_agent_with_env(storage_root: Path, env_id: str, agent_id: str = "agent_ref") -> None:
+    agents_dir = storage_root / "agents"
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    record = {
+        "id": agent_id,
+        "name": "ref-agent",
+        "kind": "claude",
+        "default_environment_id": env_id,
+        "created_at": "2024-01-01T00:00:00+00:00",
+        "version": {},
+    }
+    (agents_dir / f"{agent_id}.json").write_text(json.dumps(record))
+
+
+class TestEnvironmentDeleteConflict:
+    def test_returns_409_when_agent_references_env(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        env_id = _create_env(client)["id"]
+        _write_agent_with_env(storage_root, env_id)
+        resp = client.delete(f"/v1/environments/{env_id}")
+        assert resp.status_code == 409
+
+    def test_conflict_error_code_is_environment_in_use(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        env_id = _create_env(client)["id"]
+        _write_agent_with_env(storage_root, env_id)
+        body = client.delete(f"/v1/environments/{env_id}").json()
+        assert body["error"]["code"] == "environment_in_use"
+
+    def test_conflict_error_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        env_id = _create_env(client)["id"]
+        _write_agent_with_env(storage_root, env_id)
+        body = client.delete(f"/v1/environments/{env_id}").json()
+        assert len(body["error"]["message"]) > 0
+
+    def test_conflict_does_not_remove_environment_file(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        env_id = _create_env(client)["id"]
+        _write_agent_with_env(storage_root, env_id)
+        client.delete(f"/v1/environments/{env_id}")
+        assert (storage_root / "environments" / f"{env_id}.json").exists()
+
+    def test_delete_succeeds_after_reference_removed(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        env_id = _create_env(client)["id"]
+        agent_file = storage_root / "agents" / "agent_ref.json"
+        _write_agent_with_env(storage_root, env_id)
+        assert client.delete(f"/v1/environments/{env_id}").status_code == 409
+        agent_file.unlink()
+        assert client.delete(f"/v1/environments/{env_id}").status_code == 204
+
+    def test_conflict_writes_audit_log(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        env_id = _create_env(client)["id"]
+        _write_agent_with_env(storage_root, env_id)
+        client.delete(f"/v1/environments/{env_id}")
+        records = _audit_records(storage_root)
+        assert any(
+            r.get("event") == "environment.delete.failed"
+            and r.get("code") == "environment_in_use"
+            for r in records
+        )
+
+    def test_conflict_audit_detail_has_environment_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        env_id = _create_env(client)["id"]
+        _write_agent_with_env(storage_root, env_id)
+        client.delete(f"/v1/environments/{env_id}")
+        records = _audit_records(storage_root)
+        record = next(
+            r for r in records
+            if r.get("event") == "environment.delete.failed"
+            and r.get("code") == "environment_in_use"
+        )
+        assert record["detail"]["environment_id"] == env_id

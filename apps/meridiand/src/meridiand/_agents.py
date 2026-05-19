@@ -64,6 +64,7 @@ class AgentCreateRequest(BaseModel):
     kind: str
     config: dict[str, Any] = {}
     capabilities: list[str] = []
+    default_environment_id: str | None = None
 
 
 def _validate_request(body: AgentCreateRequest) -> AgentInvalidRequestError | None:
@@ -169,6 +170,7 @@ def make_agents_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                     "id": agent_id,
                     "name": body.name,
                     "kind": body.kind,
+                    "default_environment_id": body.default_environment_id,
                     "created_at": now,
                     "version": version_record,
                 }

@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/vaults-credenti-system-os-keychain-vault-backend-macos/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/environment-bac-api-delete-v1-environments-id-removes-a/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

@@ -146,6 +146,18 @@ class EnvironmentDeleteError(MeridianError):
         return 500
 
 
+class EnvironmentInUseError(MeridianError):
+    def __init__(self, *, environment_id: str, timestamp: str) -> None:
+        super().__init__(
+            code="environment_in_use",
+            message=f"Environment '{environment_id}' is still referenced by an agent",
+            timestamp=timestamp,
+        )
+
+    def http_status(self) -> int:
+        return 409
+
+
 # ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
@@ -198,6 +210,24 @@ def _validate_update(body: EnvironmentUpdateRequest) -> EnvironmentInvalidReques
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _referenced_by_agent(environment_id: str, agents_dir: Path) -> bool:
+    if not agents_dir.exists():
+        return False
+    for path in agents_dir.glob("*.json"):
+        try:
+            record = json.loads(path.read_text())
+            if record.get("default_environment_id") == environment_id:
+                return True
+        except Exception:
+            continue
+    return False
+
+
+# ---------------------------------------------------------------------------
 # Router factory
 # ---------------------------------------------------------------------------
 
@@ -205,6 +235,7 @@ def _validate_update(body: EnvironmentUpdateRequest) -> EnvironmentInvalidReques
 def make_environments_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
     router = APIRouter()
     envs_dir = storage_root / "environments"
+    agents_dir = storage_root / "agents"
 
     @router.post("/v1/environments", status_code=201)
     async def create_environment(body: EnvironmentCreateRequest) -> JSONResponse:
@@ -505,9 +536,14 @@ def make_environments_router(*, audit_log: AuditLog, storage_root: Path) -> APIR
                         environment_id=environment_id, timestamp=now
                     )
 
+                if _referenced_by_agent(environment_id, agents_dir):
+                    raise EnvironmentInUseError(
+                        environment_id=environment_id, timestamp=now
+                    )
+
                 env_file.unlink()
 
-            except EnvironmentNotFoundError as err:
+            except (EnvironmentNotFoundError, EnvironmentInUseError) as err:
                 record_error(span, err)
                 audit_log.write(
                     AuditLogEntry(
