@@ -19,6 +19,8 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from meridian_kb_indexer import Chunk
+
 from ._kb import KbStore
 
 
@@ -89,6 +91,25 @@ class MemoryStoreQueryError(MeridianError):
         return 500
 
 
+class MemoryStoreWriteError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="memory_store_write_failed",
+            message=message,
+            timestamp=timestamp,
+            cause=cause,
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
 # ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
@@ -111,6 +132,13 @@ class MemoryStoreQueryRequest(BaseModel):
     bm25_weight: float = 1.0
     vector_weight: float = 1.0
     rrf_k: int = 60
+
+
+class MemoryStoreWriteRequest(BaseModel):
+    key: str
+    content: str
+    scope: str | None = None
+    embedder_id: str | None = None
 
 
 def _validate_request(body: MemoryStoreCreateRequest) -> MemoryStoreInvalidRequestError | None:
@@ -332,6 +360,101 @@ def make_memory_stores_router(*, audit_log: AuditLog, storage_root: Path) -> API
                 "vector_weight": body.vector_weight,
                 "rrf_k": body.rrf_k,
             }
+        )
+
+    @router.post("/v1/memory_stores/{store_id}/write", status_code=201)
+    async def write_memory(store_id: str, body: MemoryStoreWriteRequest) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+        embedder_id = body.embedder_id or "hash-128"
+        scope = body.scope or "global"
+
+        with tracer.start_as_current_span(
+            "memory_store.write",
+            attributes={
+                "memory_store.id": store_id,
+                "memory_store.write.key": body.key,
+                "memory_store.scope": scope,
+                "memory_store.write.embedder_id": embedder_id,
+                "memory_store.write.content_length": len(body.content),
+            },
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="memory_store.write.invocation",
+                    code="memory_store_write",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                store_path = stores_dir / f"{store_id}.json"
+                if not store_path.exists():
+                    raise MemoryStoreNotFoundError(
+                        message=f"Memory store '{store_id}' not found",
+                        timestamp=now,
+                    )
+
+                kb_store = KbStore(stores_dir / store_id / "chunks.db")
+                action = "updated" if kb_store.has_key(body.key) else "inserted"
+                kb_store.upsert_chunks(
+                    body.key,
+                    scope,
+                    [Chunk(file_path=body.key, kind="text", content=body.content, start_line=0, end_line=0)],
+                )
+                span.set_attribute("memory_store.write.action", action)
+
+            except MemoryStoreNotFoundError as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="memory_store.write.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "memory_store_id": store_id,
+                            "key": body.key,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = MemoryStoreWriteError(
+                    message=f"Memory store write failed: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="memory_store.write.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={
+                            "memory_store_id": store_id,
+                            "key": body.key,
+                            "message": err2.message,
+                        },
+                    )
+                )
+                raise err2
+
+        return JSONResponse(
+            content={
+                "store_id": store_id,
+                "key": body.key,
+                "content": body.content,
+                "scope": scope,
+                "embedder_id": embedder_id,
+                "action": action,
+                "created_at": now,
+            },
+            status_code=201,
         )
 
     return router

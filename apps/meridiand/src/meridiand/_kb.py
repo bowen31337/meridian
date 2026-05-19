@@ -280,6 +280,13 @@ class KbStore:
                     [rowid, _hash_embed(c.content)],
                 )
 
+    def has_key(self, file_path: str) -> bool:
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT rowid FROM chunks_fts WHERE file_path = ? LIMIT 1", [file_path]
+        ).fetchone()
+        return row is not None
+
     def glob_search(
         self, pattern: str, scope: str | None, limit: int
     ) -> list[dict[str, Any]]:
