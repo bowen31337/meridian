@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
 
 from core_errors import (
     AuditLog,
@@ -34,13 +34,24 @@ class UsageDelta:
     output_tokens: int
 
 
+# Phases in which the harness releases the session so any harness can re-wake.
+_STOP_PHASES: frozenset[str] = frozenset({"idle", "paused", "terminated"})
+
+
+@runtime_checkable
+class _PhaseReader(Protocol):
+    def current_phase(self, session_id: str) -> str: ...
+
+
 __all__ = [
     "FakeModelAdapter",
     "FakeSandboxAdapter",
+    "HarnessLoopError",
     "UsageDelta",
     "_run_harness",
     "_run_harness_capturing",
     "_find_divergence",
+    "run_harness_loop",
 ]
 
 
@@ -252,6 +263,128 @@ def _find_divergence(
             actual[seq] if seq < len(actual) else None,
         )
     return None
+
+
+# ---------------------------------------------------------------------------
+# Phase-aware harness run loop
+# ---------------------------------------------------------------------------
+
+
+class HarnessLoopError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="harness_loop_failed", message=message, timestamp=timestamp, cause=cause
+        )
+
+    def http_status(self) -> int:
+        return 422
+
+
+async def run_harness_loop(
+    session_id: str,
+    *,
+    model_adapter: FakeModelAdapter,
+    sandbox_adapter: FakeSandboxAdapter,
+    phase_reader: _PhaseReader,
+    audit_log: AuditLog,
+    on_usage_delta: Callable[[UsageDelta], None] | None = None,
+) -> tuple[int, int, str]:
+    """Run harness while phase is not in {idle, paused, terminated}.
+
+    Iterates the model-call / tool-dispatch cycle while the session is in an active
+    phase. Releases the session (returns) when phase enters the stop set so any
+    harness can re-wake. Emits OTel span "harness.run_loop" with session.id attribute
+    and logs a structured invocation event on each call. On failure surfaces an error
+    message to the caller and writes the failure to the audit log.
+
+    Returns (model_calls, tool_calls, final_phase).
+    """
+    now = _now()
+    tracer = get_tracer()
+
+    with tracer.start_as_current_span(
+        "harness.run_loop",
+        attributes={"session.id": session_id},
+    ) as span:
+        record_invocation_event(
+            span,
+            StructuredEvent(
+                name="harness.run_loop.invocation",
+                code="harness_run_loop",
+                timestamp=now,
+            ),
+        )
+
+        model_calls = 0
+        tool_calls = 0
+        final_phase = "created"
+
+        try:
+            while True:
+                final_phase = phase_reader.current_phase(session_id)
+                if final_phase in _STOP_PHASES:
+                    break  # release — any harness can re-wake
+
+                model_calls += 1
+                tool_use_blocks: list[dict[str, Any]] = []
+                current_tool: dict[str, Any] | None = None
+                stop_reason = "end_turn"
+
+                async for event in model_adapter.call():
+                    etype = event.get("type", "")
+                    if etype == "tool_use_start":
+                        current_tool = {
+                            "id": event.get("id", ""),
+                            "name": event.get("name", ""),
+                            "input_json": "",
+                        }
+                        tool_use_blocks.append(current_tool)
+                    elif etype == "tool_input_delta" and current_tool is not None:
+                        current_tool["input_json"] += event.get("partial_json", "")
+                    elif etype == "message_stop":
+                        stop_reason = event.get("stop_reason") or "end_turn"
+
+                if on_usage_delta is not None:
+                    on_usage_delta(UsageDelta(input_tokens=100, output_tokens=50))
+
+                if not tool_use_blocks or stop_reason != "tool_use":
+                    final_phase = "idle"
+                    break  # end_turn: release session
+
+                for _block in tool_use_blocks:
+                    tool_calls += 1
+                    sandbox_adapter.next_result()
+
+        except HarnessLoopError:
+            raise
+        except Exception as exc:
+            err = HarnessLoopError(
+                message=f"Harness loop failed for session {session_id!r}: {exc}",
+                timestamp=_now(),
+                cause=exc,
+            )
+            record_error(span, err)
+            audit_log.write(
+                AuditLogEntry(
+                    level="error",
+                    event="harness.run_loop.failed",
+                    code=err.code,
+                    timestamp=err.timestamp,
+                    detail={
+                        "session_id": session_id,
+                        "message": err.message,
+                    },
+                )
+            )
+            raise err
+
+    return model_calls, tool_calls, final_phase
 
 
 # ---------------------------------------------------------------------------
