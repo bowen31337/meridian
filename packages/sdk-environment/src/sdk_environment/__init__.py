@@ -7,6 +7,7 @@ from ._contract import EnvironmentDriver
 
 # Built-in drivers
 from ._http_driver import HttpBackendDriver, VaultCredentialResolver
+from ._mcp_driver import McpBackendDriver
 
 # Network policy enforcement
 from ._enforcer import NetworkEnforcer
@@ -54,6 +55,7 @@ from ._version import ENVIRONMENT_SDK_VERSION
 __all__ = [
     # Built-in drivers
     "HttpBackendDriver",
+    "McpBackendDriver",
     "VaultCredentialResolver",
     # Types
     "AgentFilesystemPolicy",
