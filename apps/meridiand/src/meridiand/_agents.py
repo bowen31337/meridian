@@ -150,6 +150,22 @@ class AgentVersionsListError(MeridianError):
         return 500
 
 
+class AgentListError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="agent_list_failed", message=message, timestamp=timestamp, cause=cause
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
 # ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
@@ -333,6 +349,94 @@ def make_agents_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                 raise err2
 
         return JSONResponse(content=agent_record, status_code=201)
+
+    @router.get("/v1/agents")
+    async def list_agents(
+        cursor: str | None = Query(default=None),
+        limit: int = Query(default=DEFAULT_PAGE_SIZE),
+        name: str | None = Query(default=None),
+        created_after: str | None = Query(default=None),
+        created_before: str | None = Query(default=None),
+    ) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span("agent.list") as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="agent.list.invocation",
+                    code="agent_list",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                all_agents: list[dict[str, Any]] = []
+                if agents_dir.exists():
+                    for path in agents_dir.glob("*.json"):
+                        record = json.loads(path.read_text())
+                        if record.get("deleted_at") is not None:
+                            continue
+                        if name is not None and not record.get("name", "").startswith(name):
+                            continue
+                        if created_after is not None and record.get("created_at", "") <= created_after:
+                            continue
+                        if created_before is not None and record.get("created_at", "") >= created_before:
+                            continue
+                        all_agents.append(record)
+
+                all_agents.sort(
+                    key=lambda r: (r.get("created_at", ""), r.get("id", "")),
+                    reverse=True,
+                )
+
+                if cursor is not None:
+                    c_created_at, c_id = decode_cursor(cursor, timestamp=now)
+                    all_agents = apply_cursor_filter(all_agents, c_created_at, c_id)
+
+                page, next_cursor = make_cursor_page(all_agents, limit)
+
+            except CursorDecodeError as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="agent.list.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={"message": err.message},
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = AgentListError(
+                    message=f"Failed to list agents: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="agent.list.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={"message": err2.message},
+                    )
+                )
+                raise err2
+
+        response_headers: dict[str, str] = {}
+        if next_cursor is not None:
+            response_headers["X-Next-Cursor"] = next_cursor
+
+        return JSONResponse(
+            content={"items": page, "next_cursor": next_cursor, "limit": limit},
+            status_code=200,
+            headers=response_headers,
+        )
 
     @router.delete("/v1/agents/{agent_id}", status_code=204)
     async def delete_agent(agent_id: str) -> Response:

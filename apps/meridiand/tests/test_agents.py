@@ -2,6 +2,25 @@
 Agents endpoint conformance suite.
 
 Tests cover:
+  - GET /v1/agents returns 200 with items list.
+  - Items list is empty when no agents exist.
+  - Items list contains all non-deleted agents.
+  - Items are sorted newest first (descending created_at, id).
+  - Soft-deleted agents are excluded from the list.
+  - name query parameter filters by name prefix.
+  - created_after query parameter filters by created_at lower bound (exclusive).
+  - created_before query parameter filters by created_at upper bound (exclusive).
+  - Response has next_cursor null when no more pages.
+  - Response has next_cursor token when more pages exist.
+  - Link response header set when next_cursor is present.
+  - Cursor-based pagination returns the correct next page.
+  - limit query parameter controls page size.
+  - Invalid cursor returns 400 with code "cursor_invalid".
+  - Invalid cursor writes audit entry with event "agent.list.failed".
+  - Audit entry level is "error" on cursor failure.
+  - Audit entry detail includes message.
+  - OTel span "agent.list" emitted on success and failure.
+  - Failure span has ERROR status.
   - GET /v1/agents/{id}/versions returns 200 with items list.
   - Items list is empty for unknown agent id.
   - Items list contains all versions for the agent.
@@ -1352,6 +1371,338 @@ class TestAgentVersionGetOtel:
             if s.name == "agent.version.get"
         ]
         assert any(s.attributes.get("agent.version.id") == version_id for s in spans)
+
+
+# ---------------------------------------------------------------------------
+# Agent list – success
+# ---------------------------------------------------------------------------
+
+
+class TestAgentListSuccess:
+    def test_returns_200(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.get("/v1/agents")
+        assert resp.status_code == 200
+
+    def test_empty_items_when_no_agents(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.get("/v1/agents").json()
+        assert body["items"] == []
+
+    def test_response_has_items(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.get("/v1/agents").json()
+        assert "items" in body
+        assert isinstance(body["items"], list)
+
+    def test_response_has_next_cursor(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.get("/v1/agents").json()
+        assert "next_cursor" in body
+
+    def test_response_has_limit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.get("/v1/agents").json()
+        assert "limit" in body
+        assert isinstance(body["limit"], int)
+
+    def test_next_cursor_null_when_no_more_pages(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/agents", json=_body())
+        body = client.get("/v1/agents").json()
+        assert body["next_cursor"] is None
+
+    def test_items_contain_created_agent(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body()).json()["id"]
+        body = client.get("/v1/agents").json()
+        ids = [item["id"] for item in body["items"]]
+        assert agent_id in ids
+
+    def test_items_contain_all_agents(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        id1 = client.post("/v1/agents", json=_body(name="agent-a")).json()["id"]
+        id2 = client.post("/v1/agents", json=_body(name="agent-b")).json()["id"]
+        body = client.get("/v1/agents").json()
+        ids = {item["id"] for item in body["items"]}
+        assert id1 in ids
+        assert id2 in ids
+
+    def test_items_sorted_newest_first(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/agents", json=_body(name="agent-a"))
+        client.post("/v1/agents", json=_body(name="agent-b"))
+        client.post("/v1/agents", json=_body(name="agent-c"))
+        body = client.get("/v1/agents").json()
+        created_ats = [item["created_at"] for item in body["items"]]
+        assert created_ats == sorted(created_ats, reverse=True)
+
+    def test_excludes_soft_deleted_agents(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body(name="to-delete")).json()["id"]
+        client.delete(f"/v1/agents/{agent_id}")
+        body = client.get("/v1/agents").json()
+        ids = [item["id"] for item in body["items"]]
+        assert agent_id not in ids
+
+    def test_non_deleted_agents_still_appear_after_other_deletion(
+        self, storage_root: Path
+    ) -> None:
+        client = _make_client(storage_root)
+        keep_id = client.post("/v1/agents", json=_body(name="keeper")).json()["id"]
+        del_id = client.post("/v1/agents", json=_body(name="gone")).json()["id"]
+        client.delete(f"/v1/agents/{del_id}")
+        body = client.get("/v1/agents").json()
+        ids = [item["id"] for item in body["items"]]
+        assert keep_id in ids
+        assert del_id not in ids
+
+    def test_item_fields_match_stored_record(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body()).json()["id"]
+        body = client.get("/v1/agents").json()
+        item = next(i for i in body["items"] if i["id"] == agent_id)
+        stored = _agent_resource(storage_root, agent_id)
+        assert item == stored
+
+
+# ---------------------------------------------------------------------------
+# Agent list – filters
+# ---------------------------------------------------------------------------
+
+
+class TestAgentListFilters:
+    def test_name_prefix_returns_matching_agents(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/agents", json=_body(name="alpha-one"))
+        client.post("/v1/agents", json=_body(name="alpha-two"))
+        client.post("/v1/agents", json=_body(name="beta-one"))
+        body = client.get("/v1/agents?name=alpha").json()
+        assert len(body["items"]) == 2
+        assert all(item["name"].startswith("alpha") for item in body["items"])
+
+    def test_name_prefix_excludes_non_matching(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/agents", json=_body(name="alpha-agent"))
+        client.post("/v1/agents", json=_body(name="beta-agent"))
+        body = client.get("/v1/agents?name=alpha").json()
+        assert not any(item["name"].startswith("beta") for item in body["items"])
+
+    def test_name_prefix_exact_match_included(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/agents", json=_body(name="exact"))
+        body = client.get("/v1/agents?name=exact").json()
+        assert len(body["items"]) == 1
+
+    def test_name_prefix_no_match_returns_empty(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/agents", json=_body(name="alpha-agent"))
+        body = client.get("/v1/agents?name=zzz").json()
+        assert body["items"] == []
+
+    def test_name_prefix_omitted_returns_all(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/agents", json=_body(name="alpha-agent"))
+        client.post("/v1/agents", json=_body(name="beta-agent"))
+        body = client.get("/v1/agents").json()
+        assert len(body["items"]) == 2
+
+    def test_created_after_far_past_returns_all(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/agents", json=_body())
+        body = client.get("/v1/agents?created_after=1970-01-01T00:00:00%2B00:00").json()
+        assert len(body["items"]) == 1
+
+    def test_created_after_far_future_returns_empty(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/agents", json=_body())
+        body = client.get("/v1/agents?created_after=9999-12-31T23:59:59%2B00:00").json()
+        assert body["items"] == []
+
+    def test_created_before_far_future_returns_all(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/agents", json=_body())
+        body = client.get("/v1/agents?created_before=9999-12-31T23:59:59%2B00:00").json()
+        assert len(body["items"]) == 1
+
+    def test_created_before_far_past_returns_empty(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/agents", json=_body())
+        body = client.get("/v1/agents?created_before=1970-01-01T00:00:00%2B00:00").json()
+        assert body["items"] == []
+
+    def test_created_after_and_before_both_pass_returns_agents(
+        self, storage_root: Path
+    ) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/agents", json=_body())
+        url = (
+            "/v1/agents"
+            "?created_after=1970-01-01T00:00:00%2B00:00"
+            "&created_before=9999-12-31T23:59:59%2B00:00"
+        )
+        body = client.get(url).json()
+        assert len(body["items"]) == 1
+
+    def test_name_prefix_and_created_after_combined(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/agents", json=_body(name="alpha-agent"))
+        client.post("/v1/agents", json=_body(name="beta-agent"))
+        url = "/v1/agents?name=alpha&created_after=1970-01-01T00:00:00%2B00:00"
+        body = client.get(url).json()
+        assert len(body["items"]) == 1
+        assert body["items"][0]["name"] == "alpha-agent"
+
+
+# ---------------------------------------------------------------------------
+# Agent list – pagination
+# ---------------------------------------------------------------------------
+
+
+class TestAgentListPagination:
+    def test_next_cursor_set_when_more_pages(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/agents", json=_body(name="agent-a"))
+        client.post("/v1/agents", json=_body(name="agent-b"))
+        client.post("/v1/agents", json=_body(name="agent-c"))
+        body = client.get("/v1/agents?limit=2").json()
+        assert body["next_cursor"] is not None
+
+    def test_link_header_set_when_next_cursor_present(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/agents", json=_body(name="agent-a"))
+        client.post("/v1/agents", json=_body(name="agent-b"))
+        client.post("/v1/agents", json=_body(name="agent-c"))
+        resp = client.get("/v1/agents?limit=2")
+        assert "link" in resp.headers
+
+    def test_limit_controls_page_size(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/agents", json=_body(name="agent-a"))
+        client.post("/v1/agents", json=_body(name="agent-b"))
+        client.post("/v1/agents", json=_body(name="agent-c"))
+        body = client.get("/v1/agents?limit=2").json()
+        assert len(body["items"]) == 2
+
+    def test_cursor_returns_next_page(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/agents", json=_body(name="agent-a"))
+        client.post("/v1/agents", json=_body(name="agent-b"))
+        client.post("/v1/agents", json=_body(name="agent-c"))
+        first = client.get("/v1/agents?limit=2").json()
+        cursor = first["next_cursor"]
+        second = client.get(f"/v1/agents?limit=2&cursor={cursor}").json()
+        assert len(second["items"]) >= 1
+        first_ids = {i["id"] for i in first["items"]}
+        second_ids = {i["id"] for i in second["items"]}
+        assert first_ids.isdisjoint(second_ids)
+
+    def test_pagination_traverses_all_agents(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        for i in range(5):
+            client.post("/v1/agents", json=_body(name=f"agent-{i}"))
+        all_ids: set[str] = set()
+        cursor = None
+        while True:
+            url = "/v1/agents?limit=2"
+            if cursor:
+                url += f"&cursor={cursor}"
+            body = client.get(url).json()
+            for item in body["items"]:
+                all_ids.add(item["id"])
+            cursor = body["next_cursor"]
+            if cursor is None:
+                break
+        assert len(all_ids) == 5
+
+    def test_invalid_cursor_returns_400(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.get("/v1/agents?cursor=not-valid-base64!!!")
+        assert resp.status_code == 400
+
+    def test_invalid_cursor_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.get("/v1/agents?cursor=not-valid-base64!!!").json()
+        assert body["error"]["code"] == "cursor_invalid"
+
+
+# ---------------------------------------------------------------------------
+# Agent list – audit log
+# ---------------------------------------------------------------------------
+
+
+class TestAgentListAuditLog:
+    def test_invalid_cursor_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/agents?cursor=bad!!!")
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "agent.list.failed" for r in records)
+
+    def test_invalid_cursor_audit_level_is_error(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/agents?cursor=bad!!!")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "agent.list.failed"
+        )
+        assert record["level"] == "error"
+
+    def test_invalid_cursor_audit_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/agents?cursor=bad!!!")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "agent.list.failed"
+        )
+        assert record["code"] == "cursor_invalid"
+
+    def test_invalid_cursor_audit_detail_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/agents?cursor=bad!!!")
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "agent.list.failed"
+        )
+        assert len(record["detail"]["message"]) > 0
+
+    def test_no_audit_on_success(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/agents")
+        records = _audit_records(storage_root)
+        assert not any(r.get("event") == "agent.list.failed" for r in records)
+
+
+# ---------------------------------------------------------------------------
+# Agent list – OTel spans
+# ---------------------------------------------------------------------------
+
+
+class TestAgentListOtel:
+    def setup_method(self) -> None:
+        _otel_exporter.clear()
+
+    def _client(self, storage_root: Path) -> TestClient:
+        app = create_app(FileAuditLog(storage_root), storage_root=storage_root)
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_success_emits_agent_list_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        client.get("/v1/agents")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "agent.list" in span_names
+
+    def test_failure_emits_agent_list_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        client.get("/v1/agents?cursor=bad!!!")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "agent.list" in span_names
+
+    def test_failure_span_has_error_status(self, storage_root: Path) -> None:
+        from opentelemetry.trace import StatusCode
+        client = self._client(storage_root)
+        client.get("/v1/agents?cursor=bad!!!")
+        spans = [s for s in _otel_exporter.get_finished_spans() if s.name == "agent.list"]
+        assert any(s.status.status_code == StatusCode.ERROR for s in spans)
 
 
 # ---------------------------------------------------------------------------
