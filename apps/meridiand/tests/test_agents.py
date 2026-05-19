@@ -101,6 +101,19 @@ Tests cover:
   - Span carries agent.id and agent.name attributes.
   - create_app wires agents router when storage_root is supplied.
   - create_app omits agents route when storage_root is None.
+  - GET /v1/agents/{id} returns 200 with agent record on success.
+  - Response includes id, name, kind, created_at, and embedded version object.
+  - Response version object is the pinned current_version pointer.
+  - Response matches the stored agent record.
+  - Unknown agent id returns 404 with code "agent_not_found".
+  - Soft-deleted agent returns 404 with code "agent_not_found".
+  - On failure, audit log entry written with event "agent.get.failed".
+  - Audit entry level is "error" on failure.
+  - Audit entry detail includes agent_id and message.
+  - No audit entry written on success.
+  - OTel span "agent.get" emitted on success and failure.
+  - Failure span has ERROR status.
+  - Span carries agent.id attribute.
   - DELETE /v1/agents/{id} returns 204 on success.
   - Soft-delete sets deleted_at on the persisted agent JSON.
   - Agent file is retained after soft-delete (not removed).
@@ -692,6 +705,206 @@ class TestAgentDeleteOtel:
         _otel_exporter.clear()
         client.delete(f"/v1/agents/{agent_id}")
         spans = [s for s in _otel_exporter.get_finished_spans() if s.name == "agent.delete"]
+        assert any(s.attributes.get("agent.id") == agent_id for s in spans)
+
+
+# ---------------------------------------------------------------------------
+# Agent get – success
+# ---------------------------------------------------------------------------
+
+
+class TestAgentGetSuccess:
+    def test_returns_200(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body()).json()["id"]
+        resp = client.get(f"/v1/agents/{agent_id}")
+        assert resp.status_code == 200
+
+    def test_response_has_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body()).json()["id"]
+        body = client.get(f"/v1/agents/{agent_id}").json()
+        assert body["id"] == agent_id
+
+    def test_response_has_name(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body(name="named-agent")).json()["id"]
+        body = client.get(f"/v1/agents/{agent_id}").json()
+        assert body["name"] == "named-agent"
+
+    def test_response_has_kind(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body(kind="openai")).json()["id"]
+        body = client.get(f"/v1/agents/{agent_id}").json()
+        assert body["kind"] == "openai"
+
+    def test_response_has_created_at(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body()).json()["id"]
+        body = client.get(f"/v1/agents/{agent_id}").json()
+        assert isinstance(body.get("created_at"), str)
+        assert len(body["created_at"]) > 0
+
+    def test_response_has_version(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        create_body = client.post("/v1/agents", json=_body()).json()
+        agent_id = create_body["id"]
+        body = client.get(f"/v1/agents/{agent_id}").json()
+        assert "version" in body
+        assert isinstance(body["version"], dict)
+
+    def test_version_is_pinned_current_version(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        create_body = client.post("/v1/agents", json=_body()).json()
+        agent_id = create_body["id"]
+        expected_version_id = create_body["version"]["id"]
+        body = client.get(f"/v1/agents/{agent_id}").json()
+        assert body["version"]["id"] == expected_version_id
+
+    def test_response_matches_stored_record(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body()).json()["id"]
+        body = client.get(f"/v1/agents/{agent_id}").json()
+        stored = _agent_resource(storage_root, agent_id)
+        assert body == stored
+
+
+# ---------------------------------------------------------------------------
+# Agent get – not found
+# ---------------------------------------------------------------------------
+
+
+class TestAgentGetNotFound:
+    def test_unknown_id_returns_404(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.get("/v1/agents/agent_unknown")
+        assert resp.status_code == 404
+
+    def test_not_found_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.get("/v1/agents/agent_unknown").json()
+        assert body["error"]["code"] == "agent_not_found"
+
+    def test_not_found_error_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.get("/v1/agents/agent_unknown").json()
+        assert len(body["error"]["message"]) > 0
+
+    def test_deleted_agent_returns_404(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body()).json()["id"]
+        client.delete(f"/v1/agents/{agent_id}")
+        resp = client.get(f"/v1/agents/{agent_id}")
+        assert resp.status_code == 404
+
+    def test_deleted_agent_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body()).json()["id"]
+        client.delete(f"/v1/agents/{agent_id}")
+        body = client.get(f"/v1/agents/{agent_id}").json()
+        assert body["error"]["code"] == "agent_not_found"
+
+
+# ---------------------------------------------------------------------------
+# Agent get – audit log
+# ---------------------------------------------------------------------------
+
+
+class TestAgentGetAuditLog:
+    def test_unknown_id_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/agents/agent_unknown")
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "agent.get.failed" for r in records)
+
+    def test_deleted_agent_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body()).json()["id"]
+        client.delete(f"/v1/agents/{agent_id}")
+        client.get(f"/v1/agents/{agent_id}")
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "agent.get.failed" for r in records)
+
+    def test_audit_level_is_error(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/agents/agent_unknown")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.get.failed"
+        )
+        assert record["level"] == "error"
+
+    def test_audit_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/agents/agent_unknown")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.get.failed"
+        )
+        assert record["code"] == "agent_not_found"
+
+    def test_audit_detail_has_agent_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/agents/agent_unknown")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.get.failed"
+        )
+        assert record["detail"]["agent_id"] == "agent_unknown"
+
+    def test_audit_detail_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/agents/agent_unknown")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.get.failed"
+        )
+        assert len(record["detail"]["message"]) > 0
+
+    def test_no_audit_on_success(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body()).json()["id"]
+        client.get(f"/v1/agents/{agent_id}")
+        records = _audit_records(storage_root)
+        assert not any(r.get("event") == "agent.get.failed" for r in records)
+
+
+# ---------------------------------------------------------------------------
+# Agent get – OTel spans
+# ---------------------------------------------------------------------------
+
+
+class TestAgentGetOtel:
+    def setup_method(self) -> None:
+        _otel_exporter.clear()
+
+    def _client(self, storage_root: Path) -> TestClient:
+        app = create_app(FileAuditLog(storage_root), storage_root=storage_root)
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_success_emits_agent_get_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body()).json()["id"]
+        _otel_exporter.clear()
+        client.get(f"/v1/agents/{agent_id}")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "agent.get" in span_names
+
+    def test_failure_emits_agent_get_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        client.get("/v1/agents/agent_unknown")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "agent.get" in span_names
+
+    def test_failure_span_has_error_status(self, storage_root: Path) -> None:
+        from opentelemetry.trace import StatusCode
+        client = self._client(storage_root)
+        client.get("/v1/agents/agent_unknown")
+        spans = [s for s in _otel_exporter.get_finished_spans() if s.name == "agent.get"]
+        assert any(s.status.status_code == StatusCode.ERROR for s in spans)
+
+    def test_span_has_agent_id_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        agent_id = client.post("/v1/agents", json=_body()).json()["id"]
+        _otel_exporter.clear()
+        client.get(f"/v1/agents/{agent_id}")
+        spans = [s for s in _otel_exporter.get_finished_spans() if s.name == "agent.get"]
         assert any(s.attributes.get("agent.id") == agent_id for s in spans)
 
 

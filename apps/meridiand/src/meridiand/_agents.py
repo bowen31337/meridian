@@ -74,6 +74,22 @@ class AgentNotFoundError(MeridianError):
         return 404
 
 
+class AgentGetError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="agent_get_failed", message=message, timestamp=timestamp, cause=cause
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
 class AgentDeleteError(MeridianError):
     def __init__(
         self,
@@ -437,6 +453,67 @@ def make_agents_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
             status_code=200,
             headers=response_headers,
         )
+
+    @router.get("/v1/agents/{agent_id}", status_code=200)
+    async def get_agent(agent_id: str) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+        agent_record: dict[str, Any] = {}
+
+        with tracer.start_as_current_span(
+            "agent.get",
+            attributes={"agent.id": agent_id},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="agent.get.invocation",
+                    code="agent_get",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                agent_file = agents_dir / f"{agent_id}.json"
+                if not agent_file.exists():
+                    raise AgentNotFoundError(agent_id=agent_id, timestamp=now)
+
+                agent_record = json.loads(agent_file.read_text())
+                if agent_record.get("deleted_at") is not None:
+                    raise AgentNotFoundError(agent_id=agent_id, timestamp=now)
+
+            except MeridianError as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="agent.get.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={"agent_id": agent_id, "message": err.message},
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = AgentGetError(
+                    message=f"Failed to get agent: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="agent.get.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={"agent_id": agent_id, "message": err2.message},
+                    )
+                )
+                raise err2
+
+        return JSONResponse(content=agent_record, status_code=200)
 
     @router.delete("/v1/agents/{agent_id}", status_code=204)
     async def delete_agent(agent_id: str) -> Response:
