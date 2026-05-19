@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/channel-drivers-system-cli-channel-driver-synchronous-t/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/channels-gatewa-api-post-v1-channels-id-inbound-accepts/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

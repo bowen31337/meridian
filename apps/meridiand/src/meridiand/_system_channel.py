@@ -365,18 +365,17 @@ def make_system_channel_router(
 
                 channel: dict[str, Any] = json.loads(channel_file.read_text())
 
-                # HMAC verification for webhook channels with hmac_secret_ref configured.
-                if channel.get("kind") == "meridian.webhook":
-                    hmac_secret_ref: str | None = channel.get("config", {}).get("hmac_secret_ref")
-                    if hmac_secret_ref is not None:
-                        secret = _resolver.resolve(hmac_secret_ref)
-                        if secret is not None:
-                            raw_body = await request.body()
-                            sig_header = request.headers.get("X-Meridian-Signature")
-                            if not _check_hmac_signature(raw_body, secret, sig_header):
-                                raise ChannelInboundHmacError(
-                                    channel_id=channel_id, timestamp=now
-                                )
+                # HMAC verification for any channel kind with hmac_secret_ref configured.
+                hmac_secret_ref: str | None = channel.get("config", {}).get("hmac_secret_ref")
+                if hmac_secret_ref is not None:
+                    secret = _resolver.resolve(hmac_secret_ref)
+                    if secret is not None:
+                        raw_body = await request.body()
+                        sig_header = request.headers.get("X-Meridian-Signature")
+                        if not _check_hmac_signature(raw_body, secret, sig_header):
+                            raise ChannelInboundHmacError(
+                                channel_id=channel_id, timestamp=now
+                            )
 
                 inbound_policy: str = channel.get("inbound_policy", "open")
 

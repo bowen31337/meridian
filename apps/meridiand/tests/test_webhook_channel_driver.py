@@ -628,8 +628,8 @@ class TestInboundHmacVerification:
         assert span is not None
         assert span.status.status_code == StatusCode.ERROR
 
-    def test_non_webhook_channel_no_hmac_check(self, storage_root: Path) -> None:
-        """Non-webhook channels are not subject to HMAC verification."""
+    def test_channel_without_hmac_secret_ref_no_verification(self, storage_root: Path) -> None:
+        """Channels with no hmac_secret_ref configured are not subject to HMAC verification."""
         from sdk_channel import ChannelCapabilities, ChannelDriver, SendResult
 
         class OtherDriver(ChannelDriver):
@@ -675,6 +675,74 @@ class TestInboundHmacVerification:
             f"/v1/channels/{channel_id}/inbound",
             content=body,
             headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+
+    def test_non_webhook_channel_with_hmac_secret_ref_enforces_hmac(
+        self, storage_root: Path
+    ) -> None:
+        """Any channel kind with hmac_secret_ref configured enforces HMAC verification."""
+        from sdk_channel import ChannelCapabilities, ChannelDriver, SendResult
+
+        class AnyKindDriver(ChannelDriver):
+            kind = "test.anykind"
+
+            async def start(self, request: StartRequest) -> None:
+                pass
+
+            async def send(self, request: SendRequest) -> SendResult:
+                return SendResult(message_id="m", timestamp="t", delivered=True)
+
+            async def stop(self, request: StopRequest) -> None:
+                pass
+
+            def capabilities(self) -> ChannelCapabilities:
+                return ChannelCapabilities()
+
+        channels_dir = storage_root / "channels"
+        channels_dir.mkdir(parents=True, exist_ok=True)
+        channel_id = "ch_anykind"
+        record: dict[str, Any] = {
+            "id": channel_id,
+            "kind": "test.anykind",
+            "config": {
+                "token_vault_ref": "v",
+                "hmac_secret_ref": _INBOUND_SECRET_REF,
+            },
+            "inbound_policy": "open",
+            "egress_policy": "enabled",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-01T00:00:00+00:00",
+        }
+        (channels_dir / f"{channel_id}.json").write_text(json.dumps(record))
+
+        rt = ChannelRuntime()
+        rt.register(AnyKindDriver())
+        resolver = FixedSecretResolver(_INBOUND_SECRET)
+        app = create_app(
+            FileAuditLog(storage_root),
+            storage_root=storage_root,
+            channel_runtime=rt,
+            secret_resolver=resolver,
+        )
+        client = TestClient(app, raise_server_exceptions=False)
+        body = json.dumps({"sender_id": "ext-1", "content": "hi"}).encode()
+
+        # Missing signature → 401
+        resp = client.post(
+            f"/v1/channels/{channel_id}/inbound",
+            content=body,
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 401
+        assert resp.json()["error"]["code"] == "channel_inbound_hmac_invalid"
+
+        # Valid signature → 200
+        sig = _hmac_signature(body, _INBOUND_SECRET)
+        resp = client.post(
+            f"/v1/channels/{channel_id}/inbound",
+            content=body,
+            headers={"Content-Type": "application/json", "X-Meridian-Signature": sig},
         )
         assert resp.status_code == 200
 
