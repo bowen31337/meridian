@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 from ._vault_backend_encrypted_file import EncryptedFileVaultBackend
+from ._vault_backend_os_keychain import OsKeychainVaultBackend
 
 
 def _now() -> str:
@@ -275,6 +276,7 @@ def make_vaults_router(
     audit_log: AuditLog,
     storage_root: Path,
     vault_backend: EncryptedFileVaultBackend | None = None,
+    os_keychain_backend: OsKeychainVaultBackend | None = None,
 ) -> APIRouter:
     router = APIRouter()
     vaults_dir = storage_root / "vaults"
@@ -515,22 +517,19 @@ def make_vaults_router(
                         vault_id, body.key, body.value, now
                     )
                 else:
-                    secrets_dir = vaults_dir / vault_id / "secrets"
-                    secret_file = secrets_dir / f"{body.key}.json"
-                    if secret_file.exists():
+                    if os_keychain_backend is None:
+                        raise VaultSecretStoreError(
+                            message="os_keychain backend is not configured; "
+                            "pass an OsKeychainVaultBackend to the application factory",
+                            timestamp=now,
+                        )
+                    if os_keychain_backend.secret_exists(vault_id, body.key):
                         raise VaultSecretConflictError(
                             vault_id=vault_id, key=body.key, timestamp=now
                         )
-                    secrets_dir.mkdir(parents=True, exist_ok=True)
-                    secret_record = {
-                        "vault_id": vault_id,
-                        "key": body.key,
-                        "value": body.value,
-                        "created_at": now,
-                        "last_accessed_at": None,
-                        "requester_counts": {},
-                    }
-                    secret_file.write_text(json.dumps(secret_record))
+                    secret_record = os_keychain_backend.store_secret(
+                        vault_id, body.key, body.value, now
+                    )
 
             except (
                 VaultNotFoundError,
@@ -633,17 +632,23 @@ def make_vaults_router(
                     record["requester_counts"] = counts
                     vault_backend.update_secret(vault_id, name, record)
                 else:
-                    secret_file = vaults_dir / vault_id / "secrets" / f"{name}.json"
-                    if not secret_file.exists():
+                    if os_keychain_backend is None:
+                        raise VaultSecretMetaError(
+                            message="os_keychain backend is not configured; "
+                            "pass an OsKeychainVaultBackend to the application factory",
+                            timestamp=now,
+                        )
+                    ks_record = os_keychain_backend.get_secret(vault_id, name)
+                    if ks_record is None:
                         raise VaultSecretNotFoundError(
                             vault_id=vault_id, name=name, timestamp=now
                         )
-                    record = json.loads(secret_file.read_text())
+                    record = dict(ks_record)
                     record["last_accessed_at"] = now
-                    counts = record.get("requester_counts") or {}
+                    counts = dict(record.get("requester_counts") or {})
                     counts[requester] = counts.get(requester, 0) + 1
                     record["requester_counts"] = counts
-                    secret_file.write_text(json.dumps(record))
+                    os_keychain_backend.update_secret(vault_id, name, record)
 
                 meta = {
                     "vault_id": vault_id,

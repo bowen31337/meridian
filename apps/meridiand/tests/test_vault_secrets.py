@@ -34,6 +34,7 @@ import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
+from meridiand._vault_backend_os_keychain import OsKeychainVaultBackend
 
 from tests._otel_shared import otel_exporter as _otel_exporter
 
@@ -43,8 +44,29 @@ from tests._otel_shared import otel_exporter as _otel_exporter
 # ---------------------------------------------------------------------------
 
 
+class _MemoryKeyring:
+    """In-memory keyring for test isolation."""
+
+    def __init__(self) -> None:
+        self._store: dict[tuple[str, str], str] = {}
+
+    def get_password(self, service: str, username: str) -> str | None:
+        return self._store.get((service, username))
+
+    def set_password(self, service: str, username: str, password: str) -> None:
+        self._store[(service, username)] = password
+
+    def delete_password(self, service: str, username: str) -> None:
+        self._store.pop((service, username), None)
+
+
 def _make_client(storage_root: Path) -> TestClient:
-    app = create_app(FileAuditLog(storage_root), storage_root=storage_root)
+    os_keychain = OsKeychainVaultBackend(_keyring=_MemoryKeyring())
+    app = create_app(
+        FileAuditLog(storage_root),
+        storage_root=storage_root,
+        os_keychain_backend=os_keychain,
+    )
     return TestClient(app, raise_server_exceptions=False)
 
 
@@ -77,12 +99,19 @@ def _audit_records(storage_root: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
-def _secret_file(storage_root: Path, vault_id: str, key: str) -> Path:
-    return storage_root / "vaults" / vault_id / "secrets" / f"{key}.json"
+def _make_backend() -> OsKeychainVaultBackend:
+    return OsKeychainVaultBackend(_keyring=_MemoryKeyring())
 
 
-def _read_secret_record(storage_root: Path, vault_id: str, key: str) -> dict:
-    return json.loads(_secret_file(storage_root, vault_id, key).read_text())
+def _make_client_from_backend(
+    storage_root: Path, backend: OsKeychainVaultBackend
+) -> TestClient:
+    app = create_app(
+        FileAuditLog(storage_root),
+        storage_root=storage_root,
+        os_keychain_backend=backend,
+    )
+    return TestClient(app, raise_server_exceptions=False)
 
 
 # ---------------------------------------------------------------------------
@@ -142,61 +171,70 @@ class TestVaultSecretStoreSuccess:
 
 
 class TestVaultSecretStorePersistence:
-    def test_file_written_to_storage(self, storage_root: Path) -> None:
-        client = _make_client(storage_root)
+    def test_secret_written_to_keychain(self, storage_root: Path) -> None:
+        backend = _make_backend()
+        client = _make_client_from_backend(storage_root, backend)
         vault_id = _create_vault(client)["id"]
         _store_secret(client, vault_id, key="my_key")
-        assert _secret_file(storage_root, vault_id, "my_key").exists()
+        assert backend.secret_exists(vault_id, "my_key")
 
     def test_persisted_value_present(self, storage_root: Path) -> None:
-        client = _make_client(storage_root)
+        backend = _make_backend()
+        client = _make_client_from_backend(storage_root, backend)
         vault_id = _create_vault(client)["id"]
         _store_secret(client, vault_id, key="tok", value="secret_val")
-        record = _read_secret_record(storage_root, vault_id, "tok")
+        record = backend.get_secret(vault_id, "tok")
+        assert record is not None
         assert record["value"] == "secret_val"
 
     def test_persisted_key_correct(self, storage_root: Path) -> None:
-        client = _make_client(storage_root)
+        backend = _make_backend()
+        client = _make_client_from_backend(storage_root, backend)
         vault_id = _create_vault(client)["id"]
         _store_secret(client, vault_id, key="persist_key")
-        record = _read_secret_record(storage_root, vault_id, "persist_key")
+        record = backend.get_secret(vault_id, "persist_key")
+        assert record is not None
         assert record["key"] == "persist_key"
 
     def test_persisted_vault_id_correct(self, storage_root: Path) -> None:
-        client = _make_client(storage_root)
+        backend = _make_backend()
+        client = _make_client_from_backend(storage_root, backend)
         vault_id = _create_vault(client)["id"]
         _store_secret(client, vault_id, key="some_key")
-        record = _read_secret_record(storage_root, vault_id, "some_key")
+        record = backend.get_secret(vault_id, "some_key")
+        assert record is not None
         assert record["vault_id"] == vault_id
 
     def test_persisted_last_accessed_at_is_none(self, storage_root: Path) -> None:
-        client = _make_client(storage_root)
+        backend = _make_backend()
+        client = _make_client_from_backend(storage_root, backend)
         vault_id = _create_vault(client)["id"]
         _store_secret(client, vault_id, key="fresh_key")
-        record = _read_secret_record(storage_root, vault_id, "fresh_key")
+        record = backend.get_secret(vault_id, "fresh_key")
+        assert record is not None
         assert record["last_accessed_at"] is None
 
     def test_persisted_requester_counts_empty(self, storage_root: Path) -> None:
-        client = _make_client(storage_root)
+        backend = _make_backend()
+        client = _make_client_from_backend(storage_root, backend)
         vault_id = _create_vault(client)["id"]
         _store_secret(client, vault_id, key="cnt_key")
-        record = _read_secret_record(storage_root, vault_id, "cnt_key")
+        record = backend.get_secret(vault_id, "cnt_key")
+        assert record is not None
         assert record["requester_counts"] == {}
 
-    def test_not_written_on_validation_failure(self, storage_root: Path) -> None:
-        client = _make_client(storage_root)
+    def test_not_stored_on_validation_failure(self, storage_root: Path) -> None:
+        backend = _make_backend()
+        client = _make_client_from_backend(storage_root, backend)
         vault_id = _create_vault(client)["id"]
         client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="   "))
-        secrets_dir = storage_root / "vaults" / vault_id / "secrets"
-        files = list(secrets_dir.glob("*.json")) if secrets_dir.exists() else []
-        assert files == []
+        assert not backend.secret_exists(vault_id, "   ")
 
-    def test_not_written_when_vault_not_found(self, storage_root: Path) -> None:
-        client = _make_client(storage_root)
+    def test_not_stored_when_vault_not_found(self, storage_root: Path) -> None:
+        backend = _make_backend()
+        client = _make_client_from_backend(storage_root, backend)
         client.post("/v1/vaults/vault_ghost/secrets", json=_secret_body())
-        secrets_dir = storage_root / "vaults" / "vault_ghost" / "secrets"
-        files = list(secrets_dir.glob("*.json")) if secrets_dir.exists() else []
-        assert files == []
+        assert not backend.secret_exists("vault_ghost", "api_key")
 
 
 # ---------------------------------------------------------------------------
@@ -573,12 +611,14 @@ class TestVaultSecretMetaSuccess:
         assert body2["last_accessed_at"] is not None
 
     def test_requester_count_increments(self, storage_root: Path) -> None:
-        client = _make_client(storage_root)
+        backend = _make_backend()
+        client = _make_client_from_backend(storage_root, backend)
         vault_id = _create_vault(client)["id"]
         _store_secret(client, vault_id, key="inc_key")
         client.get(f"/v1/vaults/{vault_id}/secrets/inc_key/meta")
         client.get(f"/v1/vaults/{vault_id}/secrets/inc_key/meta")
-        record = _read_secret_record(storage_root, vault_id, "inc_key")
+        record = backend.get_secret(vault_id, "inc_key")
+        assert record is not None
         total = sum(record["requester_counts"].values())
         assert total == 2
 

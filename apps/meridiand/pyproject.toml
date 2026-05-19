@@ -27,6 +27,7 @@ dependencies = [
     "sqlean-py>=3.50.4",
     "jsonschema>=4.0",
     "pyrage>=1.0",
+    "keyring>=24.0",
 ]
 
 [project.scripts]

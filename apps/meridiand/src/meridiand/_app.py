@@ -31,6 +31,7 @@ from ._cron_scheduler import run_cron_scheduler_loop
 from ._environments import make_environments_router
 from ._memory_stores import make_memory_stores_router
 from ._vault_backend_encrypted_file import EncryptedFileVaultBackend
+from ._vault_backend_os_keychain import OsKeychainVaultBackend
 from ._vaults import make_vaults_router
 from ._webhook_sender import run_webhook_sender_loop
 from ._skill_forge import run_skill_forge_loop
@@ -88,6 +89,7 @@ def create_app(
     channel_runtime: ChannelRuntime | None = None,
     secret_resolver: SecretResolver | None = None,
     vault_backend: EncryptedFileVaultBackend | None = None,
+    os_keychain_backend: OsKeychainVaultBackend | None = None,
 ) -> FastAPI:
     """
     Application factory for the meridiand HTTP API.
@@ -302,6 +304,7 @@ def create_app(
                         audit_log=audit_log,
                         storage_root=storage_root,
                         vault_backend=vault_backend,
+                        os_keychain_backend=os_keychain_backend,
                     )
                 )
                 app.include_router(
