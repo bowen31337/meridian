@@ -22,7 +22,7 @@ Covers:
   - None stdin becomes empty bytes.
   - cwd set to a fresh per-call subdir within the scratch directory.
   - timeout_seconds from request used; falls back to driver timeout_s.
-  - asyncio.TimeoutError kills process and propagates.
+  - asyncio.TimeoutError: SIGTERM sent, 2s grace, then SIGKILL; raises TimeoutError.
   - env_passthrough empty → full os.environ inherited.
   - env_passthrough non-empty → only named vars forwarded.
 
@@ -30,7 +30,7 @@ Covers:
   - execute creates a per-call subdir (tempfile.mkdtemp) inside the scratch dir.
   - cwd is the per-call subdir, not the scratch root.
   - per-call subdir is removed after execute completes.
-  - per-call subdir is removed even when asyncio.TimeoutError is raised.
+  - per-call subdir is removed even when TimeoutError is raised.
   - each execute call gets a distinct subdir.
   - tempfile.mkdtemp is called with dir=scratch_root.
 
@@ -44,6 +44,7 @@ Covers:
   - Full lifecycle (provision → execute → reclaim) produces no audit entries.
   - provision failure writes audit entry with ENV_PROVISION_FAILED.
   - execute failure writes audit entry with ENV_EXECUTE_FAILED.
+  - execute timeout writes audit entry with ENV_EXECUTE_TIMEOUT at environment.execute.timed_out.
   - reclaim failure writes audit entry with ENV_RECLAIM_FAILED.
   - execute span name is "environment.execute".
 """
@@ -114,8 +115,10 @@ def _reclaim_req(kind: str = LocalBackendDriver.KIND) -> ReclaimRequest:
 def _make_proc(returncode: int = 0, stdout: bytes = b"", stderr: bytes = b"") -> MagicMock:
     proc = MagicMock()
     proc.returncode = returncode
+    proc.terminate = MagicMock()
     proc.kill = MagicMock()
     proc.communicate = AsyncMock(return_value=(stdout, stderr))
+    proc.wait = AsyncMock(return_value=None)
     return proc
 
 
@@ -396,7 +399,7 @@ class TestExecute:
             result = await driver.execute(_execute_req(timeout=5))
         assert isinstance(result, ExecuteResult)
 
-    async def test_timeout_kills_process_and_propagates(self) -> None:
+    async def test_timeout_sends_sigterm_then_sigkill_and_raises(self) -> None:
         driver = _driver()
         proc = _make_proc()
         with _patch_makedirs():
@@ -406,8 +409,9 @@ class TestExecute:
                 "sdk_environment._local_driver.asyncio.wait_for",
                 AsyncMock(side_effect=asyncio.TimeoutError()),
             ):
-                with pytest.raises(asyncio.TimeoutError):
+                with pytest.raises(TimeoutError):
                     await driver.execute(_execute_req())
+        proc.terminate.assert_called_once()
         proc.kill.assert_called_once()
 
     async def test_env_passthrough_empty_inherits_full_env(self, monkeypatch: Any) -> None:
@@ -446,6 +450,62 @@ class TestExecute:
         env = captured[0]["env"]
         assert env.get("ALLOWED_VAR") == "allowed"
         assert "OTHER_VAR" not in env
+
+    async def test_timeout_sigterm_before_sigkill_ordering(self) -> None:
+        driver = _driver()
+        proc = _make_proc()
+        call_order: list[str] = []
+        proc.terminate = MagicMock(side_effect=lambda: call_order.append("terminate"))
+        proc.kill = MagicMock(side_effect=lambda: call_order.append("kill"))
+        with _patch_makedirs():
+            await driver.provision(_provision_req())
+        with _patch_mkdtemp(), _patch_rmtree(), _patch_exec(proc):
+            with patch(
+                "sdk_environment._local_driver.asyncio.wait_for",
+                AsyncMock(side_effect=asyncio.TimeoutError()),
+            ):
+                with pytest.raises(TimeoutError):
+                    await driver.execute(_execute_req())
+        assert call_order == ["terminate", "kill"]
+
+    async def test_timeout_message_includes_timeout_seconds(self) -> None:
+        driver = _driver(timeout_s=5.0)
+        proc = _make_proc()
+        with _patch_makedirs():
+            await driver.provision(_provision_req())
+        with _patch_mkdtemp(), _patch_rmtree(), _patch_exec(proc):
+            with patch(
+                "sdk_environment._local_driver.asyncio.wait_for",
+                AsyncMock(side_effect=asyncio.TimeoutError()),
+            ):
+                with pytest.raises(TimeoutError, match="5.0s"):
+                    await driver.execute(_execute_req())
+
+    async def test_timeout_no_sigkill_when_grace_period_succeeds(self) -> None:
+        """When process exits within grace period, SIGKILL is not sent."""
+        driver = _driver()
+        proc = _make_proc()
+        communicate_timeout = asyncio.TimeoutError()
+        call_count = 0
+
+        async def _wait_for_side_effect(coro: Any, *, timeout: float) -> Any:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise communicate_timeout
+            return await coro
+
+        with _patch_makedirs():
+            await driver.provision(_provision_req())
+        with _patch_mkdtemp(), _patch_rmtree(), _patch_exec(proc):
+            with patch(
+                "sdk_environment._local_driver.asyncio.wait_for",
+                side_effect=_wait_for_side_effect,
+            ):
+                with pytest.raises(TimeoutError):
+                    await driver.execute(_execute_req())
+        proc.terminate.assert_called_once()
+        proc.kill.assert_not_called()
 
     async def test_env_passthrough_absent_var_omitted(self, monkeypatch: Any) -> None:
         monkeypatch.delenv("ABSENT_VAR", raising=False)
@@ -530,7 +590,7 @@ class TestFreshScratchDirPerCall:
                 "sdk_environment._local_driver.asyncio.wait_for",
                 AsyncMock(side_effect=asyncio.TimeoutError()),
             ):
-                with pytest.raises(asyncio.TimeoutError):
+                with pytest.raises(TimeoutError):
                     await driver.execute(_execute_req())
         mock_rmtree.assert_any_call(_CALL_DIR, ignore_errors=True)
 
@@ -696,6 +756,40 @@ class TestRuntimeIntegration:
         assert exc_info.value.code == "ENV_EXECUTE_FAILED"
         assert len(audit_log.entries) == 1
         assert audit_log.entries[0].event == "environment.execute.failed"
+
+    async def test_execute_timeout_writes_audit_with_env_execute_timeout_code(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        driver = _driver()
+        rt = EnvironmentRuntime()
+        rt.register(driver)
+        opts = _make_options(audit_log)
+        kind = LocalBackendDriver.KIND
+
+        provision_req = ProvisionRequest(environment_id="env1", environment_kind=kind, session_id="s1")
+        execute_req = ExecuteRequest(
+            environment_id="env1",
+            environment_kind=kind,
+            session_id="s1",
+            command=("sleep", "999"),
+        )
+
+        proc = _make_proc()
+        with _patch_makedirs():
+            await rt.provision(provision_req, opts)
+
+        with _patch_mkdtemp(_CALL_DIR), _patch_rmtree(), _patch_exec(proc):
+            with patch(
+                "sdk_environment._local_driver.asyncio.wait_for",
+                AsyncMock(side_effect=asyncio.TimeoutError()),
+            ):
+                with pytest.raises(EnvironmentFailure) as exc_info:
+                    await rt.execute(execute_req, opts)
+
+        assert exc_info.value.code == "ENV_EXECUTE_TIMEOUT"
+        assert len(audit_log.entries) == 1
+        assert audit_log.entries[0].event == "environment.execute.timed_out"
+        assert audit_log.entries[0].level == "error"
 
     async def test_execute_span_name(
         self, mock_span: MockSpan, audit_log: CapturingAuditLog

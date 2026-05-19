@@ -41,6 +41,8 @@ import tempfile
 import time
 
 from ._contract import EnvironmentDriver
+
+_SIGKILL_GRACE_S: float = 2.0
 from ._types import (
     CapabilityEnvelope,
     ExecuteRequest,
@@ -177,8 +179,15 @@ class LocalBackendDriver(EnvironmentDriver):
                     timeout=timeout_s,
                 )
             except asyncio.TimeoutError:
-                proc.kill()
-                raise
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=_SIGKILL_GRACE_S)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+                raise TimeoutError(
+                    f"Subprocess timed out after {timeout_s:.1f}s"
+                )
             duration_ms = _ms_since(start)
             return ExecuteResult(
                 stdout=stdout_b.decode(errors="replace"),

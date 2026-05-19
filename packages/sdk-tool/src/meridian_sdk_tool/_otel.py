@@ -23,13 +23,15 @@ def record_tool_call_error(
     message: str,
     *,
     stderr_tail: str | None = None,
+    timeout_reason: str | None = None,
 ) -> None:
     """Add a ``tool_call.error`` event to the active span and set ERROR status.
 
     Emits a structured ``tool_call.error`` event with ``error.code`` and
     ``error.message`` attributes. When *stderr_tail* is provided (subprocess
-    crash path) it is attached as ``subprocess.stderr_tail`` so operators can
-    inspect the raw subprocess output without parsing the error message string.
+    crash path) it is attached as ``subprocess.stderr_tail``. When
+    *timeout_reason* is provided (timeout path) it is attached as
+    ``timeout.reason`` so operators can filter timeout failures by span event.
 
     Safe to call with no active span — degrades to a no-op when
     opentelemetry-api is absent or no span is active in the current context.
@@ -44,6 +46,8 @@ def record_tool_call_error(
     }
     if stderr_tail:
         attrs["subprocess.stderr_tail"] = stderr_tail
+    if timeout_reason:
+        attrs["timeout.reason"] = timeout_reason
     span.set_status(StatusCode.ERROR, message)
     span.add_event("tool_call.error", attrs)
 

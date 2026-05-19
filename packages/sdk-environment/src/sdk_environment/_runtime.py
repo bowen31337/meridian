@@ -265,6 +265,18 @@ class EnvironmentRuntime:
                 return await driver.execute(request)
             except EnvironmentFailure:
                 raise
+            except TimeoutError as exc:
+                failure = EnvironmentFailure(
+                    code="ENV_EXECUTE_TIMEOUT",
+                    message=str(exc),
+                    environment_id=request.environment_id,
+                    environment_kind=request.environment_kind,
+                    session_id=request.session_id,
+                    timestamp=now,
+                    cause=exc,
+                )
+                self._fail(span, failure, opts, "environment.execute.timed_out")
+                raise failure from exc
             except Exception as exc:
                 failure = EnvironmentFailure(
                     code="ENV_EXECUTE_FAILED",

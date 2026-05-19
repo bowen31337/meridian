@@ -92,10 +92,18 @@ async def execute_tool(
             stderr_tail = getattr(exc, "stderr_tail", None)
             if isinstance(stderr_tail, str) and stderr_tail:
                 details["stderr_tail"] = stderr_tail
+            _is_timeout = isinstance(exc, TimeoutError) or isinstance(
+                getattr(exc, "cause", None), TimeoutError
+            )
+            if _is_timeout:
+                code = "execution_timeout"
+                details["timeout_reason"] = str(exc)
+            else:
+                code = "execution_failed"
             result = _fail(
                 definition.name,
                 ctx.session_id,
-                "execution_failed",
+                code,
                 str(exc),
                 details,
                 start,
@@ -162,10 +170,12 @@ def _fail(
     error = ToolError(code=code, message=message, details=details)
 
     stderr_tail = details.get("stderr_tail")
+    timeout_reason = details.get("timeout_reason")
     record_tool_call_error(
         code,
         message,
         stderr_tail=stderr_tail if isinstance(stderr_tail, str) else None,
+        timeout_reason=timeout_reason if isinstance(timeout_reason, str) else None,
     )
 
     logger.warning(
