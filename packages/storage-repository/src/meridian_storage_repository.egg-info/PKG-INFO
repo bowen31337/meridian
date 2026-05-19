@@ -6,6 +6,7 @@ Requires-Python: >=3.11
 Requires-Dist: opentelemetry-api>=1.24
 Provides-Extra: sqlite
 Requires-Dist: aiosqlite>=0.19; extra == "sqlite"
+Requires-Dist: sqlite-vec>=0.1.6; extra == "sqlite"
 Provides-Extra: postgres
 Requires-Dist: asyncpg>=0.29; extra == "postgres"
 Provides-Extra: dev
@@ -13,3 +14,4 @@ Requires-Dist: pytest>=8; extra == "dev"
 Requires-Dist: pytest-asyncio>=0.23; extra == "dev"
 Requires-Dist: opentelemetry-sdk>=1.24; extra == "dev"
 Requires-Dist: aiosqlite>=0.19; extra == "dev"
+Requires-Dist: sqlite-vec>=0.1.6; extra == "dev"

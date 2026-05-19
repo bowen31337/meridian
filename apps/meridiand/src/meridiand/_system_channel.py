@@ -215,6 +215,30 @@ class SessionOutboundError(MeridianError):
         return 500
 
 
+class ChannelRemoteNotFoundError(MeridianError):
+    def __init__(self, *, channel_id: str, timestamp: str) -> None:
+        super().__init__(
+            code="channel_remote_not_found",
+            message=f"Channel '{channel_id}' not found",
+            timestamp=timestamp,
+        )
+
+    def http_status(self) -> int:
+        return 404
+
+
+class ChannelPairingNotFoundError(MeridianError):
+    def __init__(self, *, channel_id: str, remote_id: str, timestamp: str) -> None:
+        super().__init__(
+            code="channel_pairing_not_found",
+            message=f"No pairing found for remote '{remote_id}' on channel '{channel_id}'",
+            timestamp=timestamp,
+        )
+
+    def http_status(self) -> int:
+        return 404
+
+
 # ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
@@ -372,6 +396,82 @@ def make_system_channel_router(
         )
 
     # -----------------------------------------------------------------------
+    # GET /v1/channels/{channel_id}/remote/{remote_id}
+    # -----------------------------------------------------------------------
+
+    @router.get("/v1/channels/{channel_id}/remote/{remote_id}", status_code=200)
+    async def resolve_channel_pairing(channel_id: str, remote_id: str) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "channel.pairing.resolve",
+            attributes={"channel.id": channel_id, "channel.remote_id": remote_id},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="channel.pairing.resolve.invocation",
+                    code="channel_pairing_resolve",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                channel_file = channels_dir / f"{channel_id}.json"
+                if not channel_file.exists():
+                    raise ChannelRemoteNotFoundError(channel_id=channel_id, timestamp=now)
+
+                pairing_file = channel_pairings_dir / channel_id / f"{remote_id}.json"
+                if not pairing_file.exists():
+                    raise ChannelPairingNotFoundError(
+                        channel_id=channel_id, remote_id=remote_id, timestamp=now
+                    )
+
+                pairing: dict[str, Any] = json.loads(pairing_file.read_text())
+                user_profile_id: str | None = pairing.get("user_profile_id")
+
+            except (ChannelRemoteNotFoundError, ChannelPairingNotFoundError) as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="channel.pairing.resolve.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={"channel_id": channel_id, "remote_id": remote_id, "message": err.message},
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = ChannelInboundError(
+                    message=f"Pairing resolve failed: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="channel.pairing.resolve.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={"channel_id": channel_id, "remote_id": remote_id, "message": err2.message},
+                    )
+                )
+                raise err2
+
+        return JSONResponse(
+            content={
+                "channel_id": channel_id,
+                "remote_id": remote_id,
+                "user_profile_id": user_profile_id,
+            },
+            status_code=200,
+        )
+
+    # -----------------------------------------------------------------------
     # POST /v1/channels/{channel_id}/inbound
     # -----------------------------------------------------------------------
 
@@ -495,6 +595,30 @@ def make_system_channel_router(
                     "created_at": now,
                 }
                 (s_dir / f"{session_id}.json").write_text(json.dumps(session_record))
+
+                # Fan out: register this session on every other channel where the same
+                # UserProfile is paired, so the Session is reachable from all paired channels.
+                if user_profile_id and channel_pairings_dir.exists():
+                    for ch_dir in channel_pairings_dir.iterdir():
+                        if not ch_dir.is_dir() or ch_dir.name == channel_id:
+                            continue
+                        for pairing_f in ch_dir.glob("*.json"):
+                            p: dict[str, Any] = json.loads(pairing_f.read_text())
+                            if p.get("user_profile_id") == user_profile_id:
+                                other_ch_id: str = ch_dir.name
+                                other_s_dir = channel_sessions_dir / other_ch_id
+                                other_s_dir.mkdir(parents=True, exist_ok=True)
+                                other_sess: dict[str, Any] = {
+                                    "id": session_id,
+                                    "channel_id": other_ch_id,
+                                    "user_profile_id": user_profile_id,
+                                    "agent_id": agent_id,
+                                    "sender_id": p["sender_id"],
+                                    "created_at": now,
+                                }
+                                (other_s_dir / f"{session_id}.json").write_text(
+                                    json.dumps(other_sess)
+                                )
 
             except (ChannelInboundNotFoundError, ChannelInboundHmacError) as err:
                 record_error(span, err)

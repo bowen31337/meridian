@@ -1300,6 +1300,255 @@ class TestSessionOutbound:
 
 
 # ---------------------------------------------------------------------------
+# Pairing rule lookup: GET /v1/channels/{channel_id}/remote/{remote_id}
+# ---------------------------------------------------------------------------
+
+
+def _resolve(client: TestClient, channel_id: str, remote_id: str) -> dict:
+    resp = client.get(f"/v1/channels/{channel_id}/remote/{remote_id}")
+    return resp.json() | {"_status": resp.status_code}
+
+
+class TestPairingRuleLookup:
+    """GET /v1/channels/{channel_id}/remote/{remote_id} deterministically resolves to UserProfile."""
+
+    def test_paired_remote_returns_200(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = _create_channel(client)
+        token = _issue_pairing_token(client, channel_id, user_profile_id="user_abc")
+        _redeem_token(client, token, "ext-user-1")
+        result = _resolve(client, channel_id, "ext-user-1")
+        assert result["_status"] == 200
+
+    def test_response_has_user_profile_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = _create_channel(client)
+        token = _issue_pairing_token(client, channel_id, user_profile_id="user_abc")
+        _redeem_token(client, token, "ext-user-1")
+        result = _resolve(client, channel_id, "ext-user-1")
+        assert result["user_profile_id"] == "user_abc"
+
+    def test_response_has_channel_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = _create_channel(client)
+        token = _issue_pairing_token(client, channel_id, user_profile_id="user_abc")
+        _redeem_token(client, token, "ext-user-1")
+        result = _resolve(client, channel_id, "ext-user-1")
+        assert result["channel_id"] == channel_id
+
+    def test_response_has_remote_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = _create_channel(client)
+        token = _issue_pairing_token(client, channel_id, user_profile_id="user_abc")
+        _redeem_token(client, token, "ext-user-1")
+        result = _resolve(client, channel_id, "ext-user-1")
+        assert result["remote_id"] == "ext-user-1"
+
+    def test_unknown_channel_returns_404(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        result = _resolve(client, "ch_nonexistent", "ext-user-1")
+        assert result["_status"] == 404
+
+    def test_unknown_channel_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        result = _resolve(client, "ch_nonexistent", "ext-user-1")
+        assert result["error"]["code"] == "channel_remote_not_found"
+
+    def test_unknown_channel_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        _resolve(client, "ch_nonexistent", "ext-user-1")
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "channel.pairing.resolve.failed" for r in records)
+
+    def test_unpaired_remote_returns_404(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = _create_channel(client)
+        result = _resolve(client, channel_id, "no-such-remote")
+        assert result["_status"] == 404
+
+    def test_unpaired_remote_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = _create_channel(client)
+        result = _resolve(client, channel_id, "no-such-remote")
+        assert result["error"]["code"] == "channel_pairing_not_found"
+
+    def test_unpaired_remote_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = _create_channel(client)
+        _resolve(client, channel_id, "no-such-remote")
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "channel.pairing.resolve.failed" for r in records)
+
+    def test_auto_created_pairing_resolves(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = _create_channel(client)
+        inbound_result = _inbound(client, channel_id, "auto-sender")
+        result = _resolve(client, channel_id, "auto-sender")
+        assert result["_status"] == 200
+        assert result["user_profile_id"] == inbound_result["user_profile_id"]
+
+    def test_different_remote_ids_resolve_independently(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = _create_channel(client)
+        token_a = _issue_pairing_token(client, channel_id, user_profile_id="user_a")
+        token_b = _issue_pairing_token(client, channel_id, user_profile_id="user_b")
+        _redeem_token(client, token_a, "remote-a")
+        _redeem_token(client, token_b, "remote-b")
+        assert _resolve(client, channel_id, "remote-a")["user_profile_id"] == "user_a"
+        assert _resolve(client, channel_id, "remote-b")["user_profile_id"] == "user_b"
+
+    def test_otel_span_emitted(self, storage_root: Path) -> None:
+        from tests._otel_shared import otel_exporter
+
+        otel_exporter.clear()
+        client = _make_client(storage_root)
+        channel_id = _create_channel(client)
+        token = _issue_pairing_token(client, channel_id, user_profile_id="user_abc")
+        _redeem_token(client, token, "ext-user-1")
+        otel_exporter.clear()
+        _resolve(client, channel_id, "ext-user-1")
+        span_names = [s.name for s in otel_exporter.get_finished_spans()]
+        assert "channel.pairing.resolve" in span_names
+
+    def test_otel_span_has_channel_id(self, storage_root: Path) -> None:
+        from tests._otel_shared import otel_exporter
+
+        otel_exporter.clear()
+        client = _make_client(storage_root)
+        channel_id = _create_channel(client)
+        token = _issue_pairing_token(client, channel_id, user_profile_id="user_abc")
+        _redeem_token(client, token, "ext-user-1")
+        otel_exporter.clear()
+        _resolve(client, channel_id, "ext-user-1")
+        spans = {s.name: s for s in otel_exporter.get_finished_spans()}
+        span = spans.get("channel.pairing.resolve")
+        assert span is not None
+        assert span.attributes["channel.id"] == channel_id
+
+    def test_otel_failure_span_has_error_status(self, storage_root: Path) -> None:
+        from opentelemetry.trace import StatusCode
+        from tests._otel_shared import otel_exporter
+
+        otel_exporter.clear()
+        client = _make_client(storage_root)
+        _resolve(client, "ch_nonexistent", "ext-user-1")
+        spans = {s.name: s for s in otel_exporter.get_finished_spans()}
+        span = spans.get("channel.pairing.resolve")
+        assert span is not None
+        assert span.status.status_code == StatusCode.ERROR
+
+
+# ---------------------------------------------------------------------------
+# Cross-channel session reachability (PRD F-CH-3)
+# ---------------------------------------------------------------------------
+
+
+class TestCrossChannelSession:
+    """
+    Same Session is reachable from every channel the UserProfile is paired with.
+    When an inbound message creates a session, that session is registered under
+    all other channels where the same UserProfile has a pairing.
+    """
+
+    def test_inbound_writes_session_for_other_paired_channel(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        ch_a = _create_channel(client)
+        ch_b = _create_channel(client)
+        tok_a = _issue_pairing_token(client, ch_a, user_profile_id="user_shared")
+        tok_b = _issue_pairing_token(client, ch_b, user_profile_id="user_shared")
+        _redeem_token(client, tok_a, "remote-a")
+        _redeem_token(client, tok_b, "remote-b")
+        result = _inbound(client, ch_a, "remote-a")
+        session_id = result["session_id"]
+        assert (storage_root / "channel_sessions" / ch_b / f"{session_id}.json").exists()
+
+    def test_session_on_other_channel_has_correct_sender_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        ch_a = _create_channel(client)
+        ch_b = _create_channel(client)
+        tok_a = _issue_pairing_token(client, ch_a, user_profile_id="user_shared")
+        tok_b = _issue_pairing_token(client, ch_b, user_profile_id="user_shared")
+        _redeem_token(client, tok_a, "remote-a")
+        _redeem_token(client, tok_b, "remote-b")
+        result = _inbound(client, ch_a, "remote-a")
+        session_id = result["session_id"]
+        sess_b = json.loads(
+            (storage_root / "channel_sessions" / ch_b / f"{session_id}.json").read_text()
+        )
+        assert sess_b["sender_id"] == "remote-b"
+
+    def test_session_on_other_channel_has_correct_user_profile_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        ch_a = _create_channel(client)
+        ch_b = _create_channel(client)
+        tok_a = _issue_pairing_token(client, ch_a, user_profile_id="user_shared")
+        tok_b = _issue_pairing_token(client, ch_b, user_profile_id="user_shared")
+        _redeem_token(client, tok_a, "remote-a")
+        _redeem_token(client, tok_b, "remote-b")
+        result = _inbound(client, ch_a, "remote-a")
+        session_id = result["session_id"]
+        sess_b = json.loads(
+            (storage_root / "channel_sessions" / ch_b / f"{session_id}.json").read_text()
+        )
+        assert sess_b["user_profile_id"] == "user_shared"
+
+    def test_session_outbound_delivers_to_all_paired_channels(self, storage_root: Path) -> None:
+        driver = StubDriver()
+        client = _make_client(storage_root, _make_runtime(driver))
+        ch_a = _create_channel(client)
+        ch_b = _create_channel(client)
+        tok_a = _issue_pairing_token(client, ch_a, user_profile_id="user_shared")
+        tok_b = _issue_pairing_token(client, ch_b, user_profile_id="user_shared")
+        _redeem_token(client, tok_a, "remote-a")
+        _redeem_token(client, tok_b, "remote-b")
+        inbound_result = _inbound(client, ch_a, "remote-a")
+        session_id = inbound_result["session_id"]
+        result = _session_outbound(client, session_id)
+        assert result["_status"] == 200
+        assert len(result["results"]) == 2
+
+    def test_session_outbound_uses_correct_recipient_per_channel(self, storage_root: Path) -> None:
+        driver = StubDriver()
+        client = _make_client(storage_root, _make_runtime(driver))
+        ch_a = _create_channel(client)
+        ch_b = _create_channel(client)
+        tok_a = _issue_pairing_token(client, ch_a, user_profile_id="user_shared")
+        tok_b = _issue_pairing_token(client, ch_b, user_profile_id="user_shared")
+        _redeem_token(client, tok_a, "remote-a")
+        _redeem_token(client, tok_b, "remote-b")
+        inbound_result = _inbound(client, ch_a, "remote-a")
+        session_id = inbound_result["session_id"]
+        _session_outbound(client, session_id)
+        recipients = {s.channel_id: s.recipient for s in driver.sends}
+        assert recipients[ch_a] == "remote-a"
+        assert recipients[ch_b] == "remote-b"
+
+    def test_unpaired_channel_does_not_get_session(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        ch_a = _create_channel(client)
+        ch_b = _create_channel(client)
+        tok_a = _issue_pairing_token(client, ch_a, user_profile_id="user_only_a")
+        _redeem_token(client, tok_a, "remote-a")
+        result = _inbound(client, ch_a, "remote-a")
+        session_id = result["session_id"]
+        assert not (storage_root / "channel_sessions" / ch_b / f"{session_id}.json").exists()
+
+    def test_three_channels_all_get_session(self, storage_root: Path) -> None:
+        driver = StubDriver()
+        client = _make_client(storage_root, _make_runtime(driver))
+        channels = [_create_channel(client) for _ in range(3)]
+        for i, ch in enumerate(channels):
+            tok = _issue_pairing_token(client, ch, user_profile_id="user_triple")
+            _redeem_token(client, tok, f"remote-{i}")
+        result = _inbound(client, channels[0], "remote-0")
+        session_id = result["session_id"]
+        for i, ch in enumerate(channels[1:], 1):
+            assert (storage_root / "channel_sessions" / ch / f"{session_id}.json").exists()
+        outbound = _session_outbound(client, session_id)
+        assert len(outbound["results"]) == 3
+
+
+# ---------------------------------------------------------------------------
 # Route wiring
 # ---------------------------------------------------------------------------
 
@@ -1377,5 +1626,18 @@ class TestRouteWiring:
             "/v1/sessions/sess_any/outbound",
             json={"content": "hi"},
         )
+        assert resp.status_code == 404
+        assert "error" not in resp.json()
+
+    def test_resolve_pairing_route_present_with_runtime(self, storage_root: Path) -> None:
+        client = _make_client(storage_root, _make_runtime())
+        channel_id = _create_channel(client)
+        resp = client.get(f"/v1/channels/{channel_id}/remote/no-such-remote")
+        assert resp.json().get("error", {}).get("code") == "channel_pairing_not_found"
+
+    def test_resolve_pairing_route_absent_without_runtime(self, storage_root: Path) -> None:
+        app = create_app(FileAuditLog(storage_root), storage_root=storage_root)
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.get("/v1/channels/ch_any/remote/remote_any")
         assert resp.status_code == 404
         assert "error" not in resp.json()

@@ -14,4 +14,17 @@ src/storage_repository/_sqlite.py
 src/storage_repository/_telemetry.py
 src/storage_repository/_types.py
 src/storage_repository/_version.py
+src/storage_repository/db/migrations/0001_agents.sql
+src/storage_repository/db/migrations/0002_sessions.sql
+src/storage_repository/db/migrations/0003_threads.sql
+src/storage_repository/db/migrations/0004_messages.sql
+src/storage_repository/db/migrations/0005_tool_calls.sql
+src/storage_repository/db/migrations/0006_skills.sql
+src/storage_repository/db/migrations/0007_environments.sql
+src/storage_repository/db/migrations/0008_memory_entries.sql
+src/storage_repository/db/migrations/0009_vault_entries.sql
+src/storage_repository/db/migrations/0010_user_profiles.sql
+src/storage_repository/db/migrations/0011_channels.sql
+src/storage_repository/db/migrations/0012_webhooks.sql
+src/storage_repository/db/migrations/0013_memory_entries_vec.sql
 tests/test_conformance.py

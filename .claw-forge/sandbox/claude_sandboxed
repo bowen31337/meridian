@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/channels-gatewa-system-inbound-message-resolves-to-a-se/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/user-profiles-p-system-pairing-rule-channel-remote-id-d/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

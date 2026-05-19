@@ -5,9 +5,11 @@ pytest>=8
 pytest-asyncio>=0.23
 opentelemetry-sdk>=1.24
 aiosqlite>=0.19
+sqlite-vec>=0.1.6
 
 [postgres]
 asyncpg>=0.29
 
 [sqlite]
 aiosqlite>=0.19
+sqlite-vec>=0.1.6
