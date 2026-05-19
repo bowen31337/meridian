@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -13,6 +14,7 @@ from ._telemetry import (
     get_tracer,
     record_capability_denial,
     record_env_mismatch,
+    record_env_routing,
     record_input_schema_failure,
     record_invocation_event,
     record_output_schema_failure,
@@ -57,6 +59,7 @@ class Sandbox:
     def __init__(self) -> None:
         self._tools: dict[str, ToolDefinition] = {}
         self._dispatchers: dict[str, ToolDispatcher] = {}
+        self._tool_env_routes: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Registration
@@ -82,6 +85,10 @@ class Sandbox:
     def get_dispatcher(self, kind: str) -> ToolDispatcher | None:
         """Return the registered dispatcher for a handler kind, or None."""
         return self._dispatchers.get(kind)
+
+    def configure_tool_env(self, tool_name: str, environment: str) -> None:
+        """Route a tool to a specific environment via configuration, not code change."""
+        self._tool_env_routes[tool_name] = environment
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -165,6 +172,34 @@ class Sandbox:
                 )
                 self._fail(span, failure, opts, "sandbox.execute.failed")
                 raise failure
+
+            # Per-tool environment routing: switch context.environment from
+            # configuration, not from a code change to the tool definition.
+            # Sandbox dispatch surface is identical across backends — the harness
+            # calls execute(name, input, context) unchanged; routing is internal.
+            routed_env = self._tool_env_routes.get(name)
+            if routed_env is not None:
+                record_env_routing(
+                    span,
+                    tool_name=name,
+                    session_id=context.session_id,
+                    original_env=context.environment,
+                    routed_env=routed_env,
+                )
+                opts.audit_log.write(
+                    AuditLogEntry(
+                        level="info",
+                        event="sandbox.env.routed",
+                        tool_name=name,
+                        session_id=context.session_id,
+                        timestamp=now,
+                        detail={
+                            "routed_env": routed_env,
+                            "original_env": context.environment,
+                        },
+                    )
+                )
+                context = dataclasses.replace(context, environment=routed_env)
 
             # Capability check: required caps must be a subset of granted caps.
             # On denial, return a synthetic SandboxResult (is_error=True) so the

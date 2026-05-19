@@ -740,6 +740,186 @@ class TestExecuteEnvMismatch:
 
 
 # ---------------------------------------------------------------------------
+# execute — per-tool environment routing (ENV_ROUTED)
+# ---------------------------------------------------------------------------
+
+
+ROUTABLE_TOOL = ToolDefinition(
+    name="test.routable",
+    description="Tool without hardcoded env requirement",
+    input_schema={"type": "object"},
+    handler=InProcessHandler(),
+)
+
+REQUIRES_DOCKER_ROUTABLE = ToolDefinition(
+    name="test.requires_docker",
+    description="Tool that declares docker as required environment",
+    input_schema={"type": "object"},
+    handler=InProcessHandler(),
+    requires_env="docker",
+)
+
+CTX_LOCAL_ENV = ExecutionContext(session_id="sess1", workspace="/tmp", environment="local")
+
+
+def registered_sandbox_with_routable_tool() -> tuple[Sandbox, StubDispatcher]:
+    dispatcher = StubDispatcher()
+    sb = Sandbox()
+    sb.register_dispatcher(dispatcher)
+    sb.register_tool(ROUTABLE_TOOL)
+    return sb, dispatcher
+
+
+class TestExecuteEnvRouting:
+    async def test_routing_dispatches_successfully(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """Routed tool dispatches successfully with switched environment."""
+        sb, _ = registered_sandbox_with_routable_tool()
+        sb.configure_tool_env("test.routable", "docker")
+        result = await sb.execute("test.routable", {}, CTX_LOCAL_ENV, make_options(audit_log))
+        assert result.is_error is False
+        assert result.content == "ok"
+
+    async def test_routing_switches_context_env(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """Dispatcher receives context with the routed environment, not the original."""
+        dispatcher = StubDispatcher()
+        sb = Sandbox()
+        sb.register_dispatcher(dispatcher)
+        sb.register_tool(ROUTABLE_TOOL)
+        sb.configure_tool_env("test.routable", "docker")
+        await sb.execute("test.routable", {}, CTX_LOCAL_ENV, make_options(audit_log))
+        assert len(dispatcher.calls) == 1
+        _, _, dispatched_ctx = dispatcher.calls[0]
+        assert dispatched_ctx.environment == "docker"
+
+    async def test_routing_env_routed_event_on_span(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_routable_tool()
+        sb.configure_tool_env("test.routable", "docker")
+        await sb.execute("test.routable", {}, CTX_LOCAL_ENV, make_options(audit_log))
+        event_names = [e[0] for e in mock_span.events]
+        assert "env.routed" in event_names
+
+    async def test_routing_event_attributes(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_routable_tool()
+        sb.configure_tool_env("test.routable", "docker")
+        await sb.execute("test.routable", {}, CTX_LOCAL_ENV, make_options(audit_log))
+        ev = next(e for e in mock_span.events if e[0] == "env.routed")
+        assert ev[1]["tool.name"] == "test.routable"
+        assert ev[1]["env.original"] == "local"
+        assert ev[1]["env.routed"] == "docker"
+
+    async def test_routing_audit_entry_written(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_routable_tool()
+        sb.configure_tool_env("test.routable", "docker")
+        await sb.execute("test.routable", {}, CTX_LOCAL_ENV, make_options(audit_log))
+        events = [e.event for e in audit_log.entries]
+        assert "sandbox.env.routed" in events
+
+    async def test_routing_audit_entry_info_level(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_routable_tool()
+        sb.configure_tool_env("test.routable", "docker")
+        await sb.execute("test.routable", {}, CTX_LOCAL_ENV, make_options(audit_log))
+        entry = next(e for e in audit_log.entries if e.event == "sandbox.env.routed")
+        assert entry.level == "info"
+
+    async def test_routing_audit_entry_detail(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_routable_tool()
+        sb.configure_tool_env("test.routable", "docker")
+        await sb.execute("test.routable", {}, CTX_LOCAL_ENV, make_options(audit_log))
+        entry = next(e for e in audit_log.entries if e.event == "sandbox.env.routed")
+        assert entry.detail is not None
+        assert entry.detail["routed_env"] == "docker"
+        assert entry.detail["original_env"] == "local"
+
+    async def test_routing_span_not_error(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """Successful routing does not mark the span as an error."""
+        sb, _ = registered_sandbox_with_routable_tool()
+        sb.configure_tool_env("test.routable", "docker")
+        await sb.execute("test.routable", {}, CTX_LOCAL_ENV, make_options(audit_log))
+        assert mock_span.status is None or mock_span.status.status_code != StatusCode.ERROR
+
+    async def test_routing_from_none_env_context(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """Routing works when context.environment is None (no default env)."""
+        sb, _ = registered_sandbox_with_routable_tool()
+        sb.configure_tool_env("test.routable", "docker")
+        ctx_no_env = ExecutionContext(session_id="sess1", workspace="/tmp")
+        result = await sb.execute("test.routable", {}, ctx_no_env, make_options(audit_log))
+        assert result.is_error is False
+
+    async def test_routing_event_original_empty_when_context_none(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """env.original is empty string when context had no environment."""
+        sb, _ = registered_sandbox_with_routable_tool()
+        sb.configure_tool_env("test.routable", "docker")
+        ctx_no_env = ExecutionContext(session_id="sess1", workspace="/tmp")
+        await sb.execute("test.routable", {}, ctx_no_env, make_options(audit_log))
+        ev = next(e for e in mock_span.events if e[0] == "env.routed")
+        assert ev[1]["env.original"] == ""
+
+    async def test_no_routing_uses_original_context(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """Without routing, original context environment passes through unchanged."""
+        dispatcher = StubDispatcher()
+        sb = Sandbox()
+        sb.register_dispatcher(dispatcher)
+        sb.register_tool(ROUTABLE_TOOL)
+        await sb.execute("test.routable", {}, CTX_LOCAL_ENV, make_options(audit_log))
+        _, _, dispatched_ctx = dispatcher.calls[0]
+        assert dispatched_ctx.environment == "local"
+
+    async def test_no_routing_no_env_routed_event(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """Without routing, no env.routed event is emitted."""
+        sb, _ = registered_sandbox_with_routable_tool()
+        await sb.execute("test.routable", {}, CTX_LOCAL_ENV, make_options(audit_log))
+        event_names = [e[0] for e in mock_span.events]
+        assert "env.routed" not in event_names
+
+    async def test_routing_satisfies_requires_env(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        """Routing a tool to its required env satisfies the requires_env check."""
+        dispatcher = StubDispatcher()
+        sb = Sandbox()
+        sb.register_dispatcher(dispatcher)
+        sb.register_tool(REQUIRES_DOCKER_ROUTABLE)
+        sb.configure_tool_env("test.requires_docker", "docker")
+        result = await sb.execute(
+            "test.requires_docker", {}, CTX_LOCAL_ENV, make_options(audit_log)
+        )
+        assert result.is_error is False
+        assert len(dispatcher.calls) == 1
+
+    async def test_span_ended_on_routing(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        sb, _ = registered_sandbox_with_routable_tool()
+        sb.configure_tool_env("test.routable", "docker")
+        await sb.execute("test.routable", {}, CTX_LOCAL_ENV, make_options(audit_log))
+        assert mock_span.ended
+
+
+# ---------------------------------------------------------------------------
 # execute — timeout (TIMEOUT)
 # ---------------------------------------------------------------------------
 

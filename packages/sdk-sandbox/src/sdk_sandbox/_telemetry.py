@@ -78,6 +78,28 @@ def record_env_mismatch(
     )
 
 
+def record_env_routing(
+    span: Span,
+    tool_name: str,
+    session_id: str,
+    original_env: str | None,
+    routed_env: str,
+) -> None:
+    """
+    Records a per-tool environment routing event on the span.
+    Routing is a configuration decision, not a failure — span status is not set to ERROR.
+    """
+    span.add_event(
+        "env.routed",
+        {
+            "tool.name": tool_name,
+            "session.id": session_id,
+            "env.original": original_env or "",
+            "env.routed": routed_env,
+        },
+    )
+
+
 def record_tool_timeout(
     span: Span,
     tool_name: str,
