@@ -345,12 +345,13 @@ class TestPairingRoundTrip:
 
 
 class TestInboundResolutionOpen:
-    def test_open_policy_uses_default_user_profile(self, storage_root: Path) -> None:
+    def test_open_policy_creates_user_profile_for_sender(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         channel_id = _create_channel(client, default_user_profile_id="user_default_42")
         result = _inbound(client, channel_id, "unknown-sender")
         assert result["_status"] == 200
-        assert result["user_profile_id"] == "user_default_42"
+        # Each new sender gets an auto-created UserProfile, not the channel default.
+        assert result["user_profile_id"].startswith("up_")
 
     def test_open_policy_uses_default_agent(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
@@ -374,18 +375,14 @@ class TestInboundResolutionOpen:
 
     def test_open_policy_session_contains_correct_fields(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        channel_id = _create_channel(
-            client,
-            default_user_profile_id="user_def",
-            default_agent_id="agent_def",
-        )
+        channel_id = _create_channel(client, default_agent_id="agent_def")
         result = _inbound(client, channel_id, "sender-x")
         session_id = result["session_id"]
         session = json.loads(
             (storage_root / "channel_sessions" / channel_id / f"{session_id}.json").read_text()
         )
         assert session["channel_id"] == channel_id
-        assert session["user_profile_id"] == "user_def"
+        assert session["user_profile_id"] == result["user_profile_id"]
         assert session["agent_id"] == "agent_def"
         assert session["sender_id"] == "sender-x"
 
@@ -394,6 +391,23 @@ class TestInboundResolutionOpen:
         channel_id = _create_channel(client)
         result = _inbound(client, channel_id, "any-sender")
         assert result["quarantined"] is False
+
+    def test_open_policy_creates_pairing_for_sender(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = _create_channel(client)
+        _inbound(client, channel_id, "new-sender")
+        pairing_file = storage_root / "channel_pairings" / channel_id / "new-sender.json"
+        assert pairing_file.exists()
+        pairing = json.loads(pairing_file.read_text())
+        assert pairing["auto_created"] is True
+        assert pairing["user_profile_id"].startswith("up_")
+
+    def test_open_policy_second_inbound_reuses_profile(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = _create_channel(client)
+        first = _inbound(client, channel_id, "returning-sender")
+        second = _inbound(client, channel_id, "returning-sender")
+        assert first["user_profile_id"] == second["user_profile_id"]
 
     def test_open_policy_no_audit_on_success(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
@@ -449,13 +463,44 @@ class TestUntrustedInboundQuarantine:
         assert q_record["sender_id"] == "untrusted-sender"
         assert q_record["content"] == "bad message"
 
-    def test_quarantine_no_session_created(self, storage_root: Path) -> None:
+    def test_quarantine_creates_session_for_quarantine_profile(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = self._quarantine_channel(client)
+        result = _inbound(client, channel_id, "untrusted-sender")
+        session_id = result["session_id"]
+        sessions_dir = storage_root / "channel_sessions" / channel_id
+        assert (sessions_dir / f"{session_id}.json").exists()
+
+    def test_quarantine_returns_user_profile_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = self._quarantine_channel(client)
+        result = _inbound(client, channel_id, "untrusted-sender")
+        assert "user_profile_id" in result
+        assert result["user_profile_id"].startswith("qup_")
+
+    def test_quarantine_returns_session_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = self._quarantine_channel(client)
+        result = _inbound(client, channel_id, "untrusted-sender")
+        assert "session_id" in result
+        assert result["session_id"].startswith("sess_")
+
+    def test_quarantine_profile_has_minimal_caps(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         channel_id = self._quarantine_channel(client)
         _inbound(client, channel_id, "untrusted-sender")
-        sessions_dir = storage_root / "channel_sessions" / channel_id
-        files = list(sessions_dir.glob("*.json")) if sessions_dir.exists() else []
-        assert files == []
+        qp_file = storage_root / "channel_quarantine" / channel_id / "_profile.json"
+        assert qp_file.exists()
+        qp = json.loads(qp_file.read_text())
+        caps = json.loads(qp["metadata"])["capabilities"]
+        assert caps == ["minimal"]
+
+    def test_quarantine_reuses_quarantine_profile(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = self._quarantine_channel(client)
+        first = _inbound(client, channel_id, "sender-a")
+        second = _inbound(client, channel_id, "sender-b")
+        assert first["user_profile_id"] == second["user_profile_id"]
 
     def test_quarantine_no_audit_entry(self, storage_root: Path) -> None:
         client = _make_client(storage_root)

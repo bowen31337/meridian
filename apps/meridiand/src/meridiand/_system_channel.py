@@ -421,15 +421,40 @@ def make_system_channel_router(
                 inbound_policy: str = channel.get("inbound_policy", "open")
 
                 user_profile_id: str | None = None
+                quarantined = False
+                quarantine_id: str | None = None
                 pairing_file = channel_pairings_dir / channel_id / f"{body.sender_id}.json"
 
                 if pairing_file.exists():
+                    # Known sender — use their linked UserProfile.
                     pairing: dict[str, Any] = json.loads(pairing_file.read_text())
                     user_profile_id = pairing.get("user_profile_id")
+                elif inbound_policy == "paired_only":
+                    raise ChannelInboundPolicyRejectedError(
+                        channel_id=channel_id,
+                        sender_id=body.sender_id,
+                        timestamp=now,
+                    )
                 elif inbound_policy == "quarantine":
-                    quarantine_id = f"quar_{uuid.uuid4().hex}"
+                    # Route to the per-channel quarantine UserProfile (minimal caps).
                     q_dir = channel_quarantine_dir / channel_id
                     q_dir.mkdir(parents=True, exist_ok=True)
+                    qp_file = q_dir / "_profile.json"
+                    if qp_file.exists():
+                        qp: dict[str, Any] = json.loads(qp_file.read_text())
+                        user_profile_id = qp["id"]
+                    else:
+                        qp_id = f"qup_{uuid.uuid4().hex}"
+                        qp = {
+                            "id": qp_id,
+                            "channel_id": channel_id,
+                            "username": f"quarantine_{channel_id}",
+                            "metadata": json.dumps({"capabilities": ["minimal"]}),
+                            "created_at": now,
+                        }
+                        qp_file.write_text(json.dumps(qp))
+                        user_profile_id = qp_id
+                    quarantine_id = f"quar_{uuid.uuid4().hex}"
                     q_record: dict[str, Any] = {
                         "id": quarantine_id,
                         "channel_id": channel_id,
@@ -439,18 +464,22 @@ def make_system_channel_router(
                         "quarantined_at": now,
                     }
                     (q_dir / f"{quarantine_id}.json").write_text(json.dumps(q_record))
-                    return JSONResponse(
-                        content={"quarantined": True, "quarantine_id": quarantine_id},
-                        status_code=200,
-                    )
-                elif inbound_policy == "paired_only":
-                    raise ChannelInboundPolicyRejectedError(
-                        channel_id=channel_id,
-                        sender_id=body.sender_id,
-                        timestamp=now,
-                    )
+                    quarantined = True
                 else:
-                    user_profile_id = channel.get("default_user_profile_id")
+                    # open policy — auto-create a UserProfile for this sender so their
+                    # identity is stable across sessions.
+                    new_profile_id = f"up_{uuid.uuid4().hex}"
+                    pairing_dir = channel_pairings_dir / channel_id
+                    pairing_dir.mkdir(parents=True, exist_ok=True)
+                    auto_pairing: dict[str, Any] = {
+                        "sender_id": body.sender_id,
+                        "user_profile_id": new_profile_id,
+                        "channel_id": channel_id,
+                        "created_at": now,
+                        "auto_created": True,
+                    }
+                    (pairing_dir / f"{body.sender_id}.json").write_text(json.dumps(auto_pairing))
+                    user_profile_id = new_profile_id
 
                 agent_id: str | None = channel.get("default_agent_id")
 
@@ -521,15 +550,15 @@ def make_system_channel_router(
                 if latency_ms > _INBOUND_LATENCY_TARGET_MS:
                     span.set_attribute("channel.inbound.latency_target_exceeded", True)
 
-        return JSONResponse(
-            content={
-                "user_profile_id": user_profile_id,
-                "agent_id": agent_id,
-                "session_id": session_id,
-                "quarantined": False,
-            },
-            status_code=200,
-        )
+        response_body: dict[str, Any] = {
+            "user_profile_id": user_profile_id,
+            "agent_id": agent_id,
+            "session_id": session_id,
+            "quarantined": quarantined,
+        }
+        if quarantine_id is not None:
+            response_body["quarantine_id"] = quarantine_id
+        return JSONResponse(content=response_body, status_code=200)
 
     # -----------------------------------------------------------------------
     # POST /v1/channels/{channel_id}/outbound
