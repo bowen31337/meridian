@@ -20,11 +20,19 @@ Covers:
   - request.env merged into subprocess environment.
   - stdin forwarded as bytes to communicate().
   - None stdin becomes empty bytes.
-  - cwd set to the scratch directory.
+  - cwd set to a fresh per-call subdir within the scratch directory.
   - timeout_seconds from request used; falls back to driver timeout_s.
   - asyncio.TimeoutError kills process and propagates.
   - env_passthrough empty → full os.environ inherited.
   - env_passthrough non-empty → only named vars forwarded.
+
+  Fresh per-call scratch directories:
+  - execute creates a per-call subdir (tempfile.mkdtemp) inside the scratch dir.
+  - cwd is the per-call subdir, not the scratch root.
+  - per-call subdir is removed after execute completes.
+  - per-call subdir is removed even when asyncio.TimeoutError is raised.
+  - each execute call gets a distinct subdir.
+  - tempfile.mkdtemp is called with dir=scratch_root.
 
   reclaim:
   - Calls shutil.rmtree on the scratch directory.
@@ -43,6 +51,7 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -68,6 +77,8 @@ from .conftest import CapturingAuditLog, MockSpan
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+_CALL_DIR = "/tmp/meridian-local/env1/callxxx"
 
 
 def _driver(**kwargs: Any) -> LocalBackendDriver:
@@ -128,6 +139,22 @@ def _patch_makedirs(side_effect: Exception | None = None) -> Any:
 
 def _patch_rmtree() -> Any:
     return patch("sdk_environment._local_driver.shutil.rmtree")
+
+
+def _patch_mkdtemp(return_value: str = _CALL_DIR) -> Any:
+    return patch("sdk_environment._local_driver.tempfile.mkdtemp", return_value=return_value)
+
+
+@contextlib.contextmanager
+def _exec_ctx(
+    proc: MagicMock | None = None,
+    procs: list[MagicMock] | None = None,
+    *,
+    call_dir: str = _CALL_DIR,
+) -> Any:
+    """Combined patch for execute: subprocess + mkdtemp + rmtree."""
+    with _patch_mkdtemp(call_dir), _patch_rmtree(), _patch_exec(proc, procs):
+        yield
 
 
 def _make_options(audit: CapturingAuditLog) -> RuntimeOptions:
@@ -245,7 +272,7 @@ class TestExecute:
         driver = _driver()
         with _patch_makedirs():
             await driver.provision(_provision_req())
-        with _patch_exec(_make_proc(stdout=b"ok")):
+        with _exec_ctx(_make_proc(stdout=b"ok")):
             result = await driver.execute(_execute_req())
         assert isinstance(result, ExecuteResult)
 
@@ -253,7 +280,7 @@ class TestExecute:
         driver = _driver()
         with _patch_makedirs():
             await driver.provision(_provision_req())
-        with _patch_exec(_make_proc(stdout=b"hello world")):
+        with _exec_ctx(_make_proc(stdout=b"hello world")):
             result = await driver.execute(_execute_req())
         assert result.stdout == "hello world"
 
@@ -261,7 +288,7 @@ class TestExecute:
         driver = _driver()
         with _patch_makedirs():
             await driver.provision(_provision_req())
-        with _patch_exec(_make_proc(stderr=b"err msg")):
+        with _exec_ctx(_make_proc(stderr=b"err msg")):
             result = await driver.execute(_execute_req())
         assert result.stderr == "err msg"
 
@@ -269,7 +296,7 @@ class TestExecute:
         driver = _driver()
         with _patch_makedirs():
             await driver.provision(_provision_req())
-        with _patch_exec(_make_proc(returncode=42)):
+        with _exec_ctx(_make_proc(returncode=42)):
             result = await driver.execute(_execute_req())
         assert result.exit_code == 42
 
@@ -277,7 +304,7 @@ class TestExecute:
         driver = _driver()
         with _patch_makedirs():
             await driver.provision(_provision_req())
-        with _patch_exec(_make_proc()):
+        with _exec_ctx(_make_proc()):
             result = await driver.execute(_execute_req())
         assert isinstance(result.duration_ms, float)
         assert result.duration_ms >= 0.0
@@ -286,7 +313,7 @@ class TestExecute:
         driver = _driver()
         with _patch_makedirs():
             await driver.provision(_provision_req())
-        with _patch_exec(_make_proc(stdout=b"x")):
+        with _exec_ctx(_make_proc(stdout=b"x")):
             result = await driver.execute(_execute_req())
         assert isinstance(result.stdout, str)
         assert isinstance(result.stderr, str)
@@ -303,14 +330,15 @@ class TestExecute:
 
         with _patch_makedirs():
             await driver.provision(_provision_req())
-        with patch("sdk_environment._local_driver.asyncio.create_subprocess_exec", side_effect=_capture):
+        with _patch_mkdtemp(), _patch_rmtree(), \
+             patch("sdk_environment._local_driver.asyncio.create_subprocess_exec", side_effect=_capture):
             await driver.execute(_execute_req(command=("python", "script.py")))
 
         cmd = captured[0][0]
         assert "python" in cmd
         assert "script.py" in cmd
 
-    async def test_cwd_set_to_scratch_directory(self) -> None:
+    async def test_cwd_set_to_per_call_subdir(self) -> None:
         driver = _driver()
         captured: list[Any] = []
 
@@ -320,10 +348,11 @@ class TestExecute:
 
         with _patch_makedirs():
             await driver.provision(_provision_req())
-        with patch("sdk_environment._local_driver.asyncio.create_subprocess_exec", side_effect=_capture):
+        with _patch_mkdtemp(_CALL_DIR), _patch_rmtree(), \
+             patch("sdk_environment._local_driver.asyncio.create_subprocess_exec", side_effect=_capture):
             await driver.execute(_execute_req())
 
-        assert captured[0]["cwd"] == "/tmp/meridian-local/env1"
+        assert captured[0]["cwd"] == _CALL_DIR
 
     async def test_request_env_merged_into_subprocess_env(self) -> None:
         driver = _driver()
@@ -335,7 +364,8 @@ class TestExecute:
 
         with _patch_makedirs():
             await driver.provision(_provision_req())
-        with patch("sdk_environment._local_driver.asyncio.create_subprocess_exec", side_effect=_capture):
+        with _patch_mkdtemp(), _patch_rmtree(), \
+             patch("sdk_environment._local_driver.asyncio.create_subprocess_exec", side_effect=_capture):
             await driver.execute(_execute_req(env={"MY_VAR": "my_val"}))
 
         assert captured[0]["env"]["MY_VAR"] == "my_val"
@@ -345,7 +375,7 @@ class TestExecute:
         proc = _make_proc()
         with _patch_makedirs():
             await driver.provision(_provision_req())
-        with _patch_exec(proc):
+        with _exec_ctx(proc):
             await driver.execute(_execute_req(stdin="my input"))
         proc.communicate.assert_awaited_once_with(b"my input")
 
@@ -354,7 +384,7 @@ class TestExecute:
         proc = _make_proc()
         with _patch_makedirs():
             await driver.provision(_provision_req())
-        with _patch_exec(proc):
+        with _exec_ctx(proc):
             await driver.execute(_execute_req(stdin=None))
         proc.communicate.assert_awaited_once_with(b"")
 
@@ -362,7 +392,7 @@ class TestExecute:
         driver = _driver(timeout_s=99.0)
         with _patch_makedirs():
             await driver.provision(_provision_req())
-        with _patch_exec(_make_proc()):
+        with _exec_ctx(_make_proc()):
             result = await driver.execute(_execute_req(timeout=5))
         assert isinstance(result, ExecuteResult)
 
@@ -371,7 +401,7 @@ class TestExecute:
         proc = _make_proc()
         with _patch_makedirs():
             await driver.provision(_provision_req())
-        with _patch_exec(proc):
+        with _patch_mkdtemp(), _patch_rmtree(), _patch_exec(proc):
             with patch(
                 "sdk_environment._local_driver.asyncio.wait_for",
                 AsyncMock(side_effect=asyncio.TimeoutError()),
@@ -391,7 +421,8 @@ class TestExecute:
 
         with _patch_makedirs():
             await driver.provision(_provision_req())
-        with patch("sdk_environment._local_driver.asyncio.create_subprocess_exec", side_effect=_capture):
+        with _patch_mkdtemp(), _patch_rmtree(), \
+             patch("sdk_environment._local_driver.asyncio.create_subprocess_exec", side_effect=_capture):
             await driver.execute(_execute_req())
 
         assert captured[0]["env"].get("HOST_VAR") == "host_val"
@@ -408,7 +439,8 @@ class TestExecute:
 
         with _patch_makedirs():
             await driver.provision(_provision_req())
-        with patch("sdk_environment._local_driver.asyncio.create_subprocess_exec", side_effect=_capture):
+        with _patch_mkdtemp(), _patch_rmtree(), \
+             patch("sdk_environment._local_driver.asyncio.create_subprocess_exec", side_effect=_capture):
             await driver.execute(_execute_req())
 
         env = captured[0]["env"]
@@ -426,7 +458,8 @@ class TestExecute:
 
         with _patch_makedirs():
             await driver.provision(_provision_req())
-        with patch("sdk_environment._local_driver.asyncio.create_subprocess_exec", side_effect=_capture):
+        with _patch_mkdtemp(), _patch_rmtree(), \
+             patch("sdk_environment._local_driver.asyncio.create_subprocess_exec", side_effect=_capture):
             await driver.execute(_execute_req())
 
         assert "ABSENT_VAR" not in captured[0]["env"]
@@ -442,10 +475,103 @@ class TestExecute:
 
         with _patch_makedirs():
             await driver.provision(_provision_req())
-        with patch("sdk_environment._local_driver.asyncio.create_subprocess_exec", side_effect=_capture):
+        with _patch_mkdtemp(), _patch_rmtree(), \
+             patch("sdk_environment._local_driver.asyncio.create_subprocess_exec", side_effect=_capture):
             await driver.execute(_execute_req(env={"SHARED_VAR": "from_request"}))
 
         assert captured[0]["env"]["SHARED_VAR"] == "from_request"
+
+
+# ---------------------------------------------------------------------------
+# Fresh per-call scratch directories
+# ---------------------------------------------------------------------------
+
+
+class TestFreshScratchDirPerCall:
+    async def test_cwd_is_subdir_of_scratch_root(self) -> None:
+        driver = _driver()
+        captured: list[Any] = []
+
+        async def _capture(*args: Any, **kwargs: Any) -> MagicMock:
+            captured.append(kwargs)
+            return _make_proc()
+
+        with _patch_makedirs():
+            await driver.provision(_provision_req())
+        with _patch_mkdtemp(_CALL_DIR), _patch_rmtree(), \
+             patch("sdk_environment._local_driver.asyncio.create_subprocess_exec", side_effect=_capture):
+            await driver.execute(_execute_req())
+
+        assert captured[0]["cwd"].startswith("/tmp/meridian-local/env1/")
+
+    async def test_mkdtemp_called_with_scratch_root(self) -> None:
+        driver = _driver()
+        with _patch_makedirs():
+            await driver.provision(_provision_req())
+        with _patch_mkdtemp(_CALL_DIR) as mock_mkdtemp, _patch_rmtree(), _patch_exec(_make_proc()):
+            await driver.execute(_execute_req())
+        mock_mkdtemp.assert_called_once_with(dir="/tmp/meridian-local/env1")
+
+    async def test_call_dir_removed_after_execute(self) -> None:
+        driver = _driver()
+        with _patch_makedirs():
+            await driver.provision(_provision_req())
+        with _patch_mkdtemp(_CALL_DIR), _patch_rmtree() as mock_rmtree, _patch_exec(_make_proc()):
+            await driver.execute(_execute_req())
+        mock_rmtree.assert_any_call(_CALL_DIR, ignore_errors=True)
+
+    async def test_call_dir_removed_on_timeout(self) -> None:
+        driver = _driver()
+        proc = _make_proc()
+        with _patch_makedirs():
+            await driver.provision(_provision_req())
+        with _patch_mkdtemp(_CALL_DIR), _patch_rmtree() as mock_rmtree, _patch_exec(proc):
+            with patch(
+                "sdk_environment._local_driver.asyncio.wait_for",
+                AsyncMock(side_effect=asyncio.TimeoutError()),
+            ):
+                with pytest.raises(asyncio.TimeoutError):
+                    await driver.execute(_execute_req())
+        mock_rmtree.assert_any_call(_CALL_DIR, ignore_errors=True)
+
+    async def test_consecutive_calls_get_different_subdirs(self) -> None:
+        driver = _driver()
+        captured: list[Any] = []
+
+        async def _capture(*args: Any, **kwargs: Any) -> MagicMock:
+            captured.append(kwargs)
+            return _make_proc()
+
+        call_dirs = ["/tmp/meridian-local/env1/call1", "/tmp/meridian-local/env1/call2"]
+        with _patch_makedirs():
+            await driver.provision(_provision_req())
+        with patch(
+            "sdk_environment._local_driver.tempfile.mkdtemp",
+            side_effect=call_dirs,
+        ), _patch_rmtree(), \
+             patch("sdk_environment._local_driver.asyncio.create_subprocess_exec", side_effect=_capture):
+            await driver.execute(_execute_req())
+            await driver.execute(_execute_req())
+
+        assert captured[0]["cwd"] != captured[1]["cwd"]
+        assert captured[0]["cwd"] == "/tmp/meridian-local/env1/call1"
+        assert captured[1]["cwd"] == "/tmp/meridian-local/env1/call2"
+
+    async def test_scratch_root_not_used_as_cwd(self) -> None:
+        driver = _driver()
+        captured: list[Any] = []
+
+        async def _capture(*args: Any, **kwargs: Any) -> MagicMock:
+            captured.append(kwargs)
+            return _make_proc()
+
+        with _patch_makedirs():
+            await driver.provision(_provision_req())
+        with _patch_mkdtemp(_CALL_DIR), _patch_rmtree(), \
+             patch("sdk_environment._local_driver.asyncio.create_subprocess_exec", side_effect=_capture):
+            await driver.execute(_execute_req())
+
+        assert captured[0]["cwd"] != "/tmp/meridian-local/env1"
 
 
 # ---------------------------------------------------------------------------
@@ -508,7 +634,7 @@ class TestRuntimeIntegration:
         with _patch_makedirs():
             await rt.provision(provision_req, opts)
 
-        with _patch_exec(_make_proc(stdout=b"ok")):
+        with _exec_ctx(_make_proc(stdout=b"ok")):
             result = await rt.execute(execute_req, opts)
 
         with _patch_rmtree():
@@ -560,7 +686,7 @@ class TestRuntimeIntegration:
         with _patch_makedirs():
             await rt.provision(provision_req, opts)
 
-        with patch(
+        with _patch_mkdtemp(_CALL_DIR), _patch_rmtree(), patch(
             "sdk_environment._local_driver.asyncio.create_subprocess_exec",
             AsyncMock(side_effect=Exception("spawn failed")),
         ):
@@ -591,7 +717,7 @@ class TestRuntimeIntegration:
         with _patch_makedirs():
             await rt.provision(provision_req, opts)
 
-        with _patch_exec(_make_proc(stdout=b"hi")):
+        with _exec_ctx(_make_proc(stdout=b"hi")):
             await rt.execute(execute_req, opts)
 
         assert mock_span.name == "environment.execute"

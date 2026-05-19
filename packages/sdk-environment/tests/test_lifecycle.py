@@ -18,6 +18,13 @@ Covers:
     entry removed from pool so next call can re-attempt.
   - Unknown kind: EnvironmentFailure(ENV_KIND_NOT_REGISTERED) propagated.
   - Background reaper lifecycle: start() / stop() round-trip.
+  - Pool size (max_workers):
+    - New environment evicts LRU provisioned worker when pool is full.
+    - Evicted worker is reclaimed with reason=pool_size_eviction.
+    - Reusing an existing entry never triggers eviction.
+    - LRU selection targets the least-recently-used provisioned entry.
+    - max_workers=None allows unlimited workers (no eviction).
+    - Eviction emits "environment.pool.idle_reclaim" span with pool_size_eviction reason.
 """
 
 from __future__ import annotations
@@ -723,3 +730,112 @@ class TestConfigurableTTL:
         pool._workers["env1"].last_used_at = time.monotonic() - 130
         await pool._reap_idle()
         assert "env1" not in pool._workers
+
+
+# ---------------------------------------------------------------------------
+# Pool size (max_workers)
+# ---------------------------------------------------------------------------
+
+
+class TestPoolSizeLimit:
+    async def test_new_env_evicts_lru_when_pool_full(
+        self, span_tracer: SpanCapturingTracer, audit_log: CapturingAuditLog
+    ) -> None:
+        driver = PoolDriver()
+        _, pool = _make_pool(driver, options=PoolOptions(max_workers=1))
+        await pool.execute(_exec_req(driver.kind, "env-a"), _make_opts(audit_log))
+        assert "env-a" in pool._workers
+
+        await pool.execute(_exec_req(driver.kind, "env-b"), _make_opts(audit_log))
+        assert "env-b" in pool._workers
+        assert "env-a" not in pool._workers
+
+    async def test_evicted_worker_is_reclaimed(
+        self, span_tracer: SpanCapturingTracer, audit_log: CapturingAuditLog
+    ) -> None:
+        driver = PoolDriver()
+        _, pool = _make_pool(driver, options=PoolOptions(max_workers=1))
+        await pool.execute(_exec_req(driver.kind, "env-a"), _make_opts(audit_log))
+        await pool.execute(_exec_req(driver.kind, "env-b"), _make_opts(audit_log))
+        assert len(driver.reclaims) == 1
+        assert driver.reclaims[0].environment_id == "env-a"
+
+    async def test_reusing_existing_entry_does_not_evict(
+        self, span_tracer: SpanCapturingTracer, audit_log: CapturingAuditLog
+    ) -> None:
+        driver = PoolDriver()
+        _, pool = _make_pool(driver, options=PoolOptions(max_workers=1))
+        await pool.execute(_exec_req(driver.kind, "env-a"), _make_opts(audit_log))
+        await pool.execute(_exec_req(driver.kind, "env-a"), _make_opts(audit_log))
+        assert len(driver.reclaims) == 0
+        assert "env-a" in pool._workers
+
+    async def test_lru_selects_least_recently_used(
+        self, span_tracer: SpanCapturingTracer, audit_log: CapturingAuditLog
+    ) -> None:
+        driver = PoolDriver()
+        _, pool = _make_pool(driver, options=PoolOptions(max_workers=2))
+        await pool.execute(_exec_req(driver.kind, "env-a"), _make_opts(audit_log))
+        await pool.execute(_exec_req(driver.kind, "env-b"), _make_opts(audit_log))
+        # Backdate env-a to make it LRU
+        pool._workers["env-a"].last_used_at = time.monotonic() - 100
+
+        await pool.execute(_exec_req(driver.kind, "env-c"), _make_opts(audit_log))
+        assert "env-a" not in pool._workers
+        assert "env-b" in pool._workers
+        assert "env-c" in pool._workers
+
+    async def test_none_max_workers_allows_unlimited(
+        self, span_tracer: SpanCapturingTracer, audit_log: CapturingAuditLog
+    ) -> None:
+        driver = PoolDriver()
+        _, pool = _make_pool(driver, options=PoolOptions(max_workers=None))
+        for i in range(5):
+            await pool.execute(_exec_req(driver.kind, f"env-{i}"), _make_opts(audit_log))
+        assert len(driver.reclaims) == 0
+        assert len(pool._workers) == 5
+
+    async def test_eviction_span_emitted_with_pool_size_reason(
+        self, span_tracer: SpanCapturingTracer, audit_log: CapturingAuditLog
+    ) -> None:
+        driver = PoolDriver()
+        _, pool = _make_pool(driver, options=PoolOptions(max_workers=1))
+        await pool.execute(_exec_req(driver.kind, "env-a"), _make_opts(audit_log))
+        await pool.execute(_exec_req(driver.kind, "env-b"), _make_opts(audit_log))
+
+        reclaim_spans = span_tracer.by_name("environment.pool.idle_reclaim")
+        assert len(reclaim_spans) == 1
+        events = reclaim_spans[0].pool_events()
+        assert events[0]["reason"] == "pool_size_eviction"
+
+    async def test_eviction_span_attributes(
+        self, span_tracer: SpanCapturingTracer, audit_log: CapturingAuditLog
+    ) -> None:
+        driver = PoolDriver()
+        _, pool = _make_pool(driver, options=PoolOptions(max_workers=1))
+        await pool.execute(_exec_req(driver.kind, "env-a"), _make_opts(audit_log))
+        await pool.execute(_exec_req(driver.kind, "env-b"), _make_opts(audit_log))
+
+        span = span_tracer.first("environment.pool.idle_reclaim")
+        assert span.attributes["environment.id"] == "env-a"
+        assert span.attributes["environment.kind"] == driver.kind
+
+    async def test_multiple_evictions_at_boundary(
+        self, span_tracer: SpanCapturingTracer, audit_log: CapturingAuditLog
+    ) -> None:
+        driver = PoolDriver()
+        _, pool = _make_pool(driver, options=PoolOptions(max_workers=2))
+        await pool.execute(_exec_req(driver.kind, "env-a"), _make_opts(audit_log))
+        await pool.execute(_exec_req(driver.kind, "env-b"), _make_opts(audit_log))
+        # Backdate both so env-a is LRU
+        pool._workers["env-a"].last_used_at = time.monotonic() - 200
+        pool._workers["env-b"].last_used_at = time.monotonic() - 100
+
+        await pool.execute(_exec_req(driver.kind, "env-c"), _make_opts(audit_log))
+        assert len(driver.reclaims) == 1  # only one eviction per new admission
+        assert driver.reclaims[0].environment_id == "env-a"
+
+        # Add one more — now env-b is LRU
+        await pool.execute(_exec_req(driver.kind, "env-d"), _make_opts(audit_log))
+        assert len(driver.reclaims) == 2
+        assert driver.reclaims[1].environment_id == "env-b"

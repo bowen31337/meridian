@@ -51,7 +51,13 @@ class WorkerPool:
     writes on failure.  The pool itself emits additional pool-lifecycle spans:
       - "environment.pool.provision_first_use" (pool path, first call)
       - "environment.pool.on_demand"            (on-demand path, every call)
-      - "environment.pool.idle_reclaim"          (reaper and drain)
+      - "environment.pool.idle_reclaim"          (reaper, drain, and pool-size eviction)
+
+    Pool-size enforcement (PoolOptions.max_workers):
+      When set, the pool keeps at most max_workers warm workers.  When a new
+      environment_id is admitted and the pool is full, the least-recently-used
+      provisioned worker is evicted synchronously (reason="pool_size_eviction")
+      to make room.  Reusing an existing entry never triggers eviction.
     """
 
     def __init__(
@@ -161,18 +167,38 @@ class WorkerPool:
         entry.last_used_at = time.monotonic()
         return result
 
+    def _lru_eviction_candidate(self) -> _WorkerEntry | None:
+        """Return the LRU provisioned entry to evict, or None if not needed.
+
+        Must be called with _dict_lock held.
+        """
+        max_w = self._options.max_workers
+        if max_w is None:
+            return None
+        provisioned = [e for e in self._workers.values() if e.provisioned]
+        if not provisioned or len(provisioned) < max_w:
+            return None
+        return min(provisioned, key=lambda e: e.last_used_at)
+
     async def _get_or_provision(
         self, request: ExecuteRequest, opts: RuntimeOptions
     ) -> _WorkerEntry:
+        evict_entry: _WorkerEntry | None = None
         async with self._dict_lock:
             entry = self._workers.get(request.environment_id)
             if entry is None:
+                evict_entry = self._lru_eviction_candidate()
+                if evict_entry is not None:
+                    self._workers.pop(evict_entry.environment_id)
                 entry = _WorkerEntry(
                     environment_id=request.environment_id,
                     environment_kind=request.environment_kind,
                     session_id=request.session_id,
                 )
                 self._workers[request.environment_id] = entry
+
+        if evict_entry is not None:
+            await self._reclaim_entry(evict_entry, reason="pool_size_eviction")
 
         if not entry.provisioned:
             async with entry._provision_lock:

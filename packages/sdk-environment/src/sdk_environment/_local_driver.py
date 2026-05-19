@@ -12,17 +12,20 @@ Subprocess environment:
 
 Lifecycle:
   provision  — creates the per-environment scratch directory
-  execute    — spawns a subprocess with cwd=scratch_dir, captures
-               stdout / stderr / exit-code
-  reclaim    — removes the scratch directory (shutil.rmtree)
+  execute    — creates a fresh per-call subdirectory (via tempfile.mkdtemp)
+               within the scratch directory, spawns a subprocess there,
+               captures stdout / stderr / exit-code, then removes the
+               per-call subdirectory (even on error or timeout).
+  reclaim    — removes the scratch directory tree (shutil.rmtree)
 
 Default backend for v1; no external runtime dependencies beyond the Python
 stdlib.
 
-Warm pool semantics (on_demand=False by default): the scratch directory is
-provisioned on first use and held warm by WorkerPool for the configured TTL,
-avoiding repeated mkdir / rmdir overhead across calls within the same
-session.  The WorkerPool reaper reclaims idle environments after the TTL.
+Warm pool semantics (on_demand=False by default): the per-environment scratch
+directory is provisioned on first use and held warm by WorkerPool for the
+configured TTL.  Each execute call receives a fresh per-call subdirectory so
+that consecutive calls on the same warm worker cannot observe each other's
+files.  The WorkerPool reaper reclaims idle environments after the TTL.
 
 On any failure the driver raises; the EnvironmentRuntime wraps the exception
 as EnvironmentFailure, surfaces the message to the caller, and writes the
@@ -34,6 +37,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import tempfile
 import time
 
 from ._contract import EnvironmentDriver
@@ -147,39 +151,43 @@ class LocalBackendDriver(EnvironmentDriver):
                 f"Environment {request.environment_id!r} is not provisioned; "
                 "call provision() before execute()."
             )
-        timeout_s = (
-            float(request.timeout_seconds)
-            if request.timeout_seconds is not None
-            else self._timeout_s
-        )
-        env = self._build_subprocess_env(request)
-        stdin_data = (request.stdin or "").encode()
-
-        start = time.monotonic()
-        proc = await asyncio.create_subprocess_exec(
-            *request.command,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=scratch,
-            env=env,
-        )
+        # Fresh per-call directory isolates each invocation from previous ones.
+        call_dir = tempfile.mkdtemp(dir=scratch)
         try:
-            stdout_b, stderr_b = await asyncio.wait_for(
-                proc.communicate(stdin_data),
-                timeout=timeout_s,
+            timeout_s = (
+                float(request.timeout_seconds)
+                if request.timeout_seconds is not None
+                else self._timeout_s
             )
-        except asyncio.TimeoutError:
-            proc.kill()
-            raise
-        duration_ms = _ms_since(start)
+            env = self._build_subprocess_env(request)
+            stdin_data = (request.stdin or "").encode()
 
-        return ExecuteResult(
-            stdout=stdout_b.decode(errors="replace"),
-            stderr=stderr_b.decode(errors="replace"),
-            exit_code=proc.returncode if proc.returncode is not None else 0,
-            duration_ms=duration_ms,
-        )
+            start = time.monotonic()
+            proc = await asyncio.create_subprocess_exec(
+                *request.command,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=call_dir,
+                env=env,
+            )
+            try:
+                stdout_b, stderr_b = await asyncio.wait_for(
+                    proc.communicate(stdin_data),
+                    timeout=timeout_s,
+                )
+            except asyncio.TimeoutError:
+                proc.kill()
+                raise
+            duration_ms = _ms_since(start)
+            return ExecuteResult(
+                stdout=stdout_b.decode(errors="replace"),
+                stderr=stderr_b.decode(errors="replace"),
+                exit_code=proc.returncode if proc.returncode is not None else 0,
+                duration_ms=duration_ms,
+            )
+        finally:
+            shutil.rmtree(call_dir, ignore_errors=True)
 
     async def reclaim(self, request: ReclaimRequest) -> None:
         scratch = self._scratch_dirs.pop(request.environment_id, None)

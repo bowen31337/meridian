@@ -214,3 +214,4 @@ class PoolOptions:
 
     idle_ttl_seconds: int = 300
     reap_interval_seconds: int = 60
+    max_workers: int | None = None  # None = unlimited; positive int caps warm-pool size (LRU eviction)
