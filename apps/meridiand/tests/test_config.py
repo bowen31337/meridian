@@ -5,9 +5,11 @@ Tests cover:
   - MeridianConfig: version field defaults to 2; nested BindConfig/CorsConfig defaults.
   - MeridianConfig: storage_root is required; expanduser is applied.
   - MeridianConfig: vaults defaults to empty list; daemon and storage default to None.
-  - MeridianConfig: accepts vaults, daemon, and storage sections when present.
+  - MeridianConfig: providers defaults to empty list.
+  - MeridianConfig: accepts vaults, providers, daemon, and storage sections when present.
   - MERIDIAN_CONFIG_VERSION constant equals 2.
   - VaultConfig: id required; backend defaults to "os_keychain"; model is frozen.
+  - ProviderConfig: name and kind required; mode/base_url/auth default to None; model is frozen.
   - DaemonConfig: bind/workspace_root/log_level defaults; workspace_root expanduser.
   - StorageConfig: database/event_log/blob_store default to None; model is frozen.
   - load_config: emits OTel span "config.load" on every invocation.
@@ -26,9 +28,14 @@ Tests cover:
   - validate_config: raises ConfigValidateError on empty vault id.
   - validate_config: raises ConfigValidateError on duplicate vault ids.
   - validate_config: raises ConfigValidateError on invalid vault backend.
+  - validate_config: raises ConfigValidateError on empty provider name.
+  - validate_config: raises ConfigValidateError on duplicate provider names.
+  - validate_config: raises ConfigValidateError on unknown provider kind.
+  - validate_config: raises ConfigValidateError on malformed secret_ref auth.
+  - validate_config: accepts plaintext auth and valid secret_ref auth.
   - validate_config: raises ConfigValidateError on invalid daemon log_level.
   - validate_config: raises ConfigValidateError on out-of-range daemon bind port.
-  - validate_config: succeeds with no vaults and no daemon section.
+  - validate_config: succeeds with no vaults, no providers, and no daemon section.
   - validate_config: failure sets span status to ERROR.
   - validate_config: failure writes audit log entry with event "config.validate.failed".
   - validate_config: failure audit detail contains errors list.
@@ -54,6 +61,7 @@ from meridiand._config import (
     DEFAULT_SOCKET_PATH,
     MERIDIAN_CONFIG_VERSION,
     MeridianConfig,
+    ProviderConfig,
     StorageConfig,
     VaultConfig,
     load_config,
@@ -455,6 +463,60 @@ class TestStorageConfig:
 
 
 # ---------------------------------------------------------------------------
+# TestProviderConfig
+# ---------------------------------------------------------------------------
+
+
+class TestProviderConfig:
+    def test_name_and_kind_are_required(self) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            ProviderConfig.model_validate({})
+
+    def test_name_required(self) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            ProviderConfig.model_validate({"kind": "anthropic"})
+
+    def test_kind_required(self) -> None:
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            ProviderConfig.model_validate({"name": "my-provider"})
+
+    def test_mode_defaults_to_none(self) -> None:
+        p = ProviderConfig(name="p", kind="anthropic")
+        assert p.mode is None
+
+    def test_base_url_defaults_to_none(self) -> None:
+        p = ProviderConfig(name="p", kind="anthropic")
+        assert p.base_url is None
+
+    def test_auth_defaults_to_none(self) -> None:
+        p = ProviderConfig(name="p", kind="anthropic")
+        assert p.auth is None
+
+    def test_accepts_all_optional_fields(self) -> None:
+        p = ProviderConfig(
+            name="p",
+            kind="openai",
+            mode="api",
+            base_url="https://api.openai.com/v1",
+            auth="sk-secret",
+        )
+        assert p.mode == "api"
+        assert p.base_url == "https://api.openai.com/v1"
+        assert p.auth == "sk-secret"
+
+    def test_model_is_frozen(self) -> None:
+        p = ProviderConfig(name="p", kind="anthropic")
+        with pytest.raises(Exception):
+            p.kind = "openai"  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
 # TestMeridianConfigNewSections
 # ---------------------------------------------------------------------------
 
@@ -463,6 +525,21 @@ class TestMeridianConfigNewSections:
     def test_vaults_defaults_to_empty_list(self, tmp_path: Path) -> None:
         m = MeridianConfig(storage_root=tmp_path)
         assert m.vaults == []
+
+    def test_providers_defaults_to_empty_list(self, tmp_path: Path) -> None:
+        m = MeridianConfig(storage_root=tmp_path)
+        assert m.providers == []
+
+    def test_accepts_providers_list(self, tmp_path: Path) -> None:
+        m = MeridianConfig.model_validate(
+            {
+                "storage_root": str(tmp_path),
+                "providers": [{"name": "claude", "kind": "anthropic"}],
+            }
+        )
+        assert len(m.providers) == 1
+        assert m.providers[0].name == "claude"
+        assert m.providers[0].kind == "anthropic"
 
     def test_daemon_defaults_to_none(self, tmp_path: Path) -> None:
         m = MeridianConfig(storage_root=tmp_path)
@@ -637,6 +714,184 @@ class TestValidateConfigVaults:
         audit = _CapturingAuditLog()
         validate_config(config, audit_log=audit)
         assert audit.entries == []
+
+
+# ---------------------------------------------------------------------------
+# TestValidateConfigProviders
+# ---------------------------------------------------------------------------
+
+
+class TestValidateConfigProviders:
+    def test_empty_providers_list_passes(self, tmp_path: Path) -> None:
+        config = MeridianConfig(storage_root=tmp_path)
+        validate_config(config)
+
+    def test_empty_provider_name_raises(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[ProviderConfig(name="", kind="anthropic")],
+        )
+        with pytest.raises(ConfigValidateError):
+            validate_config(config)
+
+    def test_whitespace_provider_name_raises(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[ProviderConfig(name="   ", kind="anthropic")],
+        )
+        with pytest.raises(ConfigValidateError):
+            validate_config(config)
+
+    def test_duplicate_provider_names_raise(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[
+                ProviderConfig(name="claude", kind="anthropic"),
+                ProviderConfig(name="claude", kind="openai"),
+            ],
+        )
+        with pytest.raises(ConfigValidateError):
+            validate_config(config)
+
+    def test_unknown_kind_raises(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[ProviderConfig(name="p", kind="cohere")],
+        )
+        with pytest.raises(ConfigValidateError):
+            validate_config(config)
+
+    def test_unknown_kind_error_mentions_kind(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[ProviderConfig(name="p", kind="cohere")],
+        )
+        with pytest.raises(ConfigValidateError, match="cohere"):
+            validate_config(config)
+
+    def test_all_valid_kinds_pass(self, tmp_path: Path) -> None:
+        for i, kind in enumerate(("anthropic", "openai", "local")):
+            config = MeridianConfig(
+                storage_root=tmp_path,
+                providers=[ProviderConfig(name=f"p{i}", kind=kind)],
+            )
+            validate_config(config)
+
+    def test_valid_provider_with_all_optional_fields_passes(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[
+                ProviderConfig(
+                    name="claude",
+                    kind="anthropic",
+                    mode="api",
+                    base_url="https://api.anthropic.com",
+                    auth="sk-ant-123",
+                )
+            ],
+        )
+        validate_config(config)
+
+    def test_plaintext_auth_passes(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[ProviderConfig(name="p", kind="anthropic", auth="sk-plaintext")],
+        )
+        validate_config(config)
+
+    def test_valid_secret_ref_auth_passes(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[
+                ProviderConfig(
+                    name="p",
+                    kind="anthropic",
+                    auth="secret_ref://vault/my-vault/api-key",
+                )
+            ],
+        )
+        validate_config(config)
+
+    def test_malformed_secret_ref_missing_key_raises(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[
+                ProviderConfig(name="p", kind="anthropic", auth="secret_ref://vault/my-vault/")
+            ],
+        )
+        with pytest.raises(ConfigValidateError):
+            validate_config(config)
+
+    def test_malformed_secret_ref_missing_vault_raises(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[
+                ProviderConfig(name="p", kind="anthropic", auth="secret_ref://vault//my-key")
+            ],
+        )
+        with pytest.raises(ConfigValidateError):
+            validate_config(config)
+
+    def test_malformed_secret_ref_wrong_scheme_raises(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[
+                ProviderConfig(name="p", kind="anthropic", auth="secret_ref://other/vault/key")
+            ],
+        )
+        with pytest.raises(ConfigValidateError):
+            validate_config(config)
+
+    def test_malformed_secret_ref_no_slash_raises(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[
+                ProviderConfig(name="p", kind="anthropic", auth="secret_ref://vault/no-key-here")
+            ],
+        )
+        with pytest.raises(ConfigValidateError):
+            validate_config(config)
+
+    def test_multiple_valid_providers_pass(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[
+                ProviderConfig(name="claude", kind="anthropic"),
+                ProviderConfig(name="gpt", kind="openai", base_url="https://api.openai.com/v1"),
+                ProviderConfig(name="llama", kind="local"),
+            ],
+        )
+        validate_config(config)
+
+    def test_failure_writes_audit_log(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[ProviderConfig(name="p", kind="unknown-kind")],
+        )
+        audit = _CapturingAuditLog()
+        with pytest.raises(ConfigValidateError):
+            validate_config(config, audit_log=audit)
+        assert any(e.event == "config.validate.failed" for e in audit.entries)
+
+    def test_failure_audit_detail_has_errors(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[ProviderConfig(name="p", kind="unknown-kind")],
+        )
+        audit = _CapturingAuditLog()
+        with pytest.raises(ConfigValidateError):
+            validate_config(config, audit_log=audit)
+        entry = next(e for e in audit.entries if e.event == "config.validate.failed")
+        assert isinstance(entry.detail["errors"], list)
+        assert len(entry.detail["errors"]) > 0
+
+    def test_error_message_includes_prefix(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[ProviderConfig(name="p", kind="unknown-kind")],
+        )
+        with pytest.raises(ConfigValidateError, match=r"providers\[0\]"):
+            validate_config(config)
 
 
 # ---------------------------------------------------------------------------

@@ -24,6 +24,8 @@ _DEFAULT_CORS_METHODS = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 _DEFAULT_CORS_HEADERS = ["*"]
 _VALID_LOG_LEVELS = {"debug", "info", "warning", "error", "critical"}
 _VALID_VAULT_BACKENDS = {"os_keychain", "encrypted_file"}
+_VALID_PROVIDER_KINDS = {"anthropic", "openai", "local"}
+_SECRET_REF_VAULT_PREFIX = "secret_ref://vault/"
 
 
 def _now() -> str:
@@ -144,6 +146,16 @@ class VaultConfig(BaseModel):
     backend: str = "os_keychain"
 
 
+class ProviderConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    name: str
+    kind: str
+    mode: str | None = None
+    base_url: str | None = None
+    auth: str | None = None
+
+
 class DaemonConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -179,6 +191,7 @@ class MeridianConfig(BaseModel):
     skill_forge: SkillForgeConfig = Field(default_factory=SkillForgeConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     vaults: list[VaultConfig] = Field(default_factory=list)
+    providers: list[ProviderConfig] = Field(default_factory=list)
     daemon: DaemonConfig | None = None
     storage: StorageConfig | None = None
 
@@ -252,7 +265,7 @@ def load_config(path: Path, audit_log: AuditLog | None = None) -> MeridianConfig
 
 
 def validate_config(config: MeridianConfig, audit_log: AuditLog | None = None) -> None:
-    """Validate vaults, daemon, and storage sections; raise ConfigValidateError on failure."""
+    """Validate vaults, providers, daemon, and storage sections; raise ConfigValidateError on failure."""
     _audit = audit_log if audit_log is not None else NoopAuditLog()
     now = _now()
     tracer = get_tracer()
@@ -285,6 +298,37 @@ def validate_config(config: MeridianConfig, audit_log: AuditLog | None = None) -
                     f"{prefix}.backend: {vault.backend!r} is not valid; "
                     f"expected one of {sorted(_VALID_VAULT_BACKENDS)}"
                 )
+
+        # Validate providers section
+        seen_names: set[str] = set()
+        for i, provider in enumerate(config.providers):
+            prefix = f"providers[{i}]"
+            if not provider.name.strip():
+                errors.append(f"{prefix}.name must not be empty")
+                continue
+            if provider.name in seen_names:
+                errors.append(f"{prefix}.name: duplicate provider name {provider.name!r}")
+            else:
+                seen_names.add(provider.name)
+            if provider.kind not in _VALID_PROVIDER_KINDS:
+                errors.append(
+                    f"{prefix}.kind: {provider.kind!r} is not valid; "
+                    f"expected one of {sorted(_VALID_PROVIDER_KINDS)}"
+                )
+            if provider.auth is not None and provider.auth.startswith("secret_ref://"):
+                if not provider.auth.startswith(_SECRET_REF_VAULT_PREFIX):
+                    errors.append(
+                        f"{prefix}.auth: invalid secret_ref format; "
+                        f"expected secret_ref://vault/{{vault_id}}/{{key}}"
+                    )
+                else:
+                    remainder = provider.auth[len(_SECRET_REF_VAULT_PREFIX):]
+                    slash_pos = remainder.find("/")
+                    if slash_pos <= 0 or slash_pos == len(remainder) - 1:
+                        errors.append(
+                            f"{prefix}.auth: invalid secret_ref format; "
+                            f"expected secret_ref://vault/{{vault_id}}/{{key}}"
+                        )
 
         # Validate daemon section
         if config.daemon is not None:
