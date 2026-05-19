@@ -60,6 +60,7 @@ from ._auth_middleware import AuthMiddleware
 from ._cursor_middleware import CursorPaginationMiddleware
 from ._error_envelope_middleware import ErrorEnvelopeMiddleware
 from ._idempotency_middleware import IdempotencyKeyMiddleware
+from ._system_audit_middleware import SystemAuditMiddleware
 from ._openapi_export import make_openapi_export_router
 from ._spawn import make_spawn_router
 from ._telemetry import get_tracer, record_create_event, record_factory_failure
@@ -200,6 +201,7 @@ def create_app(
 
             # GZip is always enabled; minimum_size=1000 avoids compressing tiny payloads.
             app.add_middleware(IdempotencyKeyMiddleware, audit_log=audit_log)
+            app.add_middleware(SystemAuditMiddleware, audit_log=audit_log)
             app.add_middleware(GZipMiddleware, minimum_size=1000)
             app.add_middleware(CursorPaginationMiddleware, audit_log=audit_log)
             if cors_enabled:
