@@ -77,6 +77,13 @@ jobs:
             exit 1
           }
 
+      - name: codegen
+        run: |
+          uv run python scripts/make_runner.py --target codegen || {
+            echo "::error::STAGE FAILED: codegen — fix codegen errors shown above"
+            exit 1
+          }
+
       - name: codegen-drift check
         run: |
           DIRS=""
@@ -85,7 +92,7 @@ jobs:
           if [ -n "$DIRS" ]; then
             # shellcheck disable=SC2086
             git diff --exit-code $DIRS || {
-              echo "::error::STAGE FAILED: codegen-drift check — generated SDK files have uncommitted changes; run 'make codegen' and commit"
+              echo "::error::STAGE FAILED: codegen-drift check — committed SDKs are out of date; run 'make codegen' and commit"
               exit 1
             }
           fi

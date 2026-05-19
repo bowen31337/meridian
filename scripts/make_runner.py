@@ -87,6 +87,18 @@ _CODEGEN_STEPS: list[_Step] = [
         None,
         "fix openapi export errors shown above",
     ),
+    (
+        "codegen:sdk-ts",
+        ["uv", "run", "python", "scripts/gen_sdk_ts.py"],
+        None,
+        "fix openapi-typescript errors shown above",
+    ),
+    (
+        "codegen:sdk-py",
+        ["uv", "run", "python", "scripts/gen_sdk_py.py"],
+        None,
+        "fix datamodel-codegen errors shown above",
+    ),
 ]
 
 _STEPS: dict[str, list[_Step]] = {

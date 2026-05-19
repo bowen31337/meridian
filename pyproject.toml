@@ -20,6 +20,7 @@ members = [
     "packages/storage-event-log",
     "packages/storage-reposit",
     "packages/storage-repository",
+    "packages/sdk-py",
     "packages/system-ulid",
 ]
 
@@ -46,6 +47,7 @@ dev = [
     "asyncpg>=0.29",
     "click>=8.0",
     "sqlean-py>=3.50.4.5",
+    "datamodel-code-generator>=0.26",
 ]
 
 [tool.pytest.ini_options]
