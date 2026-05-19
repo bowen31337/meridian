@@ -16,6 +16,7 @@ from meridian_plugin_loader import PluginLoader
 from storage_event_log import EventLogWriter
 
 from meridian_sdk_provider import ModelRouter
+from sdk_channel import ChannelRuntime
 
 from ._acp import AcpInboundHandler, AcpPeerClient, make_acp_router
 from ._acp_compliance import make_acp_compliance_router
@@ -34,6 +35,7 @@ from ._webhook_sender import run_webhook_sender_loop
 from ._skill_forge import run_skill_forge_loop
 from ._agents import make_agents_router
 from ._channels import make_channels_router
+from ._system_channel import make_system_channel_router
 from ._skill_activations import make_skill_activations_router
 from ._skills import make_skills_router
 from ._user_profiles import make_user_profiles_router
@@ -78,6 +80,7 @@ def create_app(
     webhook_sender: WebhookSenderConfig | None = None,
     skill_forge: SkillForgeConfig | None = None,
     auth_config: AuthConfig | None = None,
+    channel_runtime: ChannelRuntime | None = None,
 ) -> FastAPI:
     """
     Application factory for the meridiand HTTP API.
@@ -263,6 +266,14 @@ def create_app(
                 app.include_router(
                     make_channels_router(audit_log=audit_log, storage_root=storage_root)
                 )
+                if channel_runtime is not None:
+                    app.include_router(
+                        make_system_channel_router(
+                            audit_log=audit_log,
+                            storage_root=storage_root,
+                            channel_runtime=channel_runtime,
+                        )
+                    )
                 app.include_router(
                     make_user_profiles_router(audit_log=audit_log, storage_root=storage_root)
                 )
