@@ -1,9 +1,11 @@
-"""meridianconfig subcommands – validate ~/.meridian/config.yml."""
+"""meridianconfig subcommands – validate and migrate ~/.meridian/config.yml."""
 
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 import click
 import yaml
@@ -13,7 +15,7 @@ from ._audit import write_audit
 from ._telemetry import get_tracer, record_failure, record_invocation_event
 
 DEFAULT_CONFIG_PATH = Path.home() / ".meridian" / "config.yml"
-_CONFIG_VERSION = 1
+_CONFIG_VERSION = 2
 
 
 # ---------------------------------------------------------------------------
@@ -194,3 +196,153 @@ def _emit_failure(span: object, path: Path, errors: list[str]) -> None:
             "errors": errors,
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Upgrade registry (mirrors apps/meridiand/src/meridiand/config/upgrades/)
+# ---------------------------------------------------------------------------
+
+
+def _upgrade_v1_to_v2(raw: dict[str, object]) -> dict[str, object]:
+    result = dict(raw)
+    result["version"] = 2
+    return result
+
+
+_UPGRADES: dict[int, Callable[[dict[str, object]], dict[str, object]]] = {
+    1: _upgrade_v1_to_v2,
+}
+
+
+# ---------------------------------------------------------------------------
+# Migrate command helpers
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _MigrateResult:
+    errors: list[str] = field(default_factory=list)
+    applied: list[str] = field(default_factory=list)
+    from_version: int = 0
+    to_version: int = 0
+
+
+def _run_migrate(path: Path) -> _MigrateResult:
+    result = _MigrateResult()
+
+    if not path.exists():
+        result.errors.append(f"file not found: {path}")
+        return result
+
+    try:
+        raw = yaml.safe_load(path.read_text())
+    except yaml.YAMLError as exc:
+        result.errors.append(f"invalid YAML: {exc}")
+        return result
+
+    if not isinstance(raw, dict):
+        result.errors.append("config must be a YAML mapping, not a sequence or scalar")
+        return result
+
+    current = int(raw.get("version", 1))
+    result.from_version = current
+    result.to_version = current
+
+    if current > _CONFIG_VERSION:
+        result.errors.append(
+            f"config version {current} is newer than this tool supports "
+            f"(max: {_CONFIG_VERSION})"
+        )
+        return result
+
+    version = current
+    while version < _CONFIG_VERSION:
+        upgrade_fn = _UPGRADES.get(version)
+        if upgrade_fn is None:
+            result.errors.append(f"no upgrade path from version {version} to {version + 1}")
+            return result
+        raw = upgrade_fn(raw)
+        result.applied.append(f"v{version} → v{version + 1}")
+        version += 1
+
+    result.to_version = version
+
+    if result.applied:
+        path.write_text(yaml.dump(raw, default_flow_style=False, sort_keys=False))
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Migrate command
+# ---------------------------------------------------------------------------
+
+
+@meridianconfig.command()
+@click.option(
+    "--config",
+    "config_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    metavar="PATH",
+    help=f"Config file path (default: {DEFAULT_CONFIG_PATH}).",
+)
+def migrate(config_path: Path | None) -> None:
+    """Migrate ~/.meridian/config.yml to the latest config version."""
+    path = config_path or DEFAULT_CONFIG_PATH
+    tracer = get_tracer()
+
+    with tracer.start_as_current_span(
+        "meridianconfig.migrate",
+        attributes={"config.path": str(path)},
+    ) as span:
+        record_invocation_event(
+            span,
+            {
+                "event.name": "meridianconfig.migrate.invocation",
+                "config.path": str(path),
+            },
+        )
+
+        result = _run_migrate(path)
+
+        if result.errors:
+            error_text = "\n".join(result.errors)
+            message = f"config migration failed: {path}\n{error_text}"
+            click.echo(message)
+            record_failure(span, "config_migration_failed", message)  # type: ignore[arg-type]
+            write_audit(
+                "error",
+                "meridianconfig.migrate.failed",
+                {"path": str(path), "errors": result.errors},
+            )
+            sys.exit(1)
+            return
+
+        if not result.applied:
+            click.echo(
+                f"config is already at version {result.from_version}, nothing to migrate"
+            )
+            span.add_event("meridianconfig.migrate.noop")
+            return
+
+        summary = ", ".join(result.applied)
+        click.echo(f"migrated {path}: {summary}")
+        span.add_event(
+            "meridianconfig.migrate.ok",
+            {
+                "migrations.applied": summary,
+                "version.from": str(result.from_version),
+                "version.to": str(result.to_version),
+            },
+        )
+        write_audit(
+            "info",
+            "meridianconfig.migrate.ok",
+            {
+                "path": str(path),
+                "from_version": result.from_version,
+                "to_version": result.to_version,
+                "applied": result.applied,
+            },
+        )

@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 DEFAULT_CONFIG_PATH = Path.home() / ".meridian" / "config.yaml"
 DEFAULT_SOCKET_PATH = Path.home() / ".meridian" / "meridiand.sock"
-MERIDIAN_CONFIG_VERSION = 1
+MERIDIAN_CONFIG_VERSION = 2
 
 _DEFAULT_CORS_METHODS = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 _DEFAULT_CORS_HEADERS = ["*"]
@@ -122,7 +122,7 @@ class AuthConfig(BaseModel):
 class MeridianConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    version: int = 1
+    version: int = 2
     storage_root: Path
     bind: BindConfig = Field(default_factory=BindConfig)
     log_level: str = "info"

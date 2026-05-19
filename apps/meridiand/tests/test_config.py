@@ -2,9 +2,9 @@
 MeridianConfig conformance suite.
 
 Tests cover:
-  - MeridianConfig: version field defaults to 1; nested BindConfig/CorsConfig defaults.
+  - MeridianConfig: version field defaults to 2; nested BindConfig/CorsConfig defaults.
   - MeridianConfig: storage_root is required; expanduser is applied.
-  - MERIDIAN_CONFIG_VERSION constant equals 1.
+  - MERIDIAN_CONFIG_VERSION constant equals 2.
   - load_config: emits OTel span "config.load" on every invocation.
   - load_config: span carries "config.path" attribute.
   - load_config: span carries "config.version" attribute on success.
@@ -68,12 +68,12 @@ def _write_cfg(tmp_path: Path, **extra: object) -> Path:
 
 
 class TestMeridianConfigVersion:
-    def test_binary_version_constant_is_1(self) -> None:
-        assert MERIDIAN_CONFIG_VERSION == 1
+    def test_binary_version_constant_is_2(self) -> None:
+        assert MERIDIAN_CONFIG_VERSION == 2
 
-    def test_model_version_default_is_1(self, tmp_path: Path) -> None:
+    def test_model_version_default_is_2(self, tmp_path: Path) -> None:
         m = MeridianConfig(storage_root=tmp_path)
-        assert m.version == 1
+        assert m.version == 2
 
     def test_model_accepts_explicit_version(self, tmp_path: Path) -> None:
         m = MeridianConfig(storage_root=tmp_path, version=2)
@@ -182,7 +182,7 @@ class TestLoadConfigOtel:
         cfg = _write_cfg(tmp_path)
         load_config(cfg)
         span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "config.load")
-        assert span.attributes["config.version"] == 1
+        assert span.attributes["config.version"] == 2
 
     def test_span_has_invocation_event(self, tmp_path: Path) -> None:
         cfg = _write_cfg(tmp_path)
@@ -223,10 +223,10 @@ class TestLoadConfigVersionCheck:
         result = load_config(cfg)
         assert result.version == MERIDIAN_CONFIG_VERSION
 
-    def test_omitted_version_defaults_to_1_and_succeeds(self, tmp_path: Path) -> None:
+    def test_omitted_version_defaults_to_2_and_succeeds(self, tmp_path: Path) -> None:
         cfg = _write_cfg(tmp_path)
         result = load_config(cfg)
-        assert result.version == 1
+        assert result.version == 2
 
     def test_version_mismatch_raises_config_load_error(self, tmp_path: Path) -> None:
         cfg = _write_cfg(tmp_path, version=99)
