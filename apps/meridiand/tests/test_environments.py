@@ -43,6 +43,10 @@ Tests cover:
   - PATCH updates updated_at but not created_at.
   - PATCH with empty name returns 422.
   - PATCH returns 404 for unknown id.
+  - PATCH returns 409 with code "environment_active_session" when env has active sessions.
+  - PATCH 409 does not modify the environment record.
+  - PATCH 409 writes audit log entry with event "environment.update.failed".
+  - PATCH succeeds after active session transitions to a non-active status.
   - PATCH failure writes audit log entry.
   - OTel span "environment.update" emitted on success.
   - OTel span "environment.update" emitted on failure.
@@ -870,6 +874,97 @@ class TestEnvironmentUpdateOtel:
         span = spans.get("environment.update")
         assert span is not None
         assert span.attributes["environment.id"] == env_id
+
+
+# ---------------------------------------------------------------------------
+# PATCH 409 conflict (active session)
+# ---------------------------------------------------------------------------
+
+
+def _write_active_session_for_env(
+    storage_root: Path,
+    env_id: str,
+    agent_id: str = "agent_sess_ref",
+    session_id: str = "sess_active",
+) -> None:
+    _write_agent_with_env(storage_root, env_id, agent_id)
+    session_dir = storage_root / "sessions" / session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "session_id": session_id,
+        "agent_id": agent_id,
+        "status": "active",
+        "created_at": "2024-01-01T00:00:00+00:00",
+    }
+    (session_dir / "manifest.json").write_text(json.dumps(manifest))
+
+
+class TestEnvironmentUpdateConflict:
+    def test_returns_409_when_active_session_references_env(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        env_id = _create_env(client)["id"]
+        _write_active_session_for_env(storage_root, env_id)
+        resp = client.patch(f"/v1/environments/{env_id}", json={"name": "updated"})
+        assert resp.status_code == 409
+
+    def test_conflict_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        env_id = _create_env(client)["id"]
+        _write_active_session_for_env(storage_root, env_id)
+        body = client.patch(f"/v1/environments/{env_id}", json={"name": "updated"}).json()
+        assert body["error"]["code"] == "environment_active_session"
+
+    def test_conflict_error_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        env_id = _create_env(client)["id"]
+        _write_active_session_for_env(storage_root, env_id)
+        body = client.patch(f"/v1/environments/{env_id}", json={"name": "updated"}).json()
+        assert len(body["error"]["message"]) > 0
+
+    def test_conflict_does_not_modify_environment(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        env_id = _create_env(client, name="original")["id"]
+        _write_active_session_for_env(storage_root, env_id)
+        client.patch(f"/v1/environments/{env_id}", json={"name": "updated"})
+        resource = _env_resource(storage_root, env_id)
+        assert resource["name"] == "original"
+
+    def test_patch_succeeds_after_session_becomes_idle(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        env_id = _create_env(client)["id"]
+        session_id = "sess_active"
+        _write_active_session_for_env(storage_root, env_id, session_id=session_id)
+        assert client.patch(f"/v1/environments/{env_id}", json={"name": "updated"}).status_code == 409
+        manifest_path = storage_root / "sessions" / session_id / "manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["status"] = "idle"
+        manifest_path.write_text(json.dumps(manifest))
+        assert client.patch(f"/v1/environments/{env_id}", json={"name": "updated"}).status_code == 200
+
+    def test_conflict_writes_audit_log(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        env_id = _create_env(client)["id"]
+        _write_active_session_for_env(storage_root, env_id)
+        client.patch(f"/v1/environments/{env_id}", json={"name": "updated"})
+        records = _audit_records(storage_root)
+        assert any(
+            r.get("event") == "environment.update.failed"
+            and r.get("code") == "environment_active_session"
+            for r in records
+        )
+
+    def test_conflict_audit_detail_has_environment_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        env_id = _create_env(client)["id"]
+        _write_active_session_for_env(storage_root, env_id)
+        client.patch(f"/v1/environments/{env_id}", json={"name": "updated"})
+        records = _audit_records(storage_root)
+        record = next(
+            r for r in records
+            if r.get("event") == "environment.update.failed"
+            and r.get("code") == "environment_active_session"
+        )
+        assert record["detail"]["environment_id"] == env_id
 
 
 # ---------------------------------------------------------------------------

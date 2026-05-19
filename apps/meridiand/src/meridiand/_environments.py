@@ -158,6 +158,18 @@ class EnvironmentInUseError(MeridianError):
         return 409
 
 
+class EnvironmentActiveSessionError(MeridianError):
+    def __init__(self, *, environment_id: str, timestamp: str) -> None:
+        super().__init__(
+            code="environment_active_session",
+            message=f"Environment '{environment_id}' has active sessions",
+            timestamp=timestamp,
+        )
+
+    def http_status(self) -> int:
+        return 409
+
+
 # ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
@@ -227,6 +239,33 @@ def _referenced_by_agent(environment_id: str, agents_dir: Path) -> bool:
     return False
 
 
+def _has_active_session(environment_id: str, sessions_dir: Path, agents_dir: Path) -> bool:
+    if not sessions_dir.exists():
+        return False
+    for session_dir in sessions_dir.iterdir():
+        if not session_dir.is_dir():
+            continue
+        manifest_path = session_dir / "manifest.json"
+        if not manifest_path.exists():
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text())
+            if manifest.get("status") != "active":
+                continue
+            agent_id = manifest.get("agent_id")
+            if agent_id is None:
+                continue
+            agent_path = agents_dir / f"{agent_id}.json"
+            if not agent_path.exists():
+                continue
+            agent = json.loads(agent_path.read_text())
+            if agent.get("default_environment_id") == environment_id:
+                return True
+        except Exception:
+            continue
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Router factory
 # ---------------------------------------------------------------------------
@@ -236,6 +275,7 @@ def make_environments_router(*, audit_log: AuditLog, storage_root: Path) -> APIR
     router = APIRouter()
     envs_dir = storage_root / "environments"
     agents_dir = storage_root / "agents"
+    sessions_dir = storage_root / "sessions"
 
     @router.post("/v1/environments", status_code=201)
     async def create_environment(body: EnvironmentCreateRequest) -> JSONResponse:
@@ -466,13 +506,22 @@ def make_environments_router(*, audit_log: AuditLog, storage_root: Path) -> APIR
 
                 env_record = json.loads(env_file.read_text())
 
+                if _has_active_session(environment_id, sessions_dir, agents_dir):
+                    raise EnvironmentActiveSessionError(
+                        environment_id=environment_id, timestamp=now
+                    )
+
                 patch = body.model_dump(exclude_unset=True)
                 env_record.update(patch)
                 env_record["updated_at"] = now
 
                 env_file.write_text(json.dumps(env_record))
 
-            except (EnvironmentInvalidRequestError, EnvironmentNotFoundError) as err:
+            except (
+                EnvironmentInvalidRequestError,
+                EnvironmentNotFoundError,
+                EnvironmentActiveSessionError,
+            ) as err:
                 record_error(span, err)
                 audit_log.write(
                     AuditLogEntry(
