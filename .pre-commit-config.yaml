@@ -32,11 +32,11 @@ repos:
           - "fastapi>=0.110"
         exclude: ^packages/sdk-py/src/
 
-  # --- Guard: reject manual edits to codegen-owned SDK files ---
+  # --- L6: reject manual edits to codegen-owned SDK files ---
   - repo: local
     hooks:
       - id: no-sdk-manual-edits
-        name: Reject manual edits to generated SDK files
+        name: "L6 — Reject manual edits to generated SDK files"
         language: script
         entry: scripts/check-generated-sdk.sh
         pass_filenames: true

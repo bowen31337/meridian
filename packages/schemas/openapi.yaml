@@ -1,0 +1,310 @@
+openapi: "3.1.0"
+info:
+  title: Meridian API
+  version: "0.1.0"
+  description: Meridian control-plane HTTP API
+
+servers:
+  - url: http://localhost:8000
+    description: Local development
+
+paths:
+  /sessions:
+    get:
+      operationId: listSessions
+      summary: List all sessions
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+          required: false
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+          required: false
+      responses:
+        "200":
+          description: Session list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionList"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    post:
+      operationId: createSession
+      summary: Create a new session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSessionRequest"
+      responses:
+        "201":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /sessions/{session_id}:
+    get:
+      operationId: getSession
+      summary: Get a session by ID
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+    delete:
+      operationId: closeSession
+      summary: Close a session
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Session closed
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /sessions/{session_id}/events:
+    get:
+      operationId: listSessionEvents
+      summary: List events for a session
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+            maximum: 500
+          required: false
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+          required: false
+      responses:
+        "200":
+          description: Session event list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionEventList"
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /providers:
+    get:
+      operationId: listProviders
+      summary: List available model providers
+      responses:
+        "200":
+          description: Provider list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProviderList"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    Session:
+      type: object
+      required: [id, status, provider, model, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          description: Unique session identifier
+        status:
+          type: string
+          enum: [active, closed, error]
+          description: Current session status
+        provider:
+          type: string
+          description: Provider kind (e.g. anthropic, openai)
+        model:
+          type: string
+          description: Model identifier
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    SessionList:
+      type: object
+      required: [sessions, total]
+      properties:
+        sessions:
+          type: array
+          items:
+            $ref: "#/components/schemas/Session"
+        total:
+          type: integer
+          description: Total number of sessions (for pagination)
+
+    CreateSessionRequest:
+      type: object
+      required: [provider, model]
+      properties:
+        provider:
+          type: string
+          description: Provider kind to use
+        model:
+          type: string
+          description: Model identifier to use
+
+    Provider:
+      type: object
+      required: [kind, display_name, models]
+      properties:
+        kind:
+          type: string
+          description: Unique provider identifier
+        display_name:
+          type: string
+          description: Human-readable provider name
+        models:
+          type: array
+          items:
+            type: string
+          description: Available model identifiers
+
+    ProviderList:
+      type: object
+      required: [providers]
+      properties:
+        providers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Provider"
+
+    SessionEventKind:
+      type: string
+      enum: [message, tool_call, tool_result, error, canvas_op]
+
+    SessionEvent:
+      type: object
+      required: [id, session_id, kind, payload, timestamp]
+      properties:
+        id:
+          type: string
+        session_id:
+          type: string
+        kind:
+          $ref: "#/components/schemas/SessionEventKind"
+        payload:
+          type: object
+          additionalProperties: true
+          description: Event-specific payload
+        timestamp:
+          type: string
+          format: date-time
+
+    SessionEventList:
+      type: object
+      required: [events, total]
+      properties:
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/SessionEvent"
+        total:
+          type: integer
+
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        detail:
+          type: object
+          additionalProperties: true

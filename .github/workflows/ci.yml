@@ -77,6 +77,16 @@ jobs:
             exit 1
           }
 
+      - name: "L6 — sdk-ts guard (no manual edits to generated SDK)"
+        run: |
+          # Verify no local modifications exist inside the codegen-owned directories.
+          # Developers must regenerate via 'make codegen', not hand-edit these files.
+          git diff --exit-code packages/sdk-ts/src packages/sdk-py/src 2>/dev/null || {
+            echo "::error::STAGE FAILED [L6]: unstaged changes detected in codegen-owned SDK directories."
+            echo "::error::Run 'make codegen' to regenerate, then commit. Do not edit sdk-ts/src or sdk-py/src by hand."
+            exit 1
+          }
+
       - name: biome check
         run: |
           node_modules/.bin/biome check . || {
