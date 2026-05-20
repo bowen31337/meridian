@@ -19,6 +19,7 @@ Public surface for provider authors and router consumers::
 from ._version import SDK_PROVIDER_VERSION
 from .audit import AuditLog, AuditLogEntry, NoopAuditLog
 from .fake import FakeModelAdapter, write_model_fixture
+from .ollama import OllamaProvider
 from .errors import (
     NoProviderFoundError,
     ProviderCallError,
@@ -103,6 +104,8 @@ __all__ = [
     # Fake / testing
     "FakeModelAdapter",
     "write_model_fixture",
+    # Providers
+    "OllamaProvider",
     # Telemetry helpers
     "get_tracer",
     "record_invocation_event",
