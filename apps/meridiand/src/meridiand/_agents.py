@@ -193,6 +193,14 @@ class AgentCreateRequest(BaseModel):
     config: dict[str, Any] = {}
     capabilities: list[str] = []
     default_environment_id: str | None = None
+    instructions: str = ""
+    model_routing: dict[str, Any] = {}
+    skills: list[str] = []
+    tools: list[dict[str, Any]] = []
+    hooks: list[str] = []
+    budgets: dict[str, Any] = {}
+    memory_store_refs: list[str] = []
+    metadata: dict[str, Any] | None = None
 
 
 class AgentVersionCreateRequest(BaseModel):
@@ -200,6 +208,15 @@ class AgentVersionCreateRequest(BaseModel):
     kind: str
     config: dict[str, Any] = {}
     capabilities: list[str] = []
+    default_environment_id: str | None = None
+    instructions: str = ""
+    model_routing: dict[str, Any] = {}
+    skills: list[str] = []
+    tools: list[dict[str, Any]] = []
+    hooks: list[str] = []
+    budgets: dict[str, Any] = {}
+    memory_store_refs: list[str] = []
+    metadata: dict[str, Any] | None = None
 
 
 def _validate_request(body: AgentCreateRequest) -> AgentInvalidRequestError | None:
@@ -242,13 +259,31 @@ def _content_version_id(
     kind: str,
     config: dict[str, Any],
     capabilities: list[str],
+    instructions: str = "",
+    model_routing: dict[str, Any] | None = None,
+    skills: list[str] | None = None,
+    tools: list[dict[str, Any]] | None = None,
+    default_environment_id: str | None = None,
+    hooks: list[str] | None = None,
+    budgets: dict[str, Any] | None = None,
+    memory_store_refs: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> str:
     body = {
         "agent_id": agent_id,
+        "budgets": budgets if budgets is not None else {},
         "capabilities": capabilities,
         "config": config,
+        "default_environment_id": default_environment_id,
+        "hooks": hooks if hooks is not None else [],
+        "instructions": instructions,
         "kind": kind,
+        "memory_store_refs": memory_store_refs if memory_store_refs is not None else [],
+        "metadata": metadata,
+        "model_routing": model_routing if model_routing is not None else {},
         "name": name,
+        "skills": skills if skills is not None else [],
+        "tools": tools if tools is not None else [],
     }
     canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256(canonical.encode()).hexdigest()
@@ -301,6 +336,15 @@ def make_agents_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                     kind=body.kind,
                     config=body.config,
                     capabilities=body.capabilities,
+                    instructions=body.instructions,
+                    model_routing=body.model_routing,
+                    skills=body.skills,
+                    tools=body.tools,
+                    default_environment_id=body.default_environment_id,
+                    hooks=body.hooks,
+                    budgets=body.budgets,
+                    memory_store_refs=body.memory_store_refs,
+                    metadata=body.metadata,
                 )
 
                 version_record: dict[str, Any] = {
@@ -311,6 +355,15 @@ def make_agents_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                     "kind": body.kind,
                     "config": body.config,
                     "capabilities": body.capabilities,
+                    "instructions": body.instructions,
+                    "model_routing": body.model_routing,
+                    "skills": body.skills,
+                    "tools": body.tools,
+                    "default_environment_id": body.default_environment_id,
+                    "hooks": body.hooks,
+                    "budgets": body.budgets,
+                    "memory_store_refs": body.memory_store_refs,
+                    "metadata": body.metadata,
                     "created_at": now,
                 }
                 (versions_dir / f"{version_id}.json").write_text(json.dumps(version_record))
@@ -612,6 +665,15 @@ def make_agents_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                     kind=body.kind,
                     config=body.config,
                     capabilities=body.capabilities,
+                    instructions=body.instructions,
+                    model_routing=body.model_routing,
+                    skills=body.skills,
+                    tools=body.tools,
+                    default_environment_id=body.default_environment_id,
+                    hooks=body.hooks,
+                    budgets=body.budgets,
+                    memory_store_refs=body.memory_store_refs,
+                    metadata=body.metadata,
                 )
 
                 version_file = versions_dir / f"{version_id}.json"
@@ -638,6 +700,15 @@ def make_agents_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         "kind": body.kind,
                         "config": body.config,
                         "capabilities": body.capabilities,
+                        "instructions": body.instructions,
+                        "model_routing": body.model_routing,
+                        "skills": body.skills,
+                        "tools": body.tools,
+                        "default_environment_id": body.default_environment_id,
+                        "hooks": body.hooks,
+                        "budgets": body.budgets,
+                        "memory_store_refs": body.memory_store_refs,
+                        "metadata": body.metadata,
                         "created_at": now,
                     }
                     version_file.write_text(json.dumps(version_record))
