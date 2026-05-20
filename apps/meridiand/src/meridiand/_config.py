@@ -31,7 +31,7 @@ _DEFAULT_CORS_METHODS = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 _DEFAULT_CORS_HEADERS = ["*"]
 _VALID_LOG_LEVELS = {"debug", "info", "warning", "error", "critical"}
 _VALID_VAULT_BACKENDS = {"os_keychain", "encrypted_file"}
-_VALID_PROVIDER_KINDS = {"anthropic", "openai", "openrouter", "ollama", "local"}
+_VALID_PROVIDER_KINDS = {"anthropic", "openai", "openrouter", "ollama", "local", "claude_code_oauth"}
 _SECRET_REF_VAULT_PREFIX = "secret_ref://vault/"
 
 

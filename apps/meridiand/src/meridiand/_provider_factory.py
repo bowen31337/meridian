@@ -38,6 +38,7 @@ from meridian_sdk_provider import (
     TokenRange,
 )
 from meridian_provider_anthropic_apikey import AnthropicApiKeyProvider
+from meridian_provider_claude_code_oauth import SystemOAuthProvider
 
 from ._config import MeridianConfig, ProviderConfig, RoutingConfig
 from ._secret_ref import SecretRefResolver
@@ -100,6 +101,12 @@ def _build_provider(cfg: ProviderConfig, resolved_auth: str | None) -> ModelProv
     if kind in ("ollama", "local"):
         effective_url = base_url or _DEFAULT_OLLAMA_BASE_URL
         return OllamaProvider(effective_url, name=name)
+
+    if kind == "claude_code_oauth":
+        kwargs_oauth: dict[str, Any] = {"name": name}
+        if base_url:
+            kwargs_oauth["cli_path"] = base_url  # base_url repurposed as cli_path override
+        return SystemOAuthProvider(**kwargs_oauth)
 
     raise ProviderFactoryError(
         message=f"Unsupported provider kind {kind!r} for provider {name!r}",
