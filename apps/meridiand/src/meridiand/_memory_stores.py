@@ -27,6 +27,8 @@ from meridian_sdk_provider import (
     TextDeltaEvent,
 )
 
+from storage_event_log import EventLogRuntime, EventLogWriter
+
 from ._kb import KbStore
 
 
@@ -310,6 +312,7 @@ def make_memory_stores_router(
     audit_log: AuditLog,
     storage_root: Path,
     model_router: ModelRouter | None = None,
+    event_log: EventLogRuntime | None = None,
 ) -> APIRouter:
     router = APIRouter()
     stores_dir = storage_root / "memory_stores"
@@ -641,6 +644,40 @@ def make_memory_stores_router(
                     action = "updated" if was_present else "inserted"
 
                 span.set_attribute("memory_store.write.action", action)
+
+                if event_log is not None:
+                    event_data: dict[str, Any] = {
+                        "store_id": store_id,
+                        "key": body.key,
+                        "scope": scope,
+                        "action": action,
+                    }
+                    if action == "superseded" and dialectic_match_key is not None:
+                        event_data["superseded_memory_id"] = dialectic_match_key
+                    try:
+                        await event_log.append(store_id, "memory.write", event_data)
+                    except Exception as exc:
+                        err3 = MemoryStoreWriteError(
+                            message=f"Failed to record memory.write event: {exc}",
+                            timestamp=_now(),
+                            cause=exc,
+                        )
+                        record_error(span, err3)
+                        audit_log.write(
+                            AuditLogEntry(
+                                level="error",
+                                event="memory_store.write.event_log_failed",
+                                code=err3.code,
+                                timestamp=err3.timestamp,
+                                detail={
+                                    "memory_store_id": store_id,
+                                    "key": body.key,
+                                    "action": action,
+                                    "message": err3.message,
+                                },
+                            )
+                        )
+                        raise err3
 
             except MemoryStoreNotFoundError as err:
                 record_error(span, err)
