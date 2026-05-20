@@ -61,3 +61,19 @@ modules =
     meridian_builtin_tools
     meridian_plugin_loader
     storage_reposit
+
+# --- Contract 4: §13.5 ModelProvider isolation ---
+# No provider adapter package may import the Session Service, Vault, or
+# Sandbox directly.  Provider adapters receive a ModelCallOpts, yield
+# ModelEvents, and must not reach into system internals.
+[importlinter:contract:provider-isolation]
+name = §13.5 ModelProvider isolation — no Session Service, Vault, or Sandbox imports
+type = forbidden
+source_modules =
+    meridian_sdk_provider
+forbidden_modules =
+    meridiand._sessions
+    meridiand._vaults
+    meridiand._credential_proxy
+    sdk_sandbox
+    storage_event_log

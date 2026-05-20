@@ -54,6 +54,14 @@ class ModelProvider(Protocol):
 
     Capability hints are declared via ``capabilities``; the Router enforces
     them — adapters must not rely on callers stripping unsupported opts.
+
+    §13.5 Isolation contract
+    ------------------------
+    Provider adapters MUST NOT import or call the Session Service, Vault, or
+    Sandbox directly.  They receive a ``ModelCallOpts`` struct and yield
+    ``ModelEvent`` values; all cross-cutting concerns (OTel, audit log,
+    secret resolution) are handled by the ``ModelRouter`` that wraps them.
+    Violations are caught by the ``provider-isolation`` import-linter contract.
     """
 
     name: str
