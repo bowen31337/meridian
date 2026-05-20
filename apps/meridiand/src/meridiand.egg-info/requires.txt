@@ -5,6 +5,7 @@ uvicorn[standard]>=0.29
 pyyaml>=6.0
 opentelemetry-api>=1.24
 meridian-core-errors>=0.1.0
+meridian-sdk-sandbox>=0.1.0
 meridian-kb-indexer>=0.1.0
 meridian-plugin-loader>=0.1.0
 meridian-sdk-capabilities>=0.1.0
@@ -16,6 +17,9 @@ meridian-sdk-provider>=0.1.0
 sqlite-vec>=0.1.6
 sqlean-py>=3.50.4
 jsonschema>=4.0
+pyrage>=1.0
+keyring>=24.0
+cryptography>=42.0
 
 [dev]
 pytest>=8

@@ -926,6 +926,7 @@ name = "meridian-builtin-tools"
 version = "0.1.0"
 source = { editable = "packages/builtin-tools" }
 dependencies = [
+    { name = "meridian-kb-indexer" },
     { name = "meridian-sdk-capabilities" },
     { name = "meridian-sdk-tool" },
     { name = "pydantic" },
@@ -945,6 +946,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anyio", extras = ["trio"], marker = "extra == 'dev'" },
+    { name = "meridian-kb-indexer", editable = "packages/knowledge-base-indexer" },
     { name = "meridian-sdk-capabilities", editable = "packages/sdk-capabilities" },
     { name = "meridian-sdk-tool", editable = "packages/sdk-tool" },
     { name = "opentelemetry-api", marker = "extra == 'dev'", specifier = ">=1.24" },
@@ -1426,6 +1428,7 @@ name = "meridiand"
 version = "0.1.0"
 source = { editable = "apps/meridiand" }
 dependencies = [
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "jsonschema" },
@@ -1436,6 +1439,7 @@ dependencies = [
     { name = "meridian-sdk-capabilities" },
     { name = "meridian-sdk-channel" },
     { name = "meridian-sdk-provider" },
+    { name = "meridian-sdk-sandbox" },
     { name = "meridian-storage-blob" },
     { name = "meridian-storage-event-log" },
     { name = "meridian-storage-reposit" },
@@ -1458,6 +1462,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "cryptography", specifier = ">=42.0" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
@@ -1469,6 +1474,7 @@ requires-dist = [
     { name = "meridian-sdk-capabilities", editable = "packages/sdk-capabilities" },
     { name = "meridian-sdk-channel", editable = "packages/sdk-channel" },
     { name = "meridian-sdk-provider", editable = "packages/sdk-provider" },
+    { name = "meridian-sdk-sandbox", editable = "packages/sdk-sandbox" },
     { name = "meridian-storage-blob", editable = "packages/storage-blob" },
     { name = "meridian-storage-event-log", editable = "packages/storage-event-log" },
     { name = "meridian-storage-reposit", editable = "packages/storage-reposit" },

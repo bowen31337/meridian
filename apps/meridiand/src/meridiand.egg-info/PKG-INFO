@@ -10,6 +10,7 @@ Requires-Dist: uvicorn[standard]>=0.29
 Requires-Dist: pyyaml>=6.0
 Requires-Dist: opentelemetry-api>=1.24
 Requires-Dist: meridian-core-errors>=0.1.0
+Requires-Dist: meridian-sdk-sandbox>=0.1.0
 Requires-Dist: meridian-kb-indexer>=0.1.0
 Requires-Dist: meridian-plugin-loader>=0.1.0
 Requires-Dist: meridian-sdk-capabilities>=0.1.0
@@ -21,6 +22,9 @@ Requires-Dist: meridian-sdk-provider>=0.1.0
 Requires-Dist: sqlite-vec>=0.1.6
 Requires-Dist: sqlean-py>=3.50.4
 Requires-Dist: jsonschema>=4.0
+Requires-Dist: pyrage>=1.0
+Requires-Dist: keyring>=24.0
+Requires-Dist: cryptography>=42.0
 Provides-Extra: dev
 Requires-Dist: pytest>=8; extra == "dev"
 Requires-Dist: pytest-asyncio>=0.23; extra == "dev"

@@ -27,4 +27,8 @@ src/storage_repository/db/migrations/0010_user_profiles.sql
 src/storage_repository/db/migrations/0011_channels.sql
 src/storage_repository/db/migrations/0012_webhooks.sql
 src/storage_repository/db/migrations/0013_memory_entries_vec.sql
+src/storage_repository/db/migrations/0014_agent_versions.sql
+src/storage_repository/db/migrations/0015_skill_versions.sql
+src/storage_repository/db/migrations/0016_memory_stores.sql
+src/storage_repository/db/migrations/0017_audit_log_entries.sql
 tests/test_conformance.py

@@ -84,3 +84,18 @@ def record_state_machine_failure(span: Span, failure: IndexerFailure) -> None:
     )
     if failure.cause is not None:
         span.record_exception(failure.cause)
+
+
+def record_migration_failure(span: Span, failure: IndexerFailure) -> None:
+    """Records a failure on the span: sets status to ERROR, adds a "migration.error"
+    event, and records the underlying exception if present."""
+    span.set_status(Status(StatusCode.ERROR, failure.message))
+    span.add_event(
+        "migration.error",
+        {
+            "error.code": failure.code,
+            "error.message": failure.message,
+        },
+    )
+    if failure.cause is not None:
+        span.record_exception(failure.cause)

@@ -9,8 +9,10 @@ src/storage_event_log/_audit.py
 src/storage_event_log/_contract.py
 src/storage_event_log/_local.py
 src/storage_event_log/_runtime.py
+src/storage_event_log/_subscriber_bus.py
 src/storage_event_log/_telemetry.py
 src/storage_event_log/_types.py
 src/storage_event_log/_version.py
 src/storage_event_log/py.typed
 tests/test_conformance.py
+tests/test_subscriber_bus.py

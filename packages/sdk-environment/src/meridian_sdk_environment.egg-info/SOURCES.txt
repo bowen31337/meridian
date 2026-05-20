@@ -7,10 +7,12 @@ src/meridian_sdk_environment.egg-info/top_level.txt
 src/sdk_environment/__init__.py
 src/sdk_environment/_audit.py
 src/sdk_environment/_contract.py
+src/sdk_environment/_docker_driver.py
 src/sdk_environment/_enforcer.py
 src/sdk_environment/_fs_enforcer.py
 src/sdk_environment/_fs_gate.py
 src/sdk_environment/_http_driver.py
+src/sdk_environment/_local_driver.py
 src/sdk_environment/_mcp_driver.py
 src/sdk_environment/_pool.py
 src/sdk_environment/_proxy.py
@@ -21,9 +23,11 @@ src/sdk_environment/_types.py
 src/sdk_environment/_version.py
 src/sdk_environment/py.typed
 tests/test_conformance.py
+tests/test_docker_driver.py
 tests/test_filesystem_jail.py
 tests/test_http_driver.py
 tests/test_lifecycle.py
+tests/test_local_driver.py
 tests/test_mcp_driver.py
 tests/test_network_policy.py
 tests/test_ssh_driver.py

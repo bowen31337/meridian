@@ -3,38 +3,39 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Generator
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
+
+from . import _migrations as _mig
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
 
 
 class SQLiteProjectionStore:
     """
-    Manages the _watermarks table in a SQLite database.
+    Manages the projection-store SQLite database.
 
-    The watermarks table tracks how far the indexer has read into each
-    session's event log (last_seq processed, -1 means nothing yet).
-
-    Callers extend the database with their own projection tables; this class
-    only owns _watermarks.  set_watermark must be called inside a transaction
-    obtained from transaction() so the watermark and projection update are
-    committed atomically.
+    Call migrate() once on startup before any reads or writes.  set_watermark
+    must be called inside a transaction obtained from transaction() so the
+    watermark and projection update are committed atomically.
     """
 
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = Path(db_path)
-        self._init()
 
-    def _init(self) -> None:
+    def migrate(self) -> int:
+        """
+        Apply any pending schema migrations and return the count applied.
+
+        Idempotent: safe to call on every startup.  Raises sqlite3.Error on
+        statement failure.
+        """
         with sqlite3.connect(self._db_path) as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS _watermarks (
-                    session_id TEXT PRIMARY KEY,
-                    last_seq   INTEGER NOT NULL DEFAULT -1,
-                    updated_at TEXT    NOT NULL
-                )
-                """
-            )
+            count = _mig.migrate(conn, applied_at=_now())
             conn.commit()
+        return count
 
     def get_watermark(self, session_id: str) -> int:
         """Return last_seq for session_id, or -1 if the session has not been indexed."""

@@ -6,6 +6,10 @@ from ._audit import AuditLog, NoopAuditLog
 from ._contract import EventHandler
 from ._indexer import BackgroundIndexer
 
+# Migration
+from ._migration_runtime import MigrationOptions, MigrationRuntime
+from ._migrations import SCHEMA_VERSION
+
 # Phase projection
 from ._phase import PhaseProjection, PhaseProjectionOptions, PhaseProjectionRuntime
 
@@ -31,6 +35,7 @@ from ._telemetry import (
     get_tracer,
     record_indexer_failure,
     record_invocation_event,
+    record_migration_failure,
     record_phase_failure,
     record_reader_failure,
     record_state_machine_failure,
@@ -52,6 +57,10 @@ __all__ = [
     "LocalEventLogReader",
     "SQLiteProjectionStore",
     "BackgroundIndexer",
+    # Migration
+    "MigrationOptions",
+    "MigrationRuntime",
+    "SCHEMA_VERSION",
     # Phase projection
     "PhaseProjection",
     "PhaseProjectionOptions",
@@ -69,6 +78,7 @@ __all__ = [
     "get_tracer",
     "record_indexer_failure",
     "record_invocation_event",
+    "record_migration_failure",
     "record_phase_failure",
     "record_reader_failure",
     "record_state_machine_failure",

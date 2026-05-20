@@ -83,6 +83,18 @@ def mock_reader_span(mock_reader_tracer: MockTracer) -> MockSpan:
     return mock_reader_tracer.span
 
 
+@pytest.fixture()
+def mock_migration_tracer(monkeypatch: pytest.MonkeyPatch) -> MockTracer:
+    tracer = MockTracer()
+    monkeypatch.setattr("storage_reposit._migration_runtime.get_tracer", lambda: tracer)
+    return tracer
+
+
+@pytest.fixture()
+def mock_migration_span(mock_migration_tracer: MockTracer) -> MockSpan:
+    return mock_migration_tracer.span
+
+
 # ---------------------------------------------------------------------------
 # Audit log capture
 # ---------------------------------------------------------------------------
@@ -169,6 +181,29 @@ class StubReader:
             raise self._raises
         for event in self._events:
             yield event
+
+
+# ---------------------------------------------------------------------------
+# Store stubs
+# ---------------------------------------------------------------------------
+
+
+class StubStore:
+    """SQLiteProjectionStore substitute for MigrationRuntime tests."""
+
+    def __init__(
+        self,
+        *,
+        raises: Exception | None = None,
+        returns: int = 0,
+    ) -> None:
+        self._raises = raises
+        self._returns = returns
+
+    def migrate(self) -> int:
+        if self._raises:
+            raise self._raises
+        return self._returns
 
 
 # ---------------------------------------------------------------------------
