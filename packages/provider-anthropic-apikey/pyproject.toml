@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "meridian-provider-anthropic-apikey"
+version = "0.1.0"
+description = "Meridian AnthropicApiKeyProvider — raw anthropic SDK, API key auth, direct to api.anthropic.com"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "anthropic>=0.40.0",
+    "meridian-sdk-provider>=0.1.0",
+    "opentelemetry-api>=1.24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "opentelemetry-sdk>=1.24.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/meridian_provider_anthropic_apikey"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.pyright]
+pythonVersion = "3.11"
+include = ["src"]
+strict = true
