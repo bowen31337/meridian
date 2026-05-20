@@ -21,6 +21,9 @@ Tests cover:
   - redact_vault_refs: raises HookStdinRedactionError on failure.
   - redact_vault_refs: HookStdinRedactionError.code is "hook_stdin_redaction_failed".
   - redact_vault_refs: no audit log does not crash (NoopAuditLog fallback).
+  - redact_vault_refs: agent_id forwarded to resolver; audit.secret_access carries requester_agent_id.
+  - redact_vault_refs: tool_call_id forwarded to resolver; audit.secret_access carries requester_tool_call_id.
+  - redact_vault_refs: audit.secret_access requester fields are None when agent_id/tool_call_id not provided.
 """
 
 from __future__ import annotations
@@ -414,3 +417,63 @@ class TestRedactionErrorType:
                 resolver=resolver,
             )
         assert len(exc_info.value.message) > 0
+
+
+# ---------------------------------------------------------------------------
+# TestRedactionRequesterPropagation
+# ---------------------------------------------------------------------------
+
+
+class TestRedactionRequesterPropagation:
+    def _make_resolver_with_audit(
+        self,
+        storage_root: Path,
+        audit: AuditLog,
+    ) -> SecretRefResolver:
+        backend = _make_backend()
+        _write_vault(storage_root, "vault_prop")
+        backend.store_secret("vault_prop", "secret_key", "the_value", "2026-01-01T00:00:00+00:00")
+        return SecretRefResolver(
+            storage_root=storage_root,
+            os_keychain_backend=backend,
+            audit_log=audit,
+        )
+
+    def test_agent_id_forwarded_to_audit_secret_access(self, storage_root: Path) -> None:
+        audit = _CapturingAuditLog()
+        resolver = self._make_resolver_with_audit(storage_root, audit)
+        redact_vault_refs(
+            {"k": _ref("vault_prop", "secret_key")},
+            allowed_keys=frozenset({"secret_key"}),
+            resolver=resolver,
+            agent_id="agt_007",
+        )
+        entry = next(e for e in audit.entries if e.event == "audit.secret_access")
+        assert entry.detail is not None
+        assert entry.detail["requester_agent_id"] == "agt_007"
+
+    def test_tool_call_id_forwarded_to_audit_secret_access(self, storage_root: Path) -> None:
+        audit = _CapturingAuditLog()
+        resolver = self._make_resolver_with_audit(storage_root, audit)
+        redact_vault_refs(
+            {"k": _ref("vault_prop", "secret_key")},
+            allowed_keys=frozenset({"secret_key"}),
+            resolver=resolver,
+            tool_call_id="tc_abc",
+        )
+        entry = next(e for e in audit.entries if e.event == "audit.secret_access")
+        assert entry.detail is not None
+        assert entry.detail["requester_tool_call_id"] == "tc_abc"
+
+    def test_requester_fields_none_when_not_provided(self, storage_root: Path) -> None:
+        audit = _CapturingAuditLog()
+        resolver = self._make_resolver_with_audit(storage_root, audit)
+        redact_vault_refs(
+            {"k": _ref("vault_prop", "secret_key")},
+            allowed_keys=frozenset({"secret_key"}),
+            resolver=resolver,
+        )
+        entry = next(e for e in audit.entries if e.event == "audit.secret_access")
+        assert entry.detail is not None
+        assert entry.detail["requester_agent_id"] is None
+        assert entry.detail["requester_tool_call_id"] is None

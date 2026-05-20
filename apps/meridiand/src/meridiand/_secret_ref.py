@@ -93,7 +93,13 @@ class SecretRefResolver:
         self._os_keychain_backend = os_keychain_backend
         self._audit = audit_log if audit_log is not None else NoopAuditLog()
 
-    def resolve(self, ref: str) -> str:
+    def resolve(
+        self,
+        ref: str,
+        *,
+        agent_id: str | None = None,
+        tool_call_id: str | None = None,
+    ) -> str:
         """Resolve a secret_ref URI, fetching fresh from the vault on every call."""
         now = _now()
         tracer = get_tracer()
@@ -154,6 +160,20 @@ class SecretRefResolver:
                 if record is None:
                     raise SecretRefNotFoundError(vault_id=vault_id, key=key, timestamp=now)
 
+                self._audit.write(
+                    AuditLogEntry(
+                        level="info",
+                        event="audit.secret_access",
+                        code="vault_secret_access",
+                        timestamp=now,
+                        detail={
+                            "vault_id": vault_id,
+                            "name": key,
+                            "requester_agent_id": agent_id,
+                            "requester_tool_call_id": tool_call_id,
+                        },
+                    )
+                )
                 return str(record["value"])
 
             except (SecretRefParseError, SecretRefNotFoundError, SecretRefResolveError) as err:
@@ -167,6 +187,8 @@ class SecretRefResolver:
                         detail={
                             "ref": ref,
                             "message": err.message,
+                            "requester_agent_id": agent_id,
+                            "requester_tool_call_id": tool_call_id,
                         },
                     )
                 )
@@ -188,6 +210,8 @@ class SecretRefResolver:
                         detail={
                             "ref": ref,
                             "message": err2.message,
+                            "requester_agent_id": agent_id,
+                            "requester_tool_call_id": tool_call_id,
                         },
                     )
                 )

@@ -58,6 +58,8 @@ def _walk(
     *,
     allowed_keys: frozenset[str],
     resolver: SecretRefResolver,
+    agent_id: str | None = None,
+    tool_call_id: str | None = None,
 ) -> Any:
     """Recursively substitute only the allowed vault refs; leave all others unsubstituted."""
     if isinstance(value, str):
@@ -66,12 +68,18 @@ def _walk(
             return value
         key = m.group(2)
         if key in allowed_keys:
-            return resolver.resolve(value)
+            return resolver.resolve(value, agent_id=agent_id, tool_call_id=tool_call_id)
         return value  # unsubstituted — ref URI is not the secret value
     if isinstance(value, dict):
-        return {k: _walk(v, allowed_keys=allowed_keys, resolver=resolver) for k, v in value.items()}
+        return {
+            k: _walk(v, allowed_keys=allowed_keys, resolver=resolver, agent_id=agent_id, tool_call_id=tool_call_id)
+            for k, v in value.items()
+        }
     if isinstance(value, list):
-        return [_walk(item, allowed_keys=allowed_keys, resolver=resolver) for item in value]
+        return [
+            _walk(item, allowed_keys=allowed_keys, resolver=resolver, agent_id=agent_id, tool_call_id=tool_call_id)
+            for item in value
+        ]
     return value
 
 
@@ -86,6 +94,8 @@ def redact_vault_refs(
     allowed_keys: frozenset[str],
     resolver: SecretRefResolver,
     audit_log: AuditLog | None = None,
+    agent_id: str | None = None,
+    tool_call_id: str | None = None,
 ) -> Any:
     """
     Walk *payload* and ensure vault refs are not resolved unless the hook
@@ -100,6 +110,10 @@ def redact_vault_refs(
     every call.  On failure, writes to the audit log and raises
     :class:`HookStdinRedactionError` so the caller can surface the error
     message.
+
+    *agent_id* and *tool_call_id* identify the requester and are forwarded to
+    the resolver so that every resolved secret emits an ``audit.secret_access``
+    entry with full requester context.
     """
     now = _now()
     tracer = get_tracer()
@@ -119,7 +133,13 @@ def redact_vault_refs(
         )
 
         try:
-            return _walk(payload, allowed_keys=allowed_keys, resolver=resolver)
+            return _walk(
+                payload,
+                allowed_keys=allowed_keys,
+                resolver=resolver,
+                agent_id=agent_id,
+                tool_call_id=tool_call_id,
+            )
         except Exception as exc:
             err = HookStdinRedactionError(
                 message=f"Failed to redact hook stdin: {exc}",

@@ -19,6 +19,11 @@ Tests cover:
   - resolve: audit entry detail contains "ref" and "message".
   - resolve: audit code matches the raised error's code.
   - resolve: NoopAuditLog used when audit_log is None (no crash).
+  - resolve: emits audit.secret_access entry with level "info" on success.
+  - resolve: audit.secret_access detail contains vault_id, name, requester_agent_id, requester_tool_call_id.
+  - resolve: audit.secret_access requester fields are None when not provided.
+  - resolve: audit.secret_access requester fields carry provided agent_id and tool_call_id.
+  - resolve: failure audit detail contains requester_agent_id and requester_tool_call_id.
 """
 
 from __future__ import annotations
@@ -499,3 +504,132 @@ class TestSecretRefAuditLog:
         )
         with pytest.raises(SecretRefParseError):
             resolver.resolve("bad_ref")
+
+
+# ---------------------------------------------------------------------------
+# TestSecretAccessAuditEvent
+# ---------------------------------------------------------------------------
+
+
+class TestSecretAccessAuditEvent:
+    def test_success_emits_secret_access_event(self, storage_root: Path) -> None:
+        audit = _CapturingAuditLog()
+        backend = _make_backend()
+        _write_vault(storage_root, "vault_sa")
+        _store_secret(backend, "vault_sa", "api_key", "val")
+        resolver = _make_resolver(storage_root, backend, audit_log=audit)
+        resolver.resolve("secret_ref://vault/vault_sa/api_key")
+        assert any(e.event == "audit.secret_access" for e in audit.entries)
+
+    def test_secret_access_event_level_is_info(self, storage_root: Path) -> None:
+        audit = _CapturingAuditLog()
+        backend = _make_backend()
+        _write_vault(storage_root, "vault_sai")
+        _store_secret(backend, "vault_sai", "k", "v")
+        resolver = _make_resolver(storage_root, backend, audit_log=audit)
+        resolver.resolve("secret_ref://vault/vault_sai/k")
+        entry = next(e for e in audit.entries if e.event == "audit.secret_access")
+        assert entry.level == "info"
+
+    def test_secret_access_event_code(self, storage_root: Path) -> None:
+        audit = _CapturingAuditLog()
+        backend = _make_backend()
+        _write_vault(storage_root, "vault_sac")
+        _store_secret(backend, "vault_sac", "k", "v")
+        resolver = _make_resolver(storage_root, backend, audit_log=audit)
+        resolver.resolve("secret_ref://vault/vault_sac/k")
+        entry = next(e for e in audit.entries if e.event == "audit.secret_access")
+        assert entry.code == "vault_secret_access"
+
+    def test_secret_access_detail_has_vault_id(self, storage_root: Path) -> None:
+        audit = _CapturingAuditLog()
+        backend = _make_backend()
+        _write_vault(storage_root, "vault_dvid")
+        _store_secret(backend, "vault_dvid", "k", "v")
+        resolver = _make_resolver(storage_root, backend, audit_log=audit)
+        resolver.resolve("secret_ref://vault/vault_dvid/k")
+        entry = next(e for e in audit.entries if e.event == "audit.secret_access")
+        assert entry.detail is not None
+        assert entry.detail["vault_id"] == "vault_dvid"
+
+    def test_secret_access_detail_has_name(self, storage_root: Path) -> None:
+        audit = _CapturingAuditLog()
+        backend = _make_backend()
+        _write_vault(storage_root, "vault_dname")
+        _store_secret(backend, "vault_dname", "my_secret_key", "v")
+        resolver = _make_resolver(storage_root, backend, audit_log=audit)
+        resolver.resolve("secret_ref://vault/vault_dname/my_secret_key")
+        entry = next(e for e in audit.entries if e.event == "audit.secret_access")
+        assert entry.detail is not None
+        assert entry.detail["name"] == "my_secret_key"
+
+    def test_secret_access_requester_fields_none_when_not_provided(self, storage_root: Path) -> None:
+        audit = _CapturingAuditLog()
+        backend = _make_backend()
+        _write_vault(storage_root, "vault_rn")
+        _store_secret(backend, "vault_rn", "k", "v")
+        resolver = _make_resolver(storage_root, backend, audit_log=audit)
+        resolver.resolve("secret_ref://vault/vault_rn/k")
+        entry = next(e for e in audit.entries if e.event == "audit.secret_access")
+        assert entry.detail is not None
+        assert entry.detail["requester_agent_id"] is None
+        assert entry.detail["requester_tool_call_id"] is None
+
+    def test_secret_access_requester_agent_id_propagated(self, storage_root: Path) -> None:
+        audit = _CapturingAuditLog()
+        backend = _make_backend()
+        _write_vault(storage_root, "vault_rag")
+        _store_secret(backend, "vault_rag", "k", "v")
+        resolver = _make_resolver(storage_root, backend, audit_log=audit)
+        resolver.resolve("secret_ref://vault/vault_rag/k", agent_id="agent_123")
+        entry = next(e for e in audit.entries if e.event == "audit.secret_access")
+        assert entry.detail is not None
+        assert entry.detail["requester_agent_id"] == "agent_123"
+
+    def test_secret_access_requester_tool_call_id_propagated(self, storage_root: Path) -> None:
+        audit = _CapturingAuditLog()
+        backend = _make_backend()
+        _write_vault(storage_root, "vault_rtc")
+        _store_secret(backend, "vault_rtc", "k", "v")
+        resolver = _make_resolver(storage_root, backend, audit_log=audit)
+        resolver.resolve("secret_ref://vault/vault_rtc/k", tool_call_id="tc_456")
+        entry = next(e for e in audit.entries if e.event == "audit.secret_access")
+        assert entry.detail is not None
+        assert entry.detail["requester_tool_call_id"] == "tc_456"
+
+    def test_secret_access_both_requester_fields_propagated(self, storage_root: Path) -> None:
+        audit = _CapturingAuditLog()
+        backend = _make_backend()
+        _write_vault(storage_root, "vault_rboth")
+        _store_secret(backend, "vault_rboth", "k", "v")
+        resolver = _make_resolver(storage_root, backend, audit_log=audit)
+        resolver.resolve("secret_ref://vault/vault_rboth/k", agent_id="agt_1", tool_call_id="tc_2")
+        entry = next(e for e in audit.entries if e.event == "audit.secret_access")
+        assert entry.detail is not None
+        assert entry.detail["requester_agent_id"] == "agt_1"
+        assert entry.detail["requester_tool_call_id"] == "tc_2"
+
+    def test_failure_does_not_emit_secret_access_event(self, storage_root: Path) -> None:
+        audit = _CapturingAuditLog()
+        resolver = _make_resolver(storage_root, audit_log=audit)
+        with pytest.raises(SecretRefParseError):
+            resolver.resolve("bad_ref")
+        assert not any(e.event == "audit.secret_access" for e in audit.entries)
+
+    def test_failure_audit_detail_has_requester_agent_id(self, storage_root: Path) -> None:
+        audit = _CapturingAuditLog()
+        resolver = _make_resolver(storage_root, audit_log=audit)
+        with pytest.raises(SecretRefParseError):
+            resolver.resolve("bad_ref", agent_id="agt_fail")
+        entry = next(e for e in audit.entries if e.event == "vault.secret.resolve.failed")
+        assert entry.detail is not None
+        assert entry.detail["requester_agent_id"] == "agt_fail"
+
+    def test_failure_audit_detail_has_requester_tool_call_id(self, storage_root: Path) -> None:
+        audit = _CapturingAuditLog()
+        resolver = _make_resolver(storage_root, audit_log=audit)
+        with pytest.raises(SecretRefParseError):
+            resolver.resolve("bad_ref", tool_call_id="tc_fail")
+        entry = next(e for e in audit.entries if e.event == "vault.secret.resolve.failed")
+        assert entry.detail is not None
+        assert entry.detail["requester_tool_call_id"] == "tc_fail"
