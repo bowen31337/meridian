@@ -25,6 +25,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from meridian_sdk_provider import (
     MessageDeltaEvent,
+    MessageStartEvent,
     MessageStopEvent,
     ModelCallOpts,
     ModelRouter,
@@ -545,6 +546,7 @@ async def run_harness_loop(
                 _stop_event: MessageStopEvent | None = None
 
                 _model_call_exc: Exception | None = None
+                _start_event: MessageStartEvent | None = None
 
                 if (
                     final_phase == "waiting_for_model"
@@ -562,7 +564,9 @@ async def run_harness_loop(
                     opts = model_call_opts.model_copy(update={"session_id": session_id})
                     try:
                         async for event in model_router.call(opts):
-                            if isinstance(event, TextDeltaEvent):
+                            if isinstance(event, MessageStartEvent):
+                                _start_event = event
+                            elif isinstance(event, TextDeltaEvent):
                                 if event_log is not None:
                                     await event_log.append(
                                         session_id,
@@ -682,16 +686,16 @@ async def run_harness_loop(
                         on_usage_delta(UsageDelta(input_tokens=100, output_tokens=50))
 
                 if event_log is not None and _stop_event is not None:
-                    await event_log.append(
-                        session_id,
-                        "usage.delta",
-                        {
-                            "prompt_tokens": _stop_event.input_tokens or 0,
-                            "completion_tokens": _stop_event.output_tokens or 0,
-                            "cache_creation_tokens": _stop_event.cache_creation_input_tokens,
-                            "cache_read_tokens": _stop_event.cache_read_input_tokens,
-                        },
-                    )
+                    _delta_data: dict[str, Any] = {
+                        "prompt_tokens": _stop_event.input_tokens or 0,
+                        "completion_tokens": _stop_event.output_tokens or 0,
+                        "cache_creation_tokens": _stop_event.cache_creation_input_tokens,
+                        "cache_read_tokens": _stop_event.cache_read_input_tokens,
+                    }
+                    if _start_event is not None:
+                        _delta_data["model"] = _start_event.model
+                        _delta_data["provider"] = _start_event.provider
+                    await event_log.append(session_id, "usage.delta", _delta_data)
 
                 if stop_reason == "max_tokens":
                     if event_log is not None:

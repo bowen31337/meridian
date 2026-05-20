@@ -3,7 +3,7 @@ from __future__ import annotations
 from opentelemetry import trace
 from opentelemetry.trace import Span, Status, StatusCode
 
-from core_errors import BudgetExceededError
+from core_errors import BudgetExceededError, MeridianError
 
 from ._version import SDK_BUDGET_VERSION
 
@@ -66,6 +66,44 @@ def record_budget_exceeded(
             "budget.dimension": dimension,
             "budget.limit": limit,
             "budget.actual": actual,
+        },
+    )
+    if error.cause is not None:
+        span.record_exception(error.cause)
+
+
+def record_cost_accumulate_invocation(
+    span: Span,
+    *,
+    scope: str,
+    scope_id: str,
+    provider: str,
+    model: str,
+    dollars: float,
+    timestamp: str,
+) -> None:
+    """Attach a structured ``cost.accumulate.invocation`` event to the active span."""
+    span.add_event(
+        "cost.accumulate.invocation",
+        {
+            "cost.scope": scope,
+            "cost.scope_id": scope_id,
+            "provider": provider,
+            "model": model,
+            "cost.dollars": dollars,
+            "timestamp": timestamp,
+        },
+    )
+
+
+def record_cost_accumulate_failure(span: Span, error: MeridianError) -> None:
+    """Set span status to ERROR and attach a ``cost.accumulate.failure`` event."""
+    span.set_status(Status(StatusCode.ERROR, error.message))
+    span.add_event(
+        "cost.accumulate.failure",
+        {
+            "error.code": error.code,
+            "error.message": error.message,
         },
     )
     if error.cause is not None:
