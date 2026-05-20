@@ -12,6 +12,7 @@ from meridian_sdk_provider import (
     MessageStopEvent,
     ModelCallOpts,
     ModelCountReq,
+    ModelEntry,
     ModelEvent,
     ProviderCapabilities,
     TextDeltaEvent,
@@ -49,6 +50,9 @@ class FakeProvider:
             raise self._raise_on_call
         for event in self._events:
             yield event
+
+    def list_models(self) -> list[ModelEntry]:
+        return []
 
     async def count_tokens(self, req: ModelCountReq) -> TokenCount:
         return TokenCount(input_tokens=42)

@@ -28,7 +28,7 @@ from .errors import (
     ProviderTimeoutError,
     RoutingError,
 )
-from .protocol import ModelProvider, ProviderCapabilities
+from .protocol import ModelCapabilities, ModelEntry, ModelProvider, ProviderCapabilities
 from .router import (
     FallbackRule,
     ModelRouter,
@@ -66,6 +66,8 @@ __all__ = [
     # Protocol + capabilities
     "ModelProvider",
     "ProviderCapabilities",
+    "ModelCapabilities",
+    "ModelEntry",
     # Router
     "ModelRouter",
     "ModelRoutingPolicy",

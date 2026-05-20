@@ -8,6 +8,27 @@ from .types import ModelCallOpts, ModelCountReq, ModelEvent, TokenCount
 
 
 @dataclass
+class ModelCapabilities:
+    """Per-model capability flags surfaced by the GET /v1/models endpoint."""
+
+    streaming: bool = True
+    thinking: bool = False
+    vision: bool = False
+    tools: bool = False
+    cache: bool = False
+
+
+@dataclass
+class ModelEntry:
+    """A single model advertised by a provider."""
+
+    provider: str
+    model: str
+    context_window: int
+    capabilities: ModelCapabilities
+
+
+@dataclass
 class ProviderCapabilities:
     """Optional feature flags declared by a provider.
 
@@ -58,6 +79,14 @@ class ModelProvider(Protocol):
 
         Only called by the Router when ``capabilities.count_tokens`` is True.
         Providers that set ``count_tokens=False`` may raise NotImplementedError.
+        """
+        ...  # pragma: no cover
+
+    def list_models(self) -> list[ModelEntry]:
+        """Return the set of models this provider can serve.
+
+        Each entry carries per-model capability flags and the context window
+        size.  The ModelRouter aggregates these lists to populate GET /v1/models.
         """
         ...  # pragma: no cover
 

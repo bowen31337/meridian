@@ -21,7 +21,7 @@ from typing import Any
 from pydantic import TypeAdapter
 
 from .audit import AuditLog, AuditLogEntry, NoopAuditLog
-from .protocol import ProviderCapabilities
+from .protocol import ModelEntry, ProviderCapabilities
 from .telemetry import get_tracer, record_invocation_event, record_provider_failure
 from .types import ModelCallOpts, ModelCountReq, ModelEvent, TokenCount
 
@@ -75,12 +75,14 @@ class FakeModelAdapter:
         *,
         name: str = "fake",
         audit_log: AuditLog | None = None,
+        models: list[ModelEntry] | None = None,
     ) -> None:
         self.name = name
         self.kind = "fake"
         self.capabilities = ProviderCapabilities()
         self._fixtures_dir = Path(fixtures_dir)
         self._audit_log: AuditLog = audit_log if audit_log is not None else NoopAuditLog()
+        self._models: list[ModelEntry] = models if models is not None else []
 
     async def call(self, opts: ModelCallOpts) -> AsyncIterator[ModelEvent]:
         fixture_path = self._fixtures_dir / f"{_model_to_slug(opts.model)}.ndjson"
@@ -116,6 +118,9 @@ class FakeModelAdapter:
                 raise
             for event in events:
                 yield event
+
+    def list_models(self) -> list[ModelEntry]:
+        return list(self._models)
 
     async def count_tokens(self, req: ModelCountReq) -> TokenCount:
         return TokenCount(input_tokens=0)

@@ -14,7 +14,7 @@ from .errors import (
     ProviderTimeoutError,
     RoutingError,
 )
-from .protocol import ModelProvider, ProviderCapabilities
+from .protocol import ModelEntry, ModelProvider, ProviderCapabilities
 from .telemetry import get_tracer, record_invocation_event, record_provider_failure
 from .types import (
     ContentBlock,
@@ -372,6 +372,13 @@ class ModelRouter:
             for m in req.messages
         )
         return TokenCount(input_tokens=max(1, total_chars // 4))
+
+    def list_models(self) -> list[ModelEntry]:
+        """Aggregate model listings from all registered providers."""
+        result: list[ModelEntry] = []
+        for provider in self._providers.values():
+            result.extend(provider.list_models())
+        return result
 
     async def close(self) -> None:
         """Close all registered provider adapters."""

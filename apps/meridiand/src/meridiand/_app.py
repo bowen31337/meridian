@@ -53,6 +53,7 @@ from ._files import make_files_router
 from ._handoff import make_handoff_router
 from ._kb import make_kb_router
 from ._messages import make_messages_router
+from api_models import make_router as make_models_router
 from ._parallel_runs import make_parallel_runs_router
 from ._phase import make_phase_router
 from ._replay import make_replay_router
@@ -376,6 +377,12 @@ def create_app(
                         audit_log=audit_log,
                         model_router=model_router,
                         hooks_dir=_hooks_dir,
+                    )
+                )
+                app.include_router(
+                    make_models_router(
+                        model_router=model_router,
+                        audit_log=audit_log,
                     )
                 )
 
