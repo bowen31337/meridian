@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/harness-run-loo-system-on-stop-reason-tool-use-schema-v/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/harness-run-loo-system-on-stop-reason-end-turn-append-f/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

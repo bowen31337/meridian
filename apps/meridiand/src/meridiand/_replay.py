@@ -453,6 +453,16 @@ async def run_harness_loop(
         "waiting_for_user", and stops the loop. event_log must be provided to persist these
         events; without it the loop still stops or loops correctly but no events are written.
 
+    When stop_reason is "end_turn":
+      1. Emits a "message.appended" event to event_log (if provided) with model_call_number,
+         signalling the complete assistant message has been appended to the conversation.
+      2. Emits a "session.phase_change" event to event_log (if provided) with after="idle"
+         and reason="end_turn".
+      3. Dispatches "post_message" hooks (if hooks_dir is set).
+      Sets final_phase to "idle" and stops the loop. event_log must be provided to persist
+      these events; without it the loop still stops but no events are written. On failure
+      surfaces an error message to the caller and writes the failure to the audit log.
+
     When stop_reason is "tool_use":
       For each tool use block in order:
         1. Schema-validates the tool's JSON args against tool_schemas[name] (if provided) or
@@ -707,21 +717,55 @@ async def run_harness_loop(
                     break
 
                 if not tool_use_blocks or stop_reason != "tool_use":
+                    before_phase = final_phase
                     final_phase = "idle"
-                    if hooks_dir is not None:
-                        await dispatch_hooks(
-                            "on_stop",
-                            {
-                                "session_id": session_id,
-                                "stop_reason": stop_reason,
-                                "model_calls": model_calls,
-                                "tool_calls": tool_calls,
-                            },
-                            _ctx,
-                            hooks_dir=hooks_dir,
-                            audit_log=audit_log,
-                        )
-                    break  # end_turn: release session
+                    if stop_reason == "end_turn":
+                        # 1. Append final message.
+                        if event_log is not None:
+                            await event_log.append(
+                                session_id,
+                                "message.appended",
+                                {"model_call_number": model_calls, "timestamp": _now()},
+                            )
+                        # 2. Transition phase to idle.
+                        if event_log is not None:
+                            await event_log.append(
+                                session_id,
+                                "session.phase_change",
+                                {
+                                    "before": before_phase,
+                                    "after": "idle",
+                                    "timestamp": _now(),
+                                    "reason": "end_turn",
+                                },
+                            )
+                        # 3. Run post_message hooks.
+                        if hooks_dir is not None:
+                            await dispatch_hooks(
+                                "post_message",
+                                {
+                                    "session_id": session_id,
+                                    "model_call_number": model_calls,
+                                },
+                                _ctx,
+                                hooks_dir=hooks_dir,
+                                audit_log=audit_log,
+                            )
+                    else:
+                        if hooks_dir is not None:
+                            await dispatch_hooks(
+                                "on_stop",
+                                {
+                                    "session_id": session_id,
+                                    "stop_reason": stop_reason,
+                                    "model_calls": model_calls,
+                                    "tool_calls": tool_calls,
+                                },
+                                _ctx,
+                                hooks_dir=hooks_dir,
+                                audit_log=audit_log,
+                            )
+                    break  # release session
 
                 # Per-iteration budget check: only reached when tool_use would continue.
                 if iteration_budget is not None:

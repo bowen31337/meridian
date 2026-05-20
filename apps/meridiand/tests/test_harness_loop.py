@@ -79,6 +79,19 @@ Tests cover:
   - Audit detail includes message on hook dispatch failure.
   - Fake adapter model call error transitions to "terminated" (no hooks).
   - Fake adapter model call error dispatches on_error hooks when hooks_dir is set.
+  On stop_reason end_turn:
+  - Emits message.appended event to event_log with model_call_number.
+  - message.appended event has model_call_number field.
+  - No message.appended event emitted when event_log is None.
+  - Emits session.phase_change event with after="idle" and reason="end_turn".
+  - session.phase_change has reason="end_turn".
+  - No session.phase_change event emitted when event_log is None.
+  - post_message hook dispatched when hooks_dir is set.
+  - post_message hook NOT dispatched when hooks_dir is None.
+  - Event log failure raises HarnessLoopError surfaced to caller.
+  - Event log failure writes harness.run_loop.failed to audit log.
+  - post_message hook dispatch failure raises HarnessLoopError surfaced to caller.
+  - post_message hook dispatch failure writes harness.run_loop.failed to audit log.
   On stop_reason max_tokens:
   - Without policy (None): transitions final_phase to "waiting_for_user".
   - With continue_allowed=False: transitions final_phase to "waiting_for_user".
@@ -2417,6 +2430,253 @@ class TestHarnessLoopModelCallError:
 
 
 # ---------------------------------------------------------------------------
+# Tests: stop_reason end_turn
+# ---------------------------------------------------------------------------
+
+
+class TestHarnessLoopEndTurn:
+    def test_emits_message_appended_event(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        appended = [d for _, et, d in event_log.events if et == "message.appended"]
+        assert len(appended) == 1
+
+    def test_message_appended_has_model_call_number(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        appended = [d for _, et, d in event_log.events if et == "message.appended"]
+        assert appended[0]["model_call_number"] == 1
+
+    def test_no_message_appended_without_event_log(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        _, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=None,
+            )
+        )
+        assert final_phase == "idle"  # completed without error
+
+    def test_emits_session_phase_change_to_idle(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        phase_changes = [d for _, et, d in event_log.events if et == "session.phase_change"]
+        assert any(d["after"] == "idle" for d in phase_changes)
+
+    def test_session_phase_change_has_reason_end_turn(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        phase_changes = [d for _, et, d in event_log.events if et == "session.phase_change"]
+        idle_changes = [d for d in phase_changes if d["after"] == "idle"]
+        assert len(idle_changes) == 1
+        assert idle_changes[0]["reason"] == "end_turn"
+
+    def test_no_phase_change_event_without_event_log(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        _, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=None,
+            )
+        )
+        assert final_phase == "idle"  # completed without error
+
+    def test_post_message_hook_dispatched(self, tmp_path: Path, monkeypatch) -> None:
+        dispatched: list[str] = []
+
+        async def _fake_dispatch(event, data, ctx, *, hooks_dir, audit_log):
+            dispatched.append(event)
+            return []
+
+        monkeypatch.setattr("meridiand._replay.dispatch_hooks", _fake_dispatch)
+
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                hooks_dir=tmp_path / "hooks",
+            )
+        )
+        assert "post_message" in dispatched
+
+    def test_no_post_message_hook_without_hooks_dir(self, tmp_path: Path, monkeypatch) -> None:
+        dispatched: list[str] = []
+
+        async def _fake_dispatch(event, data, ctx, *, hooks_dir, audit_log):
+            dispatched.append(event)
+            return []
+
+        monkeypatch.setattr("meridiand._replay.dispatch_hooks", _fake_dispatch)
+
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                hooks_dir=None,
+            )
+        )
+        assert "post_message" not in dispatched
+
+    def test_event_log_failure_raises_harness_loop_error(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                    event_log=_FailingEventLogWriter(),
+                )
+            )
+
+    def test_event_log_failure_writes_audit_log(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                    event_log=_FailingEventLogWriter(),
+                )
+            )
+        records = _read_audit(tmp_path)
+        assert any(r.get("event") == "harness.run_loop.failed" for r in records)
+
+    def test_post_message_hook_failure_raises_harness_loop_error(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        async def _failing_dispatch(event, data, ctx, *, hooks_dir, audit_log):
+            if event == "post_message":
+                raise OSError("hook system unavailable")
+            return []
+
+        monkeypatch.setattr("meridiand._replay.dispatch_hooks", _failing_dispatch)
+
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                    hooks_dir=tmp_path / "hooks",
+                )
+            )
+
+    def test_post_message_hook_failure_writes_audit_log(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        async def _failing_dispatch(event, data, ctx, *, hooks_dir, audit_log):
+            if event == "post_message":
+                raise OSError("hook system unavailable")
+            return []
+
+        monkeypatch.setattr("meridiand._replay.dispatch_hooks", _failing_dispatch)
+
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                    hooks_dir=tmp_path / "hooks",
+                )
+            )
+        records = _read_audit(tmp_path)
+        assert any(r.get("event") == "harness.run_loop.failed" for r in records)
+
+
+# ---------------------------------------------------------------------------
 # Helpers: max_tokens fixtures
 # ---------------------------------------------------------------------------
 
@@ -2630,7 +2890,7 @@ class TestHarnessLoopMaxTokens:
             )
         )
         phase_changes = [d for _, et, d in event_log.events if et == "session.phase_change"]
-        assert len(phase_changes) == 0
+        assert not any(d.get("reason") == "max_tokens" for d in phase_changes)
 
     def test_without_event_log_still_transitions_to_waiting_for_user(
         self, tmp_path: Path
