@@ -52,6 +52,21 @@ Tests cover:
   - Router failure audit detail includes session_id.
   - Router failure error message is non-empty.
   - Without model_router, waiting_for_model phase falls back to fake adapter.
+  waiting_for_tool branch (sandbox dispatch path):
+  - tool_call.result event emitted to event_log per tool dispatched.
+  - tool_call.result data contains content from sandbox result.
+  - tool_call.result data contains tool_id from sandbox result.
+  - Multiple waiting_for_tool phases produce multiple tool_call.result events in sequence.
+  - No tool_call.result event emitted when event_log is None.
+  - model_calls not incremented during waiting_for_tool (no model call made).
+  - tool_calls incremented once per waiting_for_tool iteration.
+  - Final phase is idle after tool dispatch followed by model end_turn.
+  - pre_tool_call hook dispatched when hooks_dir is set.
+  - post_tool_call hook dispatched when hooks_dir is set.
+  - Sandbox failure raises HarnessLoopError (error surfaced to caller).
+  - Sandbox failure writes harness.run_loop.failed to audit log.
+  - Sandbox failure audit detail includes session_id.
+  - Sandbox failure error message is non-empty.
 """
 
 from __future__ import annotations
@@ -1473,3 +1488,316 @@ class TestHarnessLoopWaitingForModel:
         assert model_calls == 1
         assert tool_calls == 0
         assert final_phase == "idle"
+
+
+# ---------------------------------------------------------------------------
+# Helpers: failing sandbox adapter
+# ---------------------------------------------------------------------------
+
+
+class _FailingSandboxAdapter:
+    """Sandbox adapter that always raises on next_result."""
+
+    def next_result(self) -> dict[str, Any]:
+        raise OSError("sandbox dispatch failed")
+
+    @property
+    def dispatch_count(self) -> int:
+        return 0
+
+
+# ---------------------------------------------------------------------------
+# Tests: waiting_for_tool branch (sandbox dispatch path)
+# ---------------------------------------------------------------------------
+
+
+class TestHarnessLoopWaitingForTool:
+    def test_tool_call_result_event_emitted_when_phase_is_waiting_for_tool(
+        self, tmp_path: Path
+    ) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_end_turn_call()],
+            [{"tool_id": "tu_1", "content": "ok"}],
+        )
+        reader = _FakePhaseReader(["waiting_for_tool", "waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        results = [d for _, et, d in event_log.events if et == "tool_call.result"]
+        assert len(results) == 1
+
+    def test_tool_call_result_data_contains_content(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_end_turn_call()],
+            [{"tool_id": "tu_1", "content": "tool output here"}],
+        )
+        reader = _FakePhaseReader(["waiting_for_tool", "waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        results = [d for _, et, d in event_log.events if et == "tool_call.result"]
+        assert results[0]["content"] == "tool output here"
+
+    def test_tool_call_result_data_contains_tool_id(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_end_turn_call()],
+            [{"tool_id": "tu_xyz", "content": "result"}],
+        )
+        reader = _FakePhaseReader(["waiting_for_tool", "waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        results = [d for _, et, d in event_log.events if et == "tool_call.result"]
+        assert results[0]["tool_id"] == "tu_xyz"
+
+    def test_multiple_waiting_for_tool_phases_produce_multiple_events(
+        self, tmp_path: Path
+    ) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_end_turn_call()],
+            [{"tool_id": "tu_1", "content": "r1"}, {"tool_id": "tu_2", "content": "r2"}],
+        )
+        reader = _FakePhaseReader(["waiting_for_tool", "waiting_for_tool", "waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        results = [d for _, et, d in event_log.events if et == "tool_call.result"]
+        assert len(results) == 2
+
+    def test_no_tool_call_result_event_without_event_log(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_end_turn_call()],
+            [{"tool_id": "tu_1", "content": "result"}],
+        )
+        reader = _FakePhaseReader(["waiting_for_tool", "waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=None,
+            )
+        )  # no exception; no events to assert
+
+    def test_model_calls_not_incremented_during_waiting_for_tool(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_end_turn_call()],
+            [{"content": "result"}],
+        )
+        reader = _FakePhaseReader(["waiting_for_tool", "waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        model_calls, _, _ = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
+        )
+        assert model_calls == 1  # only from waiting_for_model iteration
+
+    def test_tool_calls_incremented_per_waiting_for_tool(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_end_turn_call()],
+            [{"content": "r1"}, {"content": "r2"}],
+        )
+        reader = _FakePhaseReader(["waiting_for_tool", "waiting_for_tool", "waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        _, tool_calls, _ = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
+        )
+        assert tool_calls == 2
+
+    def test_final_phase_idle_after_tool_dispatch_and_model_end_turn(
+        self, tmp_path: Path
+    ) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_end_turn_call()],
+            [{"content": "result"}],
+        )
+        reader = _FakePhaseReader(["waiting_for_tool", "waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        _, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
+        )
+        assert final_phase == "idle"
+
+    def test_pre_tool_call_hook_dispatched(self, tmp_path: Path, monkeypatch) -> None:
+        dispatched: list[str] = []
+
+        async def _fake_dispatch(event, data, ctx, *, hooks_dir, audit_log):
+            dispatched.append(event)
+
+        monkeypatch.setattr("meridiand._replay.dispatch_hooks", _fake_dispatch)
+
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_end_turn_call()],
+            [{"tool_id": "tu_1", "content": "ok"}],
+        )
+        reader = _FakePhaseReader(["waiting_for_tool", "waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                hooks_dir=tmp_path / "hooks",
+            )
+        )
+        assert "pre_tool_call" in dispatched
+
+    def test_post_tool_call_hook_dispatched(self, tmp_path: Path, monkeypatch) -> None:
+        dispatched: list[str] = []
+
+        async def _fake_dispatch(event, data, ctx, *, hooks_dir, audit_log):
+            dispatched.append(event)
+
+        monkeypatch.setattr("meridiand._replay.dispatch_hooks", _fake_dispatch)
+
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_end_turn_call()],
+            [{"tool_id": "tu_1", "content": "ok"}],
+        )
+        reader = _FakePhaseReader(["waiting_for_tool", "waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                hooks_dir=tmp_path / "hooks",
+            )
+        )
+        assert "post_tool_call" in dispatched
+
+    def test_sandbox_failure_raises_harness_loop_error(self, tmp_path: Path) -> None:
+        model, _ = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_tool"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=_FailingSandboxAdapter(),
+                    phase_reader=reader,
+                    audit_log=audit,
+                )
+            )
+
+    def test_sandbox_failure_writes_audit_log(self, tmp_path: Path) -> None:
+        model, _ = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_tool"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=_FailingSandboxAdapter(),
+                    phase_reader=reader,
+                    audit_log=audit,
+                )
+            )
+        records = _read_audit(tmp_path)
+        assert any(r.get("event") == "harness.run_loop.failed" for r in records)
+
+    def test_sandbox_failure_audit_detail_has_session_id(self, tmp_path: Path) -> None:
+        model, _ = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_tool"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(
+                run_harness_loop(
+                    "tool-sess-1",
+                    model_adapter=model,
+                    sandbox_adapter=_FailingSandboxAdapter(),
+                    phase_reader=reader,
+                    audit_log=audit,
+                )
+            )
+        records = _read_audit(tmp_path)
+        record = next(r for r in records if r.get("event") == "harness.run_loop.failed")
+        assert record["detail"]["session_id"] == "tool-sess-1"
+
+    def test_sandbox_failure_error_message_surfaced(self, tmp_path: Path) -> None:
+        model, _ = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_tool"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError) as exc_info:
+            asyncio.run(
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=_FailingSandboxAdapter(),
+                    phase_reader=reader,
+                    audit_log=audit,
+                )
+            )
+        assert len(exc_info.value.message) > 0

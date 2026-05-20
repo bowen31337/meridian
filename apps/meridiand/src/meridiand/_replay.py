@@ -402,6 +402,15 @@ async def run_harness_loop(
       2. Streams events from model_router.call(opts).
       3. Emits a "message.delta" event to event_log for each TextDeltaEvent received.
 
+    When the current phase is "waiting_for_tool", one pending tool call is dispatched via
+    sandbox_adapter without making a model call:
+      1. Dispatches "pre_tool_call" hooks (if hooks_dir is set) before dispatch.
+      2. Calls sandbox_adapter.next_result() to obtain the tool result.
+      3. Emits a "tool_call.result" event to event_log (if provided) with tool_id and content.
+      4. Dispatches "post_tool_call" hooks (if hooks_dir is set) after dispatch.
+      5. Continues the loop without incrementing model_calls; the phase_reader drives
+         transition back to waiting_for_model.
+
     Returns (model_calls, tool_calls, final_phase).
     """
     now = _now()
@@ -430,6 +439,47 @@ async def run_harness_loop(
                 final_phase = phase_reader.current_phase(session_id)
                 if final_phase in _STOP_PHASES:
                     break  # release — any harness can re-wake
+
+                if final_phase == "waiting_for_tool":
+                    tool_calls += 1
+                    result = sandbox_adapter.next_result()
+                    tool_id = result.get("tool_id", "")
+                    tool_name = result.get("tool_name", "")
+                    if hooks_dir is not None:
+                        await dispatch_hooks(
+                            "pre_tool_call",
+                            {
+                                "session_id": session_id,
+                                "tool_id": tool_id,
+                                "tool_name": tool_name,
+                            },
+                            _ctx,
+                            hooks_dir=hooks_dir,
+                            audit_log=audit_log,
+                        )
+                    if event_log is not None:
+                        await event_log.append(
+                            session_id,
+                            "tool_call.result",
+                            {
+                                "tool_id": tool_id,
+                                "content": result.get("content", ""),
+                            },
+                        )
+                    if hooks_dir is not None:
+                        await dispatch_hooks(
+                            "post_tool_call",
+                            {
+                                "session_id": session_id,
+                                "tool_id": tool_id,
+                                "tool_name": tool_name,
+                                "tool_result": result.get("content", ""),
+                            },
+                            _ctx,
+                            hooks_dir=hooks_dir,
+                            audit_log=audit_log,
+                        )
+                    continue
 
                 model_calls += 1
                 tool_use_blocks: list[dict[str, Any]] = []
