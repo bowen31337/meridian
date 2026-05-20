@@ -59,6 +59,17 @@ Tests cover:
   on_model_call (_messages.py):
   - Hook registered for on_model_call is dispatched via make_messages_router when hooks_dir set.
   - on_model_call payload from messages router contains model field.
+  SDK→Meridian hook mapping (Contract 3):
+  - pre_tool_call payload contains tool_args dict.
+  - pre_tool_call veto verdict raises HarnessLoopError from run_harness_loop.
+  - pre_tool_call veto writes hook.pre_tool_call.vetoed audit log entry at info level.
+  - pre_tool_call veto audit entry detail contains tool_id.
+  - pre_tool_call veto audit entry detail contains tool_name.
+  - pre_tool_call veto audit entry detail contains reason.
+  - pre_tool_call veto writes tool_call.vetoed event to event_log.
+  - pre_tool_call veto tool_call.vetoed event contains tool_id.
+  - pre_tool_call veto tool_call.vetoed event contains reason.
+  - pre_tool_call continue+mutate applies mutations.args to tool args before tool_call.requested.
 """
 
 from __future__ import annotations
@@ -625,7 +636,8 @@ class TestHarnessHookEvents:
             [_tool_use_call(), _end_turn_call()],
             [{"content": "ls output"}],
         )
-        reader = _FakePhaseReader(["created", "created"])
+        # Phase sequence: model call → waiting_for_tool (sandbox dispatch) → second model call
+        reader = _FakePhaseReader(["created", "waiting_for_tool", "created"])
         audit = FileAuditLog(tmp_path)
 
         model_calls, tool_calls, _ = asyncio.run(
@@ -1249,3 +1261,286 @@ class TestMessagesRouterModelCallHook:
             model_router=MagicMock(),
         )
         assert router is not None
+
+
+# ---------------------------------------------------------------------------
+# Tests: SDK→Meridian hook mapping — Contract 3
+# ---------------------------------------------------------------------------
+
+
+class _CapturingEventLog:
+    """Minimal EventLogWriter substitute that records appended events in memory."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict[str, Any]]] = []
+
+    async def append(
+        self,
+        session_id: str,
+        event_type: str,
+        data: dict[str, Any],
+        *,
+        thread_id: str | None = None,
+    ) -> int:
+        self.events.append((event_type, data))
+        return len(self.events) - 1
+
+
+class TestSdkToMeridianHookMapping:
+    """Contract 3: PreToolUse SDK hook → Meridian pre_tool_call verdict round-trip."""
+
+    def _adapters(
+        self,
+        fixture_dir: Path,
+        model_calls: list[list[dict[str, Any]]],
+        tool_results: list[dict[str, Any]] | None = None,
+    ) -> tuple[FakeModelAdapter, FakeSandboxAdapter]:
+        _write_model_fixture(fixture_dir, model_calls)
+        if tool_results is not None:
+            _write_tool_fixture(fixture_dir, tool_results)
+        return (
+            FakeModelAdapter(fixture_dir / "model_responses.ndjson"),
+            FakeSandboxAdapter(fixture_dir / "tool_responses.ndjson"),
+        )
+
+    # ------------------------------------------------------------------
+    # Payload: tool_args included
+    # ------------------------------------------------------------------
+
+    def test_pre_tool_call_payload_contains_tool_args(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hook = _write_hook(hooks_dir, event="pre_tool_call")
+        from meridiand._hook_dispatch import dispatch_hooks
+
+        async def _run() -> list[dict[str, Any]]:
+            captured: list[dict[str, Any]] = []
+
+            async def handler(input: dict[str, Any], context: ExecutionContext) -> Any:
+                captured.append(input)
+                return {"verdict": "continue"}
+
+            await dispatch_hooks(
+                "pre_tool_call",
+                {
+                    "session_id": "s",
+                    "tool_id": "tu_1",
+                    "tool_name": "bash",
+                    "tool_args": {"cmd": "ls"},
+                },
+                ExecutionContext(session_id="s"),
+                hooks_dir=hooks_dir,
+                audit_log=NoopAuditLog(),
+                in_process_handlers={hook["id"]: handler},
+            )
+            return captured
+
+        result = asyncio.run(_run())
+        assert result[0]["tool_args"] == {"cmd": "ls"}
+
+    # ------------------------------------------------------------------
+    # Veto verdict: error surfacing + event/audit writes
+    # ------------------------------------------------------------------
+
+    def _run_with_veto_hook(
+        self, tmp_path: Path, *, session_id: str = "s-veto"
+    ) -> tuple[_CapturingAuditLog, _CapturingEventLog]:
+        """Set up and run a harness loop with a pre_tool_call veto hook."""
+        hooks_dir = tmp_path / "hooks"
+        hook = _write_hook(hooks_dir, event="pre_tool_call")
+
+        audit = _CapturingAuditLog()
+        event_log = _CapturingEventLog()
+
+        model, sandbox = self._adapters(
+            tmp_path / "fix",
+            [_tool_use_call("tu_veto", "bash"), _end_turn_call()],
+            [{"content": "ok"}],
+        )
+        reader = _FakePhaseReader(["created", "created"])
+
+        from meridiand._hook_dispatch import dispatch_hooks as _dh
+        from meridiand._replay import HarnessLoopError, run_harness_loop
+
+        async def _veto_handler(input: dict[str, Any], context: ExecutionContext) -> Any:
+            return {"verdict": "veto", "reason": "policy: bash not allowed"}
+
+        original_dispatch = _dh
+
+        async def _patched_dispatch(event: str, payload: dict, ctx: Any, **kwargs: Any) -> Any:
+            if event == "pre_tool_call":
+                # Inject the veto in-process handler for this specific hook.
+                return await original_dispatch(
+                    event,
+                    payload,
+                    ctx,
+                    in_process_handlers={hook["id"]: _veto_handler},
+                    **kwargs,
+                )
+            return await original_dispatch(event, payload, ctx, **kwargs)
+
+        import meridiand._replay as _replay_mod
+
+        original = _replay_mod.dispatch_hooks
+
+        async def _run() -> None:
+            _replay_mod.dispatch_hooks = _patched_dispatch  # type: ignore[assignment]
+            try:
+                await run_harness_loop(
+                    session_id,
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                    hooks_dir=hooks_dir,
+                    event_log=event_log,  # type: ignore[arg-type]
+                )
+            finally:
+                _replay_mod.dispatch_hooks = original
+
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(_run())
+
+        return audit, event_log
+
+    def test_veto_raises_harness_loop_error(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hook = _write_hook(hooks_dir, event="pre_tool_call")
+        audit = _CapturingAuditLog()
+
+        model, sandbox = self._adapters(
+            tmp_path / "fix",
+            [_tool_use_call("tu_v", "bash"), _end_turn_call()],
+            [{"content": "ok"}],
+        )
+        reader = _FakePhaseReader(["created", "created"])
+
+        from meridiand._hook_dispatch import dispatch_hooks as _dh
+        from meridiand._replay import HarnessLoopError, run_harness_loop
+        import meridiand._replay as _replay_mod
+
+        async def _veto_handler(input: dict[str, Any], context: ExecutionContext) -> Any:
+            return {"verdict": "veto", "reason": "blocked"}
+
+        original = _replay_mod.dispatch_hooks
+
+        async def _patched(event: str, payload: dict, ctx: Any, **kwargs: Any) -> Any:
+            if event == "pre_tool_call":
+                return await _dh(
+                    event, payload, ctx,
+                    in_process_handlers={hook["id"]: _veto_handler},
+                    **kwargs,
+                )
+            return await _dh(event, payload, ctx, **kwargs)
+
+        async def _run() -> None:
+            _replay_mod.dispatch_hooks = _patched  # type: ignore[assignment]
+            try:
+                await run_harness_loop(
+                    "s-veto-err",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                    hooks_dir=hooks_dir,
+                )
+            finally:
+                _replay_mod.dispatch_hooks = original
+
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(_run())
+
+    def test_veto_writes_audit_entry_at_info(self, tmp_path: Path) -> None:
+        audit, _ = self._run_with_veto_hook(tmp_path)
+        veto_entries = [e for e in audit.entries if e.event == "hook.pre_tool_call.vetoed"]
+        assert len(veto_entries) >= 1
+        assert veto_entries[0].level == "info"
+
+    def test_veto_audit_entry_detail_has_tool_id(self, tmp_path: Path) -> None:
+        audit, _ = self._run_with_veto_hook(tmp_path)
+        entry = next(e for e in audit.entries if e.event == "hook.pre_tool_call.vetoed")
+        assert entry.detail is not None
+        assert entry.detail["tool_id"] == "tu_veto"
+
+    def test_veto_audit_entry_detail_has_tool_name(self, tmp_path: Path) -> None:
+        audit, _ = self._run_with_veto_hook(tmp_path)
+        entry = next(e for e in audit.entries if e.event == "hook.pre_tool_call.vetoed")
+        assert entry.detail is not None
+        assert entry.detail["tool_name"] == "bash"
+
+    def test_veto_audit_entry_detail_has_reason(self, tmp_path: Path) -> None:
+        audit, _ = self._run_with_veto_hook(tmp_path)
+        entry = next(e for e in audit.entries if e.event == "hook.pre_tool_call.vetoed")
+        assert entry.detail is not None
+        assert entry.detail["reason"] == "policy: bash not allowed"
+
+    def test_veto_writes_tool_call_vetoed_event(self, tmp_path: Path) -> None:
+        _, event_log = self._run_with_veto_hook(tmp_path)
+        vetoed = [(t, d) for t, d in event_log.events if t == "tool_call.vetoed"]
+        assert len(vetoed) == 1
+
+    def test_veto_event_contains_tool_id(self, tmp_path: Path) -> None:
+        _, event_log = self._run_with_veto_hook(tmp_path)
+        _, data = next((t, d) for t, d in event_log.events if t == "tool_call.vetoed")
+        assert data["tool_id"] == "tu_veto"
+
+    def test_veto_event_contains_reason(self, tmp_path: Path) -> None:
+        _, event_log = self._run_with_veto_hook(tmp_path)
+        _, data = next((t, d) for t, d in event_log.events if t == "tool_call.vetoed")
+        assert data["reason"] == "policy: bash not allowed"
+
+    # ------------------------------------------------------------------
+    # Mutation: args replaced before tool_call.requested
+    # ------------------------------------------------------------------
+
+    def test_mutation_args_applied_before_tool_call_requested(self, tmp_path: Path) -> None:
+        hooks_dir = tmp_path / "hooks"
+        hook = _write_hook(hooks_dir, event="pre_tool_call")
+        audit = _CapturingAuditLog()
+        event_log = _CapturingEventLog()
+
+        model, sandbox = self._adapters(
+            tmp_path / "fix",
+            [_tool_use_call("tu_mut", "bash"), _end_turn_call()],
+            [{"content": "ok", "tool_id": "tu_mut", "tool_name": "bash"}],
+        )
+        reader = _FakePhaseReader(["created", "waiting_for_tool", "created"])
+
+        from meridiand._hook_dispatch import dispatch_hooks as _dh
+        from meridiand._replay import run_harness_loop
+        import meridiand._replay as _replay_mod
+
+        async def _mutate_handler(input: dict[str, Any], context: ExecutionContext) -> Any:
+            return {"verdict": "continue", "mutations": {"args": {"cmd": "ls -la"}}}
+
+        original = _replay_mod.dispatch_hooks
+
+        async def _patched(event: str, payload: dict, ctx: Any, **kwargs: Any) -> Any:
+            if event == "pre_tool_call":
+                return await _dh(
+                    event, payload, ctx,
+                    in_process_handlers={hook["id"]: _mutate_handler},
+                    **kwargs,
+                )
+            return await _dh(event, payload, ctx, **kwargs)
+
+        async def _run() -> None:
+            _replay_mod.dispatch_hooks = _patched  # type: ignore[assignment]
+            try:
+                await run_harness_loop(
+                    "s-mut",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                    hooks_dir=hooks_dir,
+                    event_log=event_log,  # type: ignore[arg-type]
+                )
+            finally:
+                _replay_mod.dispatch_hooks = original
+
+        asyncio.run(_run())
+
+        requested = [(t, d) for t, d in event_log.events if t == "tool_call.requested"]
+        assert len(requested) == 1
+        _, req_data = requested[0]
+        assert req_data["args"] == {"cmd": "ls -la"}

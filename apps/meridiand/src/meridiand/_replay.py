@@ -33,7 +33,7 @@ from sdk_sandbox import ExecutionContext
 from storage_event_log import EventLogWriter
 
 from ._event_translator import ModelEventTranslator
-from ._hook_dispatch import dispatch_hooks
+from ._hook_dispatch import HookVetoError, dispatch_hooks
 
 
 def _now() -> str:
@@ -272,18 +272,28 @@ async def _run_harness(
 
         for block in tool_use_blocks:
             tool_calls += 1
+            _block_input = block.get("input_json", "")
+            try:
+                _block_args: Any = json.loads(_block_input) if _block_input else {}
+            except json.JSONDecodeError:
+                _block_args = {}
             if hooks_dir is not None:
-                await dispatch_hooks(
+                _pre_results = await dispatch_hooks(
                     "pre_tool_call",
                     {
                         "session_id": session_id,
                         "tool_id": block["id"],
                         "tool_name": block["name"],
+                        "tool_args": _block_args,
                     },
                     _ctx,
                     hooks_dir=hooks_dir,
                     audit_log=_hooks_log,
                 )
+                for _pre_r in _pre_results:
+                    if _pre_r.mutations and isinstance(_pre_r.mutations.get("args"), dict):
+                        _block_args = _pre_r.mutations["args"]
+                        break
             result = sandbox_adapter.next_result()
             if hooks_dir is not None:
                 await dispatch_hooks(
@@ -839,19 +849,59 @@ async def run_harness_loop(
                                 f"missing {sorted(_missing_caps)}"
                             )
 
-                    # 3. pre_tool_call hooks.
+                    # 3. pre_tool_call hooks — verdict round-trip (Contract 3).
                     if hooks_dir is not None:
-                        await dispatch_hooks(
-                            "pre_tool_call",
-                            {
-                                "session_id": session_id,
-                                "tool_id": _tool_id,
-                                "tool_name": _tool_name,
-                            },
-                            _ctx,
-                            hooks_dir=hooks_dir,
-                            audit_log=audit_log,
-                        )
+                        try:
+                            _pre_hook_results = await dispatch_hooks(
+                                "pre_tool_call",
+                                {
+                                    "session_id": session_id,
+                                    "tool_id": _tool_id,
+                                    "tool_name": _tool_name,
+                                    "tool_args": _args,
+                                },
+                                _ctx,
+                                hooks_dir=hooks_dir,
+                                audit_log=audit_log,
+                            )
+                            for _phr in _pre_hook_results:
+                                if _phr.mutations and isinstance(
+                                    _phr.mutations.get("args"), dict
+                                ):
+                                    _args = _phr.mutations["args"]
+                                    break
+                        except HookVetoError as _veto:
+                            _veto_now = _now()
+                            if event_log is not None:
+                                await event_log.append(
+                                    session_id,
+                                    "tool_call.vetoed",
+                                    {
+                                        "tool_id": _tool_id,
+                                        "tool_name": _tool_name,
+                                        "reason": _veto.message,
+                                    },
+                                )
+                            audit_log.write(
+                                AuditLogEntry(
+                                    level="info",
+                                    event="hook.pre_tool_call.vetoed",
+                                    code="hook_veto",
+                                    timestamp=_veto_now,
+                                    detail={
+                                        "session_id": session_id,
+                                        "tool_id": _tool_id,
+                                        "tool_name": _tool_name,
+                                        "reason": _veto.message,
+                                    },
+                                )
+                            )
+                            raise HarnessLoopError(
+                                message=f"Tool call {_tool_name!r} vetoed by hook"
+                                f" {_veto.hook_name!r}: {_veto.message}",
+                                timestamp=_veto_now,
+                                cause=_veto,
+                            )
 
                     # 4. Write tool_call.requested event.
                     if event_log is not None:
