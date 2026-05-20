@@ -53,6 +53,8 @@ from meridian_sdk_provider.types import (
     ToolUseStartEvent,
 )
 
+from ._disallowed_tools import ALL_CLAUDE_CODE_BUILTIN_TOOLS
+
 _MAX_STDERR_BYTES = 64 * 1024
 _SIGKILL_GRACE_S = 2.0
 
@@ -71,6 +73,18 @@ class CliSubprocessError(ProviderCallError):
 
 class CliCallTimeoutError(ProviderTimeoutError):
     """A model call to the CLI subprocess timed out (no event within call_timeout_s)."""
+
+    def __init__(self, message: str, *, provider_name: str = "claude_code_oauth") -> None:
+        super().__init__(message, provider_name=provider_name)
+
+
+class DisallowedToolError(CliSubprocessError):
+    """Inner loop attempted to call a Claude Code built-in tool despite disallow list.
+
+    Raised when a ``tool_use_start`` event arrives for a tool in
+    :data:`ALL_CLAUDE_CODE_BUILTIN_TOOLS`.  This indicates the CLI did not
+    honour the ``disallowed_tools`` payload field — a Contract 1 violation.
+    """
 
     def __init__(self, message: str, *, provider_name: str = "claude_code_oauth") -> None:
         super().__init__(message, provider_name=provider_name)
@@ -131,6 +145,9 @@ def _opts_to_dict(opts: ModelCallOpts) -> dict[str, Any]:
         "model": opts.model,
         "messages": messages,
         "max_tokens": opts.max_tokens,
+        # Contract 1: always disallow Claude Code's built-in tools so the
+        # inner loop can only call tools Meridian exposes via the MCP bridge.
+        "disallowed_tools": sorted(ALL_CLAUDE_CODE_BUILTIN_TOOLS),
     }
     if opts.system:
         d["system"] = opts.system
@@ -343,6 +360,15 @@ class CliSubprocessManager:
                     f"{code}: {message}",
                     provider_name=self._provider_name,
                 )
+
+            if msg_type == "tool_use_start":
+                tool_name = msg.get("name", "")
+                if tool_name in ALL_CLAUDE_CODE_BUILTIN_TOOLS:
+                    raise DisallowedToolError(
+                        f"inner loop attempted disallowed built-in tool {tool_name!r}; "
+                        "capability boundary violation",
+                        provider_name=self._provider_name,
+                    )
 
             event = _parse_event(msg, self._provider_name)
             if event is not None:

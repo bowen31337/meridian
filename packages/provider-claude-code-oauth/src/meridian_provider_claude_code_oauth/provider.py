@@ -30,7 +30,7 @@ from meridian_sdk_provider.telemetry import (
 from meridian_sdk_provider.types import ModelCallOpts, ModelCountReq, ModelEvent, TokenCount
 
 from ._lock import LockFileFormatError, LockFileNotFoundError, read_lock
-from ._subprocess import CliSubprocessManager
+from ._subprocess import CliSubprocessManager, DisallowedToolError
 
 _LOG = logging.getLogger(__name__)
 
@@ -177,6 +177,21 @@ class SystemOAuthProvider:
             try:
                 async for event in self._manager.call(opts):
                     yield event
+            except DisallowedToolError as exc:
+                record_provider_failure(span, exc, provider_name=self.name, model=opts.model)
+                self._audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="claude_code_oauth.disallowed_tool.attempted",
+                        provider_name=self.name,
+                        provider_kind=self.kind,
+                        model=opts.model,
+                        session_id=opts.session_id,
+                        timestamp=_now(),
+                        detail={"error": str(exc), "error_type": type(exc).__name__},
+                    )
+                )
+                raise
             except ProviderCallError as exc:
                 record_provider_failure(span, exc, provider_name=self.name, model=opts.model)
                 self._audit_log.write(

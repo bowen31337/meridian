@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/model-providers-system-oauth-provider-contract-2-sandbo/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/model-providers-system-oauth-provider-contract-1-disall/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

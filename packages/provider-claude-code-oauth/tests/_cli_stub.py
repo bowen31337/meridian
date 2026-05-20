@@ -13,6 +13,10 @@ instead of events.
 
 Set env var CLI_STUB_NO_PONG=1 to silently ignore pings (no pong emitted),
 simulating a subprocess that is alive but unresponsive to health checks.
+
+Set env var CLI_STUB_DISALLOWED_TOOL=<name> to emit a tool_use_start event
+for that tool name before the normal response, simulating a CLI that ignores
+the disallowed_tools payload field (Contract 1 violation detection tests).
 """
 
 import json
@@ -23,6 +27,7 @@ import time
 _hang = os.environ.get("CLI_STUB_HANG") == "1"
 _error = os.environ.get("CLI_STUB_ERROR") == "1"
 _no_pong = os.environ.get("CLI_STUB_NO_PONG") == "1"
+_disallowed_tool = os.environ.get("CLI_STUB_DISALLOWED_TOOL", "")
 
 
 def _emit(obj: dict) -> None:
@@ -68,6 +73,14 @@ def main() -> None:
                     "message": "stub configured to return error",
                 })
                 continue
+
+            if _disallowed_tool:
+                _emit({
+                    "type": "tool_use_start",
+                    "call_id": call_id,
+                    "id": "tool_abc123",
+                    "name": _disallowed_tool,
+                })
 
             _emit({
                 "type": "message_start",
