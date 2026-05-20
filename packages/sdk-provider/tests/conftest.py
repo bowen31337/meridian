@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
 
 import pytest
 
@@ -74,6 +75,41 @@ class CollectingAuditLog:
         self.entries.append(entry)
 
 
+@dataclass
+class ModelCallRecord:
+    session_id: str
+    routing_rule: str
+    provider_name: str
+    model: str
+
+
+class CollectingModelCallEventLog:
+    """ModelCallEventLog that records all record_started calls for assertion."""
+
+    def __init__(self, raise_on_record: Exception | None = None) -> None:
+        self.started: list[ModelCallRecord] = []
+        self._raise_on_record = raise_on_record
+
+    async def record_started(
+        self,
+        *,
+        session_id: str,
+        routing_rule: str,
+        provider_name: str,
+        model: str,
+    ) -> None:
+        if self._raise_on_record is not None:
+            raise self._raise_on_record
+        self.started.append(
+            ModelCallRecord(
+                session_id=session_id,
+                routing_rule=routing_rule,
+                provider_name=provider_name,
+                model=model,
+            )
+        )
+
+
 @pytest.fixture
 def fake_provider() -> FakeProvider:
     return FakeProvider(name="test-provider")
@@ -82,6 +118,11 @@ def fake_provider() -> FakeProvider:
 @pytest.fixture
 def audit_log() -> CollectingAuditLog:
     return CollectingAuditLog()
+
+
+@pytest.fixture
+def event_log() -> CollectingModelCallEventLog:
+    return CollectingModelCallEventLog()
 
 
 def make_opts(**kwargs: object) -> ModelCallOpts:

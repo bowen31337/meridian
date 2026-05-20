@@ -14,9 +14,10 @@ from meridian_sdk_provider import (
     ProviderCapabilities,
     ProviderRateLimitError,
     RoutingCondition,
+    RoutingError,
     TokenRange,
 )
-from tests.conftest import CollectingAuditLog, FakeProvider, make_opts
+from tests.conftest import CollectingAuditLog, CollectingModelCallEventLog, FakeProvider, make_opts
 
 
 def _router(
@@ -24,9 +25,15 @@ def _router(
     providers: dict,
     fallbacks: list[FallbackRule] | None = None,
     audit_log: CollectingAuditLog | None = None,
+    event_log: CollectingModelCallEventLog | None = None,
 ) -> ModelRouter:
     policy = ModelRoutingPolicy(rules=rules, fallbacks=fallbacks or [])
-    return ModelRouter(policy=policy, providers=providers, audit_log=audit_log)
+    return ModelRouter(
+        policy=policy,
+        providers=providers,
+        audit_log=audit_log,
+        event_log=event_log,
+    )
 
 
 # ─── Basic routing ────────────────────────────────────────────────────────────
@@ -540,3 +547,104 @@ async def test_register_provider_after_init() -> None:
     router.register_provider(provider)
     events = [e async for e in router.call(make_opts())]
     assert len(events) == 3
+
+
+# ─── model_call.started event log ────────────────────────────────────────────
+
+
+async def test_model_call_started_recorded_on_success(
+    event_log: CollectingModelCallEventLog,
+) -> None:
+    provider = FakeProvider(name="p")
+    router = _router(
+        rules=[ModelRoutingRule(model="p:specific")],
+        providers={"p": provider},
+        event_log=event_log,
+    )
+    [e async for e in router.call(make_opts(session_id="sess-1"))]
+
+    assert len(event_log.started) == 1
+    rec = event_log.started[0]
+    assert rec.session_id == "sess-1"
+    assert rec.routing_rule == "p:specific"
+    assert rec.provider_name == "p"
+    assert rec.model == "specific"
+
+
+async def test_model_call_started_not_recorded_without_session(
+    event_log: CollectingModelCallEventLog,
+) -> None:
+    provider = FakeProvider(name="p")
+    router = _router(
+        rules=[ModelRoutingRule(model="p:m")],
+        providers={"p": provider},
+        event_log=event_log,
+    )
+    [e async for e in router.call(make_opts())]  # no session_id
+
+    assert len(event_log.started) == 0
+
+
+async def test_model_call_started_routing_rule_is_model_ref(
+    event_log: CollectingModelCallEventLog,
+) -> None:
+    provider = FakeProvider(name="myp")
+    router = _router(
+        rules=[ModelRoutingRule(model="myp:claude-3")],
+        providers={"myp": provider},
+        event_log=event_log,
+    )
+    [e async for e in router.call(make_opts(session_id="sess-2"))]
+
+    rec = event_log.started[0]
+    assert rec.routing_rule == "myp:claude-3"
+    assert rec.provider_name == "myp"
+    assert rec.model == "claude-3"
+
+
+async def test_model_call_started_failure_raises_routing_error_and_writes_audit(
+    audit_log: CollectingAuditLog,
+) -> None:
+    failing_event_log = CollectingModelCallEventLog(
+        raise_on_record=RuntimeError("event log unavailable")
+    )
+    provider = FakeProvider(name="p")
+    router = _router(
+        rules=[ModelRoutingRule(model="p:m")],
+        providers={"p": provider},
+        audit_log=audit_log,
+        event_log=failing_event_log,
+    )
+    with pytest.raises(RoutingError, match="model_call.started"):
+        [e async for e in router.call(make_opts(session_id="sess-3"))]
+
+    assert len(audit_log.entries) == 1
+    entry = audit_log.entries[0]
+    assert entry.event == "provider.call.failed"
+    assert entry.provider_name == "<event_log>"
+
+
+async def test_model_call_started_failure_provider_not_called(
+    event_log: CollectingModelCallEventLog,
+) -> None:
+    failing_event_log = CollectingModelCallEventLog(raise_on_record=RuntimeError("unavailable"))
+    provider = FakeProvider(name="p")
+    router = _router(
+        rules=[ModelRoutingRule(model="p:m")],
+        providers={"p": provider},
+        event_log=failing_event_log,
+    )
+    with pytest.raises(RoutingError):
+        [e async for e in router.call(make_opts(session_id="sess-4"))]
+
+    assert provider.call_count == 0
+
+
+async def test_set_event_log_replaces_noop(event_log: CollectingModelCallEventLog) -> None:
+    provider = FakeProvider(name="p")
+    router = _router(rules=[ModelRoutingRule(model="p:m")], providers={"p": provider})
+    router.set_event_log(event_log)
+
+    [e async for e in router.call(make_opts(session_id="sess-5"))]
+
+    assert len(event_log.started) == 1

@@ -18,6 +18,7 @@ Public surface for provider authors and router consumers::
 
 from ._version import SDK_PROVIDER_VERSION
 from .audit import AuditLog, AuditLogEntry, NoopAuditLog
+from .event_log import ModelCallEventLog, NoopModelCallEventLog
 from .fake import FakeModelAdapter, write_model_fixture
 from .ollama import OllamaProvider
 from .openai import OpenAIProvider
@@ -104,6 +105,9 @@ __all__ = [
     "AuditLog",
     "AuditLogEntry",
     "NoopAuditLog",
+    # Event log
+    "ModelCallEventLog",
+    "NoopModelCallEventLog",
     # Fake / testing
     "FakeModelAdapter",
     "write_model_fixture",

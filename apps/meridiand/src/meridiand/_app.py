@@ -53,6 +53,7 @@ from ._files import make_files_router
 from ._handoff import make_handoff_router
 from ._kb import make_kb_router
 from ._messages import make_messages_router
+from ._model_call_event_log import EventLogModelCallAdapter
 from api_models import make_router as make_models_router
 from ._parallel_runs import make_parallel_runs_router
 from ._phase import make_phase_router
@@ -372,6 +373,11 @@ def create_app(
                     make_acp_compliance_router(audit_log=audit_log)
                 )
             if model_router is not None:
+                if event_log is not None:
+                    from storage_event_log import EventLogRuntime
+                    model_router.set_event_log(
+                        EventLogModelCallAdapter(EventLogRuntime(event_log))
+                    )
                 app.include_router(
                     make_messages_router(
                         audit_log=audit_log,

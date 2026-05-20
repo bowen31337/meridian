@@ -14,6 +14,7 @@ from .errors import (
     ProviderTimeoutError,
     RoutingError,
 )
+from .event_log import ModelCallEventLog, NoopModelCallEventLog
 from .protocol import ModelEntry, ModelProvider, ProviderCapabilities
 from .registry import ProviderRegistry, _ProviderSlot
 from .telemetry import get_tracer, record_invocation_event, record_provider_failure
@@ -197,11 +198,17 @@ class ModelRouter:
         providers: dict[str, ModelProvider] | None = None,
         registry: ProviderRegistry | None = None,
         audit_log: AuditLog | None = None,
+        event_log: ModelCallEventLog | None = None,
     ) -> None:
         self._policy = policy
         self._providers: dict[str, ModelProvider] = providers or {}
         self._registry = registry
         self._audit = audit_log or NoopAuditLog()
+        self._event_log: ModelCallEventLog = event_log or NoopModelCallEventLog()
+
+    def set_event_log(self, event_log: ModelCallEventLog) -> None:
+        """Attach or replace the event log after construction."""
+        self._event_log = event_log
 
     def register_provider(self, provider: ModelProvider) -> None:
         """Add or replace a provider by its ``name``.
@@ -344,6 +351,21 @@ class ModelRouter:
                 session_id=opts.session_id,
                 routing_rule=rule_label,
             )
+
+            if opts.session_id:
+                try:
+                    await self._event_log.record_started(
+                        session_id=opts.session_id,
+                        routing_rule=rule_label,
+                        provider_name=provider.name,
+                        model=model_id,
+                    )
+                except Exception as exc:
+                    record_provider_failure(span, exc, provider_name="<event_log>", model=model_id)
+                    self._write_audit_failure(
+                        exc, "<event_log>", "<event_log>", model_id, opts, rule_label
+                    )
+                    raise RoutingError(f"Failed to record model_call.started: {exc}") from exc
 
             # Peek at the first event before yielding anything.  This lets us
             # attempt a fallback when the provider errors before sending data.
