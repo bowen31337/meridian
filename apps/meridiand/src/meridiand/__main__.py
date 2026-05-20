@@ -144,6 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         services.audit_log,
         plugin_loader=services.plugin_loader,
         storage_root=config.storage_root,
+        config_path=config_path,
         event_log=services.event_log,
         cors=config.cors,
         auth_config=config.auth,

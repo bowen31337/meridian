@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/yaml-configurat-system-reload-failure-invalid-new-confi/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/yaml-configurat-system-sighup-signal-handler-invokes-th/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

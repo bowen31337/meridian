@@ -29,6 +29,7 @@ from ._vault_leak_soak import make_vault_leak_soak_router
 from ._compaction import make_compaction_router, run_compaction_loop
 from ._config import AuthConfig, CompactionConfig, CronSchedulerConfig, CorsConfig, SkillForgeConfig, WebhookSenderConfig
 from ._secret_ref import SecretRefResolver
+from ._sighup import install_sighup_handler, remove_sighup_handler
 from ._system_config import make_system_config_router
 from ._cron import make_cron_router
 from ._cron_scheduler import run_cron_scheduler_loop
@@ -83,6 +84,7 @@ def create_app(
     audit_log: AuditLog,
     plugin_loader: PluginLoader | None = None,
     storage_root: Path | None = None,
+    config_path: Path | None = None,
     event_log: EventLogWriter | None = None,
     acp_targets: dict[str, str] | None = None,
     acp_peer_client: AcpPeerClient | None = None,
@@ -183,8 +185,19 @@ def create_app(
                             )
                         )
 
+                if config_path is not None and model_router is not None:
+                    install_sighup_handler(
+                        config_path=config_path,
+                        model_router=model_router,
+                        audit_log=audit_log,
+                        secret_resolver=secret_resolver,
+                    )
+
                 _LOG.info("meridiand ready")
                 yield
+
+                if config_path is not None and model_router is not None:
+                    remove_sighup_handler()
 
                 if compaction_task is not None:
                     compaction_task.cancel()
