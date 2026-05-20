@@ -20,6 +20,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from meridian_kb_indexer import Chunk
+from meridian_sdk_provider import (
+    Message,
+    ModelCallOpts,
+    ModelRouter,
+    TextDeltaEvent,
+)
 
 from ._kb import KbStore
 
@@ -110,6 +116,25 @@ class MemoryStoreWriteError(MeridianError):
         return 500
 
 
+class MemoryStoreDialecticError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="memory_store_dialectic_failed",
+            message=message,
+            timestamp=timestamp,
+            cause=cause,
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
 # ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
@@ -139,6 +164,8 @@ class MemoryStoreWriteRequest(BaseModel):
     content: str
     scope: str | None = None
     embedder_id: str | None = None
+    dialectic: bool = False
+    dialectic_top_k: int = 5
 
 
 def _validate_request(body: MemoryStoreCreateRequest) -> MemoryStoreInvalidRequestError | None:
@@ -177,11 +204,113 @@ def _weighted_rrf_fuse(
 
 
 # ---------------------------------------------------------------------------
+# Dialectic classification
+# ---------------------------------------------------------------------------
+
+_DialecticLabel = Literal["duplicate", "refinement", "contradiction", "net-new"]
+
+_CLASSIFIER_SYSTEM = """\
+You are a memory deduplication classifier. Given a new memory and existing similar \
+memories, classify the relationship.
+
+Labels:
+- "duplicate": new memory conveys the same information as an existing one (no new value)
+- "refinement": new memory updates or adds compatible information to an existing one
+- "contradiction": new memory contradicts an existing one
+- "net-new": new memory is distinct from all existing ones
+
+Rules:
+- Pick at most one existing memory as the primary match (by key)
+- For "refinement", provide merged_content that blends both into a single coherent memory
+- For all other labels, set merged_content to null
+- Respond ONLY with valid JSON, no markdown, no explanation outside the JSON
+
+Response format:
+{"label": "duplicate|refinement|contradiction|net-new", "match_key": "<key or null>", \
+"merged_content": "<merged text or null>", "explanation": "<one sentence>"}"""
+
+
+class _DialecticResult:
+    __slots__ = ("label", "match_key", "merged_content", "explanation")
+
+    def __init__(
+        self,
+        label: _DialecticLabel,
+        match_key: str | None,
+        merged_content: str | None,
+        explanation: str,
+    ) -> None:
+        self.label = label
+        self.match_key = match_key
+        self.merged_content = merged_content
+        self.explanation = explanation
+
+
+async def _classify_memory(
+    model_router: ModelRouter,
+    incoming_key: str,
+    incoming_content: str,
+    candidates: list[dict[str, Any]],
+) -> _DialecticResult:
+    if not candidates:
+        return _DialecticResult(
+            label="net-new",
+            match_key=None,
+            merged_content=None,
+            explanation="No existing memories to compare against.",
+        )
+
+    candidate_lines = "\n".join(
+        f"{i + 1}. [key={c['file_path']!r}]: {c['content']}"
+        for i, c in enumerate(candidates)
+    )
+    user_text = (
+        f"New memory (key: {incoming_key!r}):\n{incoming_content}\n\n"
+        f"Existing similar memories:\n{candidate_lines}"
+    )
+
+    opts = ModelCallOpts(
+        model="memory_classifier",
+        messages=[Message(role="user", content=user_text)],
+        system=_CLASSIFIER_SYSTEM,
+        max_tokens=512,
+        temperature=0.0,
+        role="memory_classifier",
+        skill_id="memory_dialectic_classifier",
+    )
+
+    text_parts: list[str] = []
+    async for event in model_router.call(opts):
+        if isinstance(event, TextDeltaEvent):
+            text_parts.append(event.text)
+
+    raw = "".join(text_parts).strip()
+    try:
+        data = json.loads(raw)
+        label: _DialecticLabel = data["label"]
+        if label not in ("duplicate", "refinement", "contradiction", "net-new"):
+            raise ValueError(f"Unknown label: {label!r}")
+        return _DialecticResult(
+            label=label,
+            match_key=data.get("match_key"),
+            merged_content=data.get("merged_content"),
+            explanation=data.get("explanation", ""),
+        )
+    except Exception as exc:
+        raise ValueError(f"Classifier returned invalid response: {raw!r}") from exc
+
+
+# ---------------------------------------------------------------------------
 # Router factory
 # ---------------------------------------------------------------------------
 
 
-def make_memory_stores_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
+def make_memory_stores_router(
+    *,
+    audit_log: AuditLog,
+    storage_root: Path,
+    model_router: ModelRouter | None = None,
+) -> APIRouter:
     router = APIRouter()
     stores_dir = storage_root / "memory_stores"
 
@@ -369,6 +498,12 @@ def make_memory_stores_router(*, audit_log: AuditLog, storage_root: Path) -> API
         embedder_id = body.embedder_id or "hash-128"
         scope = body.scope or "global"
 
+        # Initialise to safe defaults; mutated inside the try block.
+        action = "inserted"
+        effective_content = body.content
+        dialectic_label: _DialecticLabel | None = None
+        dialectic_match_key: str | None = None
+
         with tracer.start_as_current_span(
             "memory_store.write",
             attributes={
@@ -377,6 +512,7 @@ def make_memory_stores_router(*, audit_log: AuditLog, storage_root: Path) -> API
                 "memory_store.scope": scope,
                 "memory_store.write.embedder_id": embedder_id,
                 "memory_store.write.content_length": len(body.content),
+                "memory_store.write.dialectic": body.dialectic,
             },
         ) as span:
             record_invocation_event(
@@ -397,15 +533,133 @@ def make_memory_stores_router(*, audit_log: AuditLog, storage_root: Path) -> API
                     )
 
                 kb_store = KbStore(stores_dir / store_id / "chunks.db")
-                action = "updated" if kb_store.has_key(body.key) else "inserted"
-                kb_store.upsert_chunks(
-                    body.key,
-                    scope,
-                    [Chunk(file_path=body.key, kind="text", content=body.content, start_line=0, end_line=0)],
-                )
+
+                if body.dialectic and model_router is not None:
+                    # 1. Retrieve top-K similar memories, excluding the incoming key.
+                    bm25_r = kb_store.bm25_search(body.content, scope, body.dialectic_top_k)
+                    vec_r = kb_store.vector_search(body.content, scope, body.dialectic_top_k)
+                    candidates = _weighted_rrf_fuse(
+                        [(bm25_r, 1.0), (vec_r, 1.0)],
+                        body.dialectic_top_k,
+                    )
+                    candidates = [c for c in candidates if c["file_path"] != body.key]
+
+                    # 2. Ask classifier to categorise the incoming content.
+                    try:
+                        result = await _classify_memory(
+                            model_router, body.key, body.content, candidates
+                        )
+                    except Exception as exc:
+                        raise MemoryStoreDialecticError(
+                            message=f"Memory dialectic classification failed: {exc}",
+                            timestamp=_now(),
+                            cause=exc,
+                        )
+
+                    dialectic_label = result.label
+                    dialectic_match_key = result.match_key
+                    span.set_attribute("memory_store.write.dialectic_label", result.label)
+
+                    # 3. Apply outcome.
+                    if result.label == "duplicate":
+                        # Skip write; content unchanged in store.
+                        action = "deduplicated"
+                        effective_content = body.content
+
+                    elif result.label == "refinement":
+                        effective_content = result.merged_content or body.content
+                        kb_store.upsert_chunks(
+                            body.key,
+                            scope,
+                            [Chunk(
+                                file_path=body.key,
+                                kind="text",
+                                content=effective_content,
+                                start_line=0,
+                                end_line=0,
+                            )],
+                        )
+                        action = "merged"
+
+                    elif result.label == "contradiction":
+                        effective_content = body.content
+                        kb_store.upsert_chunks(
+                            body.key,
+                            scope,
+                            [Chunk(
+                                file_path=body.key,
+                                kind="text",
+                                content=effective_content,
+                                start_line=0,
+                                end_line=0,
+                            )],
+                        )
+                        # Provenance edge: record what was superseded.
+                        prov_dir = stores_dir / store_id / "provenance"
+                        prov_dir.mkdir(parents=True, exist_ok=True)
+                        (prov_dir / f"{body.key}.json").write_text(
+                            json.dumps({
+                                "key": body.key,
+                                "superseded_at": now,
+                                "superseded_match_key": result.match_key,
+                                "explanation": result.explanation,
+                            })
+                        )
+                        action = "superseded"
+
+                    else:  # net-new
+                        effective_content = body.content
+                        was_present = kb_store.has_key(body.key)
+                        kb_store.upsert_chunks(
+                            body.key,
+                            scope,
+                            [Chunk(
+                                file_path=body.key,
+                                kind="text",
+                                content=effective_content,
+                                start_line=0,
+                                end_line=0,
+                            )],
+                        )
+                        action = "updated" if was_present else "inserted"
+
+                else:
+                    # No dialectic: existing upsert behaviour.
+                    effective_content = body.content
+                    was_present = kb_store.has_key(body.key)
+                    kb_store.upsert_chunks(
+                        body.key,
+                        scope,
+                        [Chunk(
+                            file_path=body.key,
+                            kind="text",
+                            content=effective_content,
+                            start_line=0,
+                            end_line=0,
+                        )],
+                    )
+                    action = "updated" if was_present else "inserted"
+
                 span.set_attribute("memory_store.write.action", action)
 
             except MemoryStoreNotFoundError as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="memory_store.write.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "memory_store_id": store_id,
+                            "key": body.key,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise
+
+            except MemoryStoreDialecticError as err:
                 record_error(span, err)
                 audit_log.write(
                     AuditLogEntry(
@@ -448,11 +702,13 @@ def make_memory_stores_router(*, audit_log: AuditLog, storage_root: Path) -> API
             content={
                 "store_id": store_id,
                 "key": body.key,
-                "content": body.content,
+                "content": effective_content,
                 "scope": scope,
                 "embedder_id": embedder_id,
                 "action": action,
                 "created_at": now,
+                "dialectic_label": dialectic_label,
+                "dialectic_match_key": dialectic_match_key,
             },
             status_code=201,
         )

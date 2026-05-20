@@ -305,7 +305,11 @@ def create_app(
                     make_user_profiles_router(audit_log=audit_log, storage_root=storage_root)
                 )
                 app.include_router(
-                    make_memory_stores_router(audit_log=audit_log, storage_root=storage_root)
+                    make_memory_stores_router(
+                        audit_log=audit_log,
+                        storage_root=storage_root,
+                        model_router=model_router,
+                    )
                 )
                 app.include_router(
                     make_vaults_router(
