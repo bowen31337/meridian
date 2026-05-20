@@ -263,6 +263,34 @@ class ModelRouter:
             )
         )
 
+    def _write_audit_failover(
+        self,
+        primary_exc: Exception,
+        primary_provider_name: str,
+        primary_model: str,
+        fallback_rule: FallbackRule,
+        error_category: Literal["rate_limit", "timeout", "5xx"] | None,
+        opts: ModelCallOpts,
+    ) -> None:
+        self._audit.write(
+            AuditLogEntry(
+                level="info",
+                event="router.failover",
+                provider_name=primary_provider_name,
+                provider_kind="<router>",
+                model=primary_model,
+                session_id=opts.session_id,
+                timestamp=_now_iso(),
+                detail={
+                    "error_category": error_category or "any",
+                    "error_type": type(primary_exc).__name__,
+                    "error": str(primary_exc),
+                    "fallback_model": fallback_rule.model,
+                    "fallback_on": fallback_rule.on,
+                },
+            )
+        )
+
     async def call(self, opts: ModelCallOpts) -> AsyncIterator[ModelEvent]:
         """Stream model events for *opts* according to the routing policy.
 
@@ -345,6 +373,11 @@ class ModelRouter:
                         primary_exc, provider.name, provider.kind, model_id, opts, rule_label
                     )
                     raise
+
+                # Log the failover decision before attempting the fallback.
+                self._write_audit_failover(
+                    primary_exc, provider.name, model_id, fb_rule, cat, opts
+                )
 
                 # Attempt the fallback provider.
                 fb_provider, fb_model_id, _slot = self._resolve(fb_rule.model)

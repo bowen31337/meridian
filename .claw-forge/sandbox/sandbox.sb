@@ -1,7 +1,7 @@
 (version 1)
 (allow default)
 (deny file-write* (subpath "/Users/bowenli/development/meridian"))
-(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/model-router-system-provider-registry-holds-instantiate"))
+(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/model-router-system-failover-policy-on-rate-limit-timeo"))
 (allow file-write* (subpath "/Users/bowenli/development/meridian/.git"))
 (deny file-write* (subpath "/Users/bowenli/.ssh"))
 (deny file-write* (subpath "/Users/bowenli/.aws"))

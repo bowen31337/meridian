@@ -304,9 +304,156 @@ async def test_fallback_failure_raises_and_logs(audit_log: CollectingAuditLog) -
         async for _ in router.call(make_opts()):
             pass
 
+    # Expect: one router.failover decision entry + one provider.call.failed entry.
+    assert len(audit_log.entries) == 2
+    failover_entry = next(e for e in audit_log.entries if e.event == "router.failover")
+    failure_entry = next(e for e in audit_log.entries if e.event == "provider.call.failed")
+    assert failover_entry.provider_name == "primary"
+    assert failure_entry.provider_name == "fallback"
+
+
+async def test_failover_decision_logged_on_rate_limit(audit_log: CollectingAuditLog) -> None:
+    primary = FakeProvider(
+        name="primary",
+        raise_on_call=ProviderRateLimitError("rate limited", "primary"),
+    )
+    fallback = FakeProvider(name="fallback")
+    router = _router(
+        rules=[ModelRoutingRule(model="primary:m")],
+        providers={"primary": primary, "fallback": fallback},
+        fallbacks=[FallbackRule(on="rate_limit", model="fallback:fb-model")],
+        audit_log=audit_log,
+    )
+    events = [e async for e in router.call(make_opts())]
+    assert len(events) == 3
+
     assert len(audit_log.entries) == 1
-    assert audit_log.entries[0].provider_name == "fallback"
+    entry = audit_log.entries[0]
+    assert entry.event == "router.failover"
+    assert entry.level == "info"
+    assert entry.provider_name == "primary"
+    assert entry.detail["error_category"] == "rate_limit"
+    assert entry.detail["fallback_model"] == "fallback:fb-model"
+    assert entry.detail["fallback_on"] == "rate_limit"
+    assert entry.detail["error_type"] == "ProviderRateLimitError"
+
+
+async def test_failover_decision_logged_on_timeout(audit_log: CollectingAuditLog) -> None:
+    from meridian_sdk_provider import ProviderTimeoutError
+
+    primary = FakeProvider(
+        name="primary",
+        raise_on_call=ProviderTimeoutError("timed out", "primary"),
+    )
+    fallback = FakeProvider(name="fallback")
+    router = _router(
+        rules=[ModelRoutingRule(model="primary:m")],
+        providers={"primary": primary, "fallback": fallback},
+        fallbacks=[FallbackRule(on="timeout", model="fallback:fb-model")],
+        audit_log=audit_log,
+    )
+    [e async for e in router.call(make_opts())]
+
+    assert len(audit_log.entries) == 1
+    entry = audit_log.entries[0]
+    assert entry.event == "router.failover"
+    assert entry.detail["error_category"] == "timeout"
+
+
+async def test_failover_decision_logged_on_5xx(audit_log: CollectingAuditLog) -> None:
+    from meridian_sdk_provider import ProviderServerError
+
+    primary = FakeProvider(
+        name="primary",
+        raise_on_call=ProviderServerError("server error", "primary"),
+    )
+    fallback = FakeProvider(name="fallback")
+    router = _router(
+        rules=[ModelRoutingRule(model="primary:m")],
+        providers={"primary": primary, "fallback": fallback},
+        fallbacks=[FallbackRule(on="5xx", model="fallback:fb-model")],
+        audit_log=audit_log,
+    )
+    [e async for e in router.call(make_opts())]
+
+    assert len(audit_log.entries) == 1
+    entry = audit_log.entries[0]
+    assert entry.event == "router.failover"
+    assert entry.detail["error_category"] == "5xx"
+
+
+async def test_failover_decision_logged_on_any(audit_log: CollectingAuditLog) -> None:
+    primary = FakeProvider(
+        name="primary",
+        raise_on_call=ValueError("unexpected"),
+    )
+    fallback = FakeProvider(name="fallback")
+    router = _router(
+        rules=[ModelRoutingRule(model="primary:m")],
+        providers={"primary": primary, "fallback": fallback},
+        fallbacks=[FallbackRule(on="any", model="fallback:fb-model")],
+        audit_log=audit_log,
+    )
+    [e async for e in router.call(make_opts())]
+
+    assert len(audit_log.entries) == 1
+    entry = audit_log.entries[0]
+    assert entry.event == "router.failover"
+    assert entry.detail["error_category"] == "any"
+    assert entry.detail["fallback_on"] == "any"
+
+
+async def test_failover_decision_not_logged_when_no_fallback_matches(
+    audit_log: CollectingAuditLog,
+) -> None:
+    primary = FakeProvider(
+        name="primary",
+        raise_on_call=ProviderRateLimitError("rate limited", "primary"),
+    )
+    fallback = FakeProvider(name="fallback")
+    router = _router(
+        rules=[ModelRoutingRule(model="primary:m")],
+        providers={"primary": primary, "fallback": fallback},
+        fallbacks=[FallbackRule(on="timeout", model="fallback:fb-model")],
+        audit_log=audit_log,
+    )
+    with pytest.raises(ProviderRateLimitError):
+        async for _ in router.call(make_opts()):
+            pass
+
+    # Only the failure entry; no router.failover since no rule matched.
+    assert len(audit_log.entries) == 1
     assert audit_log.entries[0].event == "provider.call.failed"
+
+
+async def test_failover_decision_not_logged_on_success(audit_log: CollectingAuditLog) -> None:
+    provider = FakeProvider(name="p")
+    router = _router(
+        rules=[ModelRoutingRule(model="p:m")],
+        providers={"p": provider},
+        fallbacks=[FallbackRule(on="any", model="p:m")],
+        audit_log=audit_log,
+    )
+    [e async for e in router.call(make_opts())]
+    assert len(audit_log.entries) == 0
+
+
+async def test_failover_decision_includes_session_id(audit_log: CollectingAuditLog) -> None:
+    primary = FakeProvider(
+        name="primary",
+        raise_on_call=ProviderRateLimitError("rate limited", "primary"),
+    )
+    fallback = FakeProvider(name="fallback")
+    router = _router(
+        rules=[ModelRoutingRule(model="primary:m")],
+        providers={"primary": primary, "fallback": fallback},
+        fallbacks=[FallbackRule(on="any", model="fallback:fb-model")],
+        audit_log=audit_log,
+    )
+    [e async for e in router.call(make_opts(session_id="sess-456"))]
+
+    entry = next(e for e in audit_log.entries if e.event == "router.failover")
+    assert entry.session_id == "sess-456"
 
 
 # ─── Audit log ────────────────────────────────────────────────────────────────
