@@ -24,18 +24,15 @@ from core_errors import (
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from meridian_sdk_provider import (
-    MessageDeltaEvent,
     MessageStartEvent,
     MessageStopEvent,
     ModelCallOpts,
     ModelRouter,
-    TextDeltaEvent,
-    ToolInputDeltaEvent,
-    ToolUseStartEvent,
 )
 from sdk_sandbox import ExecutionContext
 from storage_event_log import EventLogWriter
 
+from ._event_translator import ModelEventTranslator
 from ._hook_dispatch import dispatch_hooks
 
 
@@ -433,8 +430,10 @@ async def run_harness_loop(
     When model_router and model_call_opts are both provided and the current phase is
     "waiting_for_model", the model call uses the router instead of model_adapter:
       1. Dispatches "pre_message" hooks (if hooks_dir is set) before the call.
-      2. Streams events from model_router.call(opts).
-      3. Emits a "message.delta" event to event_log for each TextDeltaEvent received.
+      2. Streams events from model_router.call(opts) through ModelEventTranslator.
+      3. Emits "message.delta" (kind="text") for each TextDeltaEvent.
+      4. Emits "message.delta" (kind="thinking") for each ThinkingDeltaEvent.
+      5. Emits "model_call.completed" for each MessageStopEvent.
 
     When the current phase is "waiting_for_tool", one pending tool call is dispatched via
     sandbox_adapter without making a model call:
@@ -562,36 +561,19 @@ async def run_harness_loop(
                             audit_log=audit_log,
                         )
                     opts = model_call_opts.model_copy(update={"session_id": session_id})
+                    _translator = ModelEventTranslator(model_call_number=model_calls)
                     try:
                         async for event in model_router.call(opts):
-                            if isinstance(event, MessageStartEvent):
-                                _start_event = event
-                            elif isinstance(event, TextDeltaEvent):
-                                if event_log is not None:
-                                    await event_log.append(
-                                        session_id,
-                                        "message.delta",
-                                        {"text": event.text, "model_call_number": model_calls},
-                                    )
-                            elif isinstance(event, ToolUseStartEvent):
-                                current_tool = {
-                                    "id": event.id,
-                                    "name": event.name,
-                                    "input_json": "",
-                                }
-                                tool_use_blocks.append(current_tool)
-                            elif isinstance(event, ToolInputDeltaEvent) and current_tool is not None:
-                                if current_tool["id"] == event.id:
-                                    current_tool["input_json"] += event.partial_json
-                            elif isinstance(event, MessageStopEvent):
-                                if event.stop_reason is not None:
-                                    stop_reason = event.stop_reason
-                                _stop_event = event
-                            elif isinstance(event, MessageDeltaEvent):
-                                if event.stop_reason is not None:
-                                    stop_reason = event.stop_reason
+                            pairs = _translator.translate(event)
+                            if event_log is not None:
+                                for _etype, _edata in pairs:
+                                    await event_log.append(session_id, _etype, _edata)
                     except Exception as _exc:
                         _model_call_exc = _exc
+                    tool_use_blocks = _translator.tool_blocks
+                    stop_reason = _translator.stop_reason
+                    _stop_event = _translator.stop_event
+                    _start_event = _translator.start_event
                 else:
                     if hooks_dir is not None:
                         await dispatch_hooks(

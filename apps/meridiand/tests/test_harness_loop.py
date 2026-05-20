@@ -124,6 +124,18 @@ Tests cover:
   - Capability intersection check: missing cap writes harness.run_loop.failed to audit log.
   - No capability check when tool_capabilities is None.
   - No capability check when granted_capabilities is None.
+  Contract 4 — event translation (model_router path):
+  - ThinkingDeltaEvent emits message.delta with kind="thinking".
+  - Thinking delta data["thinking"] carries the thinking text.
+  - Thinking delta data["model_call_number"] is correct.
+  - No thinking delta event emitted when event_log is None.
+  - model_call.completed event written to event_log on MessageStopEvent.
+  - model_call.completed data["stop_reason"] matches the stream stop reason.
+  - model_call.completed data["input_tokens"] and data["output_tokens"] are correct.
+  - model_call.completed data["model_call_number"] matches the call number.
+  - No model_call.completed event emitted when event_log is None.
+  - text message.delta now includes data["kind"] == "text".
+  - Mixed thinking + text deltas produce message.delta rows in order.
 """
 
 from __future__ import annotations
@@ -152,6 +164,7 @@ from meridian_sdk_provider import (
     MessageStopEvent,
     ModelCallOpts,
     TextDeltaEvent,
+    ThinkingDeltaEvent,
     ToolInputDeltaEvent,
     ToolUseStartEvent,
 )
@@ -3543,3 +3556,341 @@ class TestHarnessLoopStopReasonToolUse:
             )
         )
         assert final_phase == "idle"
+
+
+# ---------------------------------------------------------------------------
+# Helpers for Contract 4 (event translation) tests
+# ---------------------------------------------------------------------------
+
+
+def _router_thinking_then_text(*chunks: str) -> list:
+    """Event stream with thinking block followed by text chunks and end_turn stop."""
+    events: list = [MessageStartEvent(type="message_start", model="fake", provider="fake")]
+    events.append(ThinkingDeltaEvent(type="thinking_delta", thinking="let me think"))
+    for chunk in chunks:
+        events.append(TextDeltaEvent(type="text_delta", text=chunk))
+    events.append(MessageStopEvent(
+        type="message_stop",
+        stop_reason="end_turn",
+        input_tokens=12,
+        output_tokens=6,
+    ))
+    return events
+
+
+def _router_end_turn_with_tokens(
+    input_tokens: int = 10,
+    output_tokens: int = 5,
+    stop_reason: str = "end_turn",
+) -> list:
+    return [
+        MessageStartEvent(type="message_start", model="fake", provider="fake"),
+        TextDeltaEvent(type="text_delta", text="done"),
+        MessageStopEvent(
+            type="message_stop",
+            stop_reason=stop_reason,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+        ),
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Tests: Contract 4 — event translation via model_router path
+# ---------------------------------------------------------------------------
+
+
+class TestHarnessLoopContract4EventTranslation:
+    # --- ThinkingDeltaEvent → message.delta kind="thinking" ---
+
+    def test_thinking_delta_emits_message_delta(self, tmp_path: Path) -> None:
+        router = _FakeModelRouter([_router_thinking_then_text("answer")])
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+        thinking_deltas = [
+            d for _, et, d in event_log.events
+            if et == "message.delta" and d.get("kind") == "thinking"
+        ]
+        assert len(thinking_deltas) == 1
+
+    def test_thinking_delta_data_kind_is_thinking(self, tmp_path: Path) -> None:
+        router = _FakeModelRouter([_router_thinking_then_text("answer")])
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+        thinking_deltas = [
+            d for _, et, d in event_log.events
+            if et == "message.delta" and d.get("kind") == "thinking"
+        ]
+        assert thinking_deltas[0]["kind"] == "thinking"
+
+    def test_thinking_delta_data_carries_thinking_text(self, tmp_path: Path) -> None:
+        router = _FakeModelRouter([_router_thinking_then_text("reply")])
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+        thinking_deltas = [
+            d for _, et, d in event_log.events
+            if et == "message.delta" and d.get("kind") == "thinking"
+        ]
+        assert thinking_deltas[0]["thinking"] == "let me think"
+
+    def test_thinking_delta_data_has_model_call_number(self, tmp_path: Path) -> None:
+        router = _FakeModelRouter([_router_thinking_then_text("reply")])
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+        thinking_deltas = [
+            d for _, et, d in event_log.events
+            if et == "message.delta" and d.get("kind") == "thinking"
+        ]
+        assert thinking_deltas[0]["model_call_number"] == 1
+
+    def test_no_thinking_delta_without_event_log(self, tmp_path: Path) -> None:
+        router = _FakeModelRouter([_router_thinking_then_text("reply")])
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        # Must not raise; simply no events written
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=None,
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+
+    # --- text message.delta now has kind="text" ---
+
+    def test_text_delta_kind_is_text(self, tmp_path: Path) -> None:
+        router = _FakeModelRouter([_router_end_turn("chunk1")])
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+        text_deltas = [
+            d for _, et, d in event_log.events
+            if et == "message.delta" and d.get("kind") == "text"
+        ]
+        assert len(text_deltas) == 1
+        assert text_deltas[0]["kind"] == "text"
+
+    # --- Mixed thinking + text ordering ---
+
+    def test_thinking_then_text_delta_order(self, tmp_path: Path) -> None:
+        router = _FakeModelRouter([_router_thinking_then_text("the answer")])
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+        deltas = [(sid, et, d) for sid, et, d in event_log.events if et == "message.delta"]
+        kinds = [d["kind"] for _, _, d in deltas]
+        assert kinds == ["thinking", "text"]
+
+    # --- model_call.completed event ---
+
+    def test_model_call_completed_emitted_on_message_stop(self, tmp_path: Path) -> None:
+        router = _FakeModelRouter([_router_end_turn_with_tokens()])
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+        completed = [d for _, et, d in event_log.events if et == "model_call.completed"]
+        assert len(completed) == 1
+
+    def test_model_call_completed_data_stop_reason(self, tmp_path: Path) -> None:
+        router = _FakeModelRouter([_router_end_turn_with_tokens(stop_reason="end_turn")])
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+        completed = [d for _, et, d in event_log.events if et == "model_call.completed"]
+        assert completed[0]["stop_reason"] == "end_turn"
+
+    def test_model_call_completed_data_input_tokens(self, tmp_path: Path) -> None:
+        router = _FakeModelRouter([_router_end_turn_with_tokens(input_tokens=99)])
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+        completed = [d for _, et, d in event_log.events if et == "model_call.completed"]
+        assert completed[0]["input_tokens"] == 99
+
+    def test_model_call_completed_data_output_tokens(self, tmp_path: Path) -> None:
+        router = _FakeModelRouter([_router_end_turn_with_tokens(output_tokens=77)])
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+        completed = [d for _, et, d in event_log.events if et == "model_call.completed"]
+        assert completed[0]["output_tokens"] == 77
+
+    def test_model_call_completed_data_model_call_number(self, tmp_path: Path) -> None:
+        router = _FakeModelRouter([_router_end_turn_with_tokens()])
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+        completed = [d for _, et, d in event_log.events if et == "model_call.completed"]
+        assert completed[0]["model_call_number"] == 1
+
+    def test_no_model_call_completed_without_event_log(self, tmp_path: Path) -> None:
+        router = _FakeModelRouter([_router_end_turn_with_tokens()])
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        # Must not raise; simply no events written
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=None,
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
