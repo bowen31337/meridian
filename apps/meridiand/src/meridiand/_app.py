@@ -33,6 +33,7 @@ from ._environments import make_environments_router
 from ._memory_stores import make_memory_stores_router
 from ._vault_backend_encrypted_file import EncryptedFileVaultBackend
 from ._vault_backend_os_keychain import OsKeychainVaultBackend
+from ._credential_proxy import CredentialProxyProviderConfig, make_credential_proxy_router
 from ._vaults import make_vaults_router
 from ._webhook_sender import run_webhook_sender_loop
 from ._skill_forge import run_skill_forge_loop
@@ -93,6 +94,7 @@ def create_app(
     vault_backend: EncryptedFileVaultBackend | None = None,
     os_keychain_backend: OsKeychainVaultBackend | None = None,
     subscriber_bus: SubscriberBus | None = None,
+    credential_proxy_providers: list[CredentialProxyProviderConfig] | None = None,
 ) -> FastAPI:
     """
     Application factory for the meridiand HTTP API.
@@ -326,6 +328,14 @@ def create_app(
                 app.include_router(
                     make_environments_router(audit_log=audit_log, storage_root=storage_root)
                 )
+                if credential_proxy_providers and secret_resolver is not None:
+                    app.include_router(
+                        make_credential_proxy_router(
+                            audit_log=audit_log,
+                            secret_resolver=secret_resolver,
+                            providers=credential_proxy_providers,
+                        )
+                    )
                 if compaction is not None:
                     app.include_router(
                         make_compaction_router(
