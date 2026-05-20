@@ -21,6 +21,15 @@ from core_errors import (
 )
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+from meridian_sdk_provider import (
+    MessageDeltaEvent,
+    MessageStopEvent,
+    ModelCallOpts,
+    ModelRouter,
+    TextDeltaEvent,
+    ToolInputDeltaEvent,
+    ToolUseStartEvent,
+)
 from sdk_sandbox import ExecutionContext
 from storage_event_log import EventLogWriter
 
@@ -368,6 +377,8 @@ async def run_harness_loop(
     hooks_dir: Path | None = None,
     iteration_budget: IterationBudget | None = None,
     event_log: EventLogWriter | None = None,
+    model_router: ModelRouter | None = None,
+    model_call_opts: ModelCallOpts | None = None,
 ) -> tuple[int, int, str]:
     """Run harness while phase is not in {idle, paused, terminated}.
 
@@ -384,6 +395,12 @@ async def run_harness_loop(
     writes a budget.warning event plus a session.phase_change event to waiting_for_user and
     stops the loop pending user approval. event_log must be provided to persist these
     transitions; without it the loop still stops but no events are written.
+
+    When model_router and model_call_opts are both provided and the current phase is
+    "waiting_for_model", the model call uses the router instead of model_adapter:
+      1. Dispatches "pre_message" hooks (if hooks_dir is set) before the call.
+      2. Streams events from model_router.call(opts).
+      3. Emits a "message.delta" event to event_log for each TextDeltaEvent received.
 
     Returns (model_calls, tool_calls, final_phase).
     """
@@ -419,28 +436,63 @@ async def run_harness_loop(
                 current_tool: dict[str, Any] | None = None
                 stop_reason = "end_turn"
 
-                if hooks_dir is not None:
-                    await dispatch_hooks(
-                        "on_model_call",
-                        {"session_id": session_id, "model_call_number": model_calls},
-                        _ctx,
-                        hooks_dir=hooks_dir,
-                        audit_log=audit_log,
-                    )
-
-                async for event in model_adapter.call():
-                    etype = event.get("type", "")
-                    if etype == "tool_use_start":
-                        current_tool = {
-                            "id": event.get("id", ""),
-                            "name": event.get("name", ""),
-                            "input_json": "",
-                        }
-                        tool_use_blocks.append(current_tool)
-                    elif etype == "tool_input_delta" and current_tool is not None:
-                        current_tool["input_json"] += event.get("partial_json", "")
-                    elif etype == "message_stop":
-                        stop_reason = event.get("stop_reason") or "end_turn"
+                if (
+                    final_phase == "waiting_for_model"
+                    and model_router is not None
+                    and model_call_opts is not None
+                ):
+                    if hooks_dir is not None:
+                        await dispatch_hooks(
+                            "pre_message",
+                            {"session_id": session_id, "model_call_number": model_calls},
+                            _ctx,
+                            hooks_dir=hooks_dir,
+                            audit_log=audit_log,
+                        )
+                    opts = model_call_opts.model_copy(update={"session_id": session_id})
+                    async for event in model_router.call(opts):
+                        if isinstance(event, TextDeltaEvent):
+                            if event_log is not None:
+                                await event_log.append(
+                                    session_id,
+                                    "message.delta",
+                                    {"text": event.text, "model_call_number": model_calls},
+                                )
+                        elif isinstance(event, ToolUseStartEvent):
+                            current_tool = {
+                                "id": event.id,
+                                "name": event.name,
+                                "input_json": "",
+                            }
+                            tool_use_blocks.append(current_tool)
+                        elif isinstance(event, ToolInputDeltaEvent) and current_tool is not None:
+                            if current_tool["id"] == event.id:
+                                current_tool["input_json"] += event.partial_json
+                        elif isinstance(event, (MessageDeltaEvent, MessageStopEvent)):
+                            if event.stop_reason is not None:
+                                stop_reason = event.stop_reason
+                else:
+                    if hooks_dir is not None:
+                        await dispatch_hooks(
+                            "on_model_call",
+                            {"session_id": session_id, "model_call_number": model_calls},
+                            _ctx,
+                            hooks_dir=hooks_dir,
+                            audit_log=audit_log,
+                        )
+                    async for event in model_adapter.call():
+                        etype = event.get("type", "")
+                        if etype == "tool_use_start":
+                            current_tool = {
+                                "id": event.get("id", ""),
+                                "name": event.get("name", ""),
+                                "input_json": "",
+                            }
+                            tool_use_blocks.append(current_tool)
+                        elif etype == "tool_input_delta" and current_tool is not None:
+                            current_tool["input_json"] += event.get("partial_json", "")
+                        elif etype == "message_stop":
+                            stop_reason = event.get("stop_reason") or "end_turn"
 
                 if on_usage_delta is not None:
                     on_usage_delta(UsageDelta(input_tokens=100, output_tokens=50))

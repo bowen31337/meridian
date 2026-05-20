@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/harness-run-loo-system-per-iteration-budget-check-hard/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/harness-run-loo-system-in-waiting-for-model-branch-run/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
