@@ -29,6 +29,7 @@ dependencies = [
     "jsonschema>=4.0",
     "pyrage>=1.0",
     "keyring>=24.0",
+    "cryptography>=42.0",
 ]
 
 [project.scripts]

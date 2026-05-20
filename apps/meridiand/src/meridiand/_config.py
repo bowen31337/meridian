@@ -154,6 +154,13 @@ class SkillForgeConfig(BaseModel):
     check_interval_seconds: float = 5.0
 
 
+class AuditSigningConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    # Optional in v1; MUST be enabled for multi-user installs in v1.1 (PRD §6.3).
+    enabled: bool = False
+
+
 class AuthConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -210,6 +217,7 @@ class MeridianConfig(BaseModel):
     cron: CronSchedulerConfig = Field(default_factory=CronSchedulerConfig)
     webhook_sender: WebhookSenderConfig = Field(default_factory=WebhookSenderConfig)
     skill_forge: SkillForgeConfig = Field(default_factory=SkillForgeConfig)
+    audit_signing: AuditSigningConfig = Field(default_factory=AuditSigningConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     vaults: list[VaultConfig] = Field(default_factory=list)
     providers: list[ProviderConfig] = Field(default_factory=list)
