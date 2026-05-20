@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/model-router-system-every-model-call-records-model-call/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/model-router-system-modelroutingrule-when-supports-skil/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

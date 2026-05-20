@@ -172,3 +172,62 @@ async def test_span_carries_session_id(span_exporter: InMemorySpanExporter) -> N
 
     spans = _get_provider_call_spans(span_exporter)
     assert spans[0].attributes.get("session.id") == "test-session"
+
+
+async def test_span_carries_role_attribute(span_exporter: InMemorySpanExporter) -> None:
+    from meridian_sdk_provider import ModelRoutingPolicy, RoutingCondition
+
+    provider = FakeProvider(name="p")
+    router = ModelRouter(
+        policy=ModelRoutingPolicy(
+            rules=[
+                ModelRoutingRule(when=RoutingCondition(role="planner"), model="p:m"),
+                ModelRoutingRule(model="p:m"),
+            ]
+        ),
+        providers={"p": provider},
+    )
+    async for _ in router.call(make_opts(role="planner")):
+        pass
+
+    spans = _get_provider_call_spans(span_exporter)
+    assert spans[0].attributes["model.role"] == "planner"
+
+
+async def test_span_carries_skill_id_attribute(span_exporter: InMemorySpanExporter) -> None:
+    from meridian_sdk_provider import ModelRoutingPolicy, RoutingCondition
+
+    provider = FakeProvider(name="p")
+    router = ModelRouter(
+        policy=ModelRoutingPolicy(
+            rules=[
+                ModelRoutingRule(when=RoutingCondition(skill_id="summarize"), model="p:m"),
+                ModelRoutingRule(model="p:m"),
+            ]
+        ),
+        providers={"p": provider},
+    )
+    async for _ in router.call(make_opts(skill_id="summarize")):
+        pass
+
+    spans = _get_provider_call_spans(span_exporter)
+    assert spans[0].attributes["model.skill_id"] == "summarize"
+
+
+async def test_span_no_match_records_error_and_audit(span_exporter: InMemorySpanExporter) -> None:
+    """When no routing rule matches, span status is ERROR and NoProviderFoundError is raised."""
+    from meridian_sdk_provider import NoProviderFoundError, RoutingCondition
+
+    provider = FakeProvider(name="p")
+    router = ModelRouter(
+        policy=ModelRoutingPolicy(
+            rules=[ModelRoutingRule(when=RoutingCondition(role="worker"), model="p:m")]
+        ),
+        providers={"p": provider},
+    )
+    with pytest.raises(NoProviderFoundError):
+        async for _ in router.call(make_opts(role="planner")):
+            pass
+
+    spans = _get_provider_call_spans(span_exporter)
+    assert spans[0].status.status_code.name == "ERROR"
