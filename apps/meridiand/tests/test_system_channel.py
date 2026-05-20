@@ -519,6 +519,92 @@ class TestUntrustedInboundQuarantine:
         assert result["quarantined"] is False
         assert result["user_profile_id"] == "user_trusted"
 
+    # --- Minimal caps envelope ---
+
+    def _session_record(self, storage_root: Path, channel_id: str, session_id: str) -> dict:
+        return json.loads(
+            (storage_root / "channel_sessions" / channel_id / f"{session_id}.json").read_text()
+        )
+
+    def test_quarantine_session_has_caps_envelope(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = self._quarantine_channel(client)
+        result = _inbound(client, channel_id, "untrusted-sender")
+        sess = self._session_record(storage_root, channel_id, result["session_id"])
+        assert "caps_envelope" in sess
+
+    def test_quarantine_caps_envelope_no_exec_subprocesses(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = self._quarantine_channel(client)
+        result = _inbound(client, channel_id, "untrusted-sender")
+        sess = self._session_record(storage_root, channel_id, result["session_id"])
+        assert sess["caps_envelope"]["can_exec_subprocesses"] is False
+
+    def test_quarantine_caps_envelope_no_write_filesystem(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = self._quarantine_channel(client)
+        result = _inbound(client, channel_id, "untrusted-sender")
+        sess = self._session_record(storage_root, channel_id, result["session_id"])
+        assert sess["caps_envelope"]["can_write_filesystem"] is False
+
+    def test_quarantine_caps_envelope_no_net_egress(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = self._quarantine_channel(client)
+        result = _inbound(client, channel_id, "untrusted-sender")
+        sess = self._session_record(storage_root, channel_id, result["session_id"])
+        assert sess["caps_envelope"]["network"]["egress_allowed"] is False
+
+    def test_quarantine_caps_envelope_fs_read_sandbox_dir(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = self._quarantine_channel(client)
+        result = _inbound(client, channel_id, "untrusted-sender")
+        sess = self._session_record(storage_root, channel_id, result["session_id"])
+        read_globs = sess["caps_envelope"]["filesystem"]["read_globs"]
+        assert any(f"channel_quarantine/{channel_id}" in g for g in read_globs)
+
+    def test_quarantine_caps_envelope_fs_read_glob_covers_sandbox(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = self._quarantine_channel(client)
+        result = _inbound(client, channel_id, "untrusted-sender")
+        sess = self._session_record(storage_root, channel_id, result["session_id"])
+        read_globs = sess["caps_envelope"]["filesystem"]["read_globs"]
+        assert len(read_globs) == 1
+        assert read_globs[0].endswith("/**")
+
+    def test_paired_sender_session_has_no_caps_envelope(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = self._quarantine_channel(client)
+        token = _issue_pairing_token(client, channel_id, user_profile_id="user_trusted")
+        _redeem_token(client, token, "trusted-sender")
+        result = _inbound(client, channel_id, "trusted-sender")
+        sess = self._session_record(storage_root, channel_id, result["session_id"])
+        assert "caps_envelope" not in sess
+
+    # --- Auto-expiry ---
+
+    def test_quarantine_session_has_expires_at(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = self._quarantine_channel(client)
+        result = _inbound(client, channel_id, "untrusted-sender")
+        sess = self._session_record(storage_root, channel_id, result["session_id"])
+        assert "expires_at" in sess
+
+    def test_quarantine_session_expires_at_is_after_created_at(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = self._quarantine_channel(client)
+        result = _inbound(client, channel_id, "untrusted-sender")
+        sess = self._session_record(storage_root, channel_id, result["session_id"])
+        assert sess["expires_at"] > sess["created_at"]
+
+    def test_paired_sender_session_has_no_expires_at(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        channel_id = self._quarantine_channel(client)
+        token = _issue_pairing_token(client, channel_id, user_profile_id="user_trusted")
+        _redeem_token(client, token, "trusted-sender")
+        result = _inbound(client, channel_id, "trusted-sender")
+        sess = self._session_record(storage_root, channel_id, result["session_id"])
+        assert "expires_at" not in sess
+
 
 # ---------------------------------------------------------------------------
 # Paired-only policy
@@ -984,6 +1070,107 @@ class TestOtelSpans:
         span = spans.get("channel.pair.redeem")
         assert span is not None
         assert span.status.status_code == StatusCode.ERROR
+
+    def test_quarantine_inbound_emits_quarantine_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        channel_id = _create_channel(client, inbound_policy="quarantine")
+        _otel_exporter.clear()
+        client.post(
+            f"/v1/channels/{channel_id}/inbound",
+            json={"sender_id": "untrusted", "content": "hi"},
+        )
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "channel.inbound.quarantine" in span_names
+
+    def test_quarantine_span_has_channel_id_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        channel_id = _create_channel(client, inbound_policy="quarantine")
+        _otel_exporter.clear()
+        client.post(
+            f"/v1/channels/{channel_id}/inbound",
+            json={"sender_id": "untrusted", "content": "hi"},
+        )
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("channel.inbound.quarantine")
+        assert span is not None
+        assert span.attributes["channel.id"] == channel_id
+
+    def test_quarantine_span_has_invocation_event(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        channel_id = _create_channel(client, inbound_policy="quarantine")
+        _otel_exporter.clear()
+        client.post(
+            f"/v1/channels/{channel_id}/inbound",
+            json={"sender_id": "untrusted", "content": "hi"},
+        )
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("channel.inbound.quarantine")
+        assert span is not None
+        event_names = [e.name for e in span.events]
+        assert "meridian.error.invocation" in event_names
+
+    def test_quarantine_span_has_expires_at_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        channel_id = _create_channel(client, inbound_policy="quarantine")
+        _otel_exporter.clear()
+        client.post(
+            f"/v1/channels/{channel_id}/inbound",
+            json={"sender_id": "untrusted", "content": "hi"},
+        )
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("channel.inbound.quarantine")
+        assert span is not None
+        assert "quarantine.expires_at" in span.attributes
+
+    def test_quarantine_span_has_sandbox_dir_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        channel_id = _create_channel(client, inbound_policy="quarantine")
+        _otel_exporter.clear()
+        client.post(
+            f"/v1/channels/{channel_id}/inbound",
+            json={"sender_id": "untrusted", "content": "hi"},
+        )
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("channel.inbound.quarantine")
+        assert span is not None
+        assert f"channel_quarantine/{channel_id}" in span.attributes["quarantine.sandbox_dir"]
+
+    def test_inbound_span_has_quarantined_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        channel_id = _create_channel(client, inbound_policy="quarantine")
+        _otel_exporter.clear()
+        client.post(
+            f"/v1/channels/{channel_id}/inbound",
+            json={"sender_id": "untrusted", "content": "hi"},
+        )
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("channel.inbound")
+        assert span is not None
+        assert span.attributes.get("channel.inbound.quarantined") is True
+
+    def test_inbound_span_has_quarantine_expires_at_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        channel_id = _create_channel(client, inbound_policy="quarantine")
+        _otel_exporter.clear()
+        client.post(
+            f"/v1/channels/{channel_id}/inbound",
+            json={"sender_id": "untrusted", "content": "hi"},
+        )
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("channel.inbound")
+        assert span is not None
+        assert "channel.inbound.quarantine.expires_at" in span.attributes
+
+    def test_non_quarantine_inbound_does_not_emit_quarantine_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        channel_id = _create_channel(client, inbound_policy="open")
+        _otel_exporter.clear()
+        client.post(
+            f"/v1/channels/{channel_id}/inbound",
+            json={"sender_id": "normal-sender", "content": "hi"},
+        )
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "channel.inbound.quarantine" not in span_names
 
 
 # ---------------------------------------------------------------------------

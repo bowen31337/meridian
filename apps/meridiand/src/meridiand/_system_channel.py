@@ -23,12 +23,15 @@ import hmac
 import json
 import time
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 # PRD §6.1: channel inbound → harness wake must be < 1 s p95 end-to-end.
 _INBOUND_LATENCY_TARGET_MS = 1000.0
+
+# Quarantine sessions expire after this many minutes of silence.
+_QUARANTINE_SILENCE_TIMEOUT_MINUTES = 15
 
 from core_errors import (
     AuditLog,
@@ -540,6 +543,8 @@ def make_system_channel_router(
                 user_profile_id: str | None = None
                 quarantined = False
                 quarantine_id: str | None = None
+                caps_envelope: dict[str, Any] | None = None
+                expires_at: str | None = None
                 pairing_file = channel_pairings_dir / channel_id / f"{body.sender_id}.json"
 
                 if pairing_file.exists():
@@ -571,6 +576,21 @@ def make_system_channel_router(
                         }
                         qp_file.write_text(json.dumps(qp))
                         user_profile_id = qp_id
+
+                    # Minimal caps envelope: fs.read on dedicated sandbox dir only,
+                    # no exec.*, no net.fetch.
+                    sandbox_dir = f"channel_quarantine/{channel_id}"
+                    caps_envelope = {
+                        "can_exec_subprocesses": False,
+                        "can_write_filesystem": False,
+                        "network": {"egress_allowed": False},
+                        "filesystem": {"read_globs": [f"{sandbox_dir}/**"]},
+                    }
+                    expires_at = (
+                        datetime.now(UTC)
+                        + timedelta(minutes=_QUARANTINE_SILENCE_TIMEOUT_MINUTES)
+                    ).isoformat()
+
                     quarantine_id = f"quar_{uuid.uuid4().hex}"
                     q_record: dict[str, Any] = {
                         "id": quarantine_id,
@@ -580,8 +600,29 @@ def make_system_channel_router(
                         "content_type": body.content_type,
                         "quarantined_at": now,
                     }
-                    (q_dir / f"{quarantine_id}.json").write_text(json.dumps(q_record))
+
+                    with tracer.start_as_current_span(
+                        "channel.inbound.quarantine",
+                        attributes={
+                            "channel.id": channel_id,
+                            "channel.sender_id": body.sender_id,
+                            "quarantine.sandbox_dir": sandbox_dir,
+                            "quarantine.expires_at": expires_at,
+                        },
+                    ) as q_span:
+                        record_invocation_event(
+                            q_span,
+                            StructuredEvent(
+                                name="channel.inbound.quarantine.invocation",
+                                code="channel_inbound_quarantine",
+                                timestamp=now,
+                            ),
+                        )
+                        (q_dir / f"{quarantine_id}.json").write_text(json.dumps(q_record))
+
                     quarantined = True
+                    span.set_attribute("channel.inbound.quarantined", True)
+                    span.set_attribute("channel.inbound.quarantine.expires_at", expires_at)
                 else:
                     # open policy — auto-create a UserProfile for this sender so their
                     # identity is stable across sessions.
@@ -611,6 +652,10 @@ def make_system_channel_router(
                     "sender_id": body.sender_id,
                     "created_at": now,
                 }
+                if caps_envelope is not None:
+                    session_record["caps_envelope"] = caps_envelope
+                if expires_at is not None:
+                    session_record["expires_at"] = expires_at
                 (s_dir / f"{session_id}.json").write_text(json.dumps(session_record))
 
                 await dispatch_hooks(
