@@ -16,9 +16,17 @@ from core_errors import (
 )
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+from opentelemetry import metrics
 from storage_reposit import LocalEventLogReader, PhaseProjection
 
 from ._system_prompt_template import expand_system_prompt
+from ._version import MERIDIAND_VERSION
+
+_meter = metrics.get_meter("meridian.meridiand", MERIDIAND_VERSION)
+_wakes_counter = _meter.create_counter(
+    "meridian_harness_wakes_total",
+    description="Total number of harness wake invocations",
+)
 
 
 def _now() -> str:
@@ -143,16 +151,17 @@ def make_wake_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
     async def wake_session(session_id: str) -> JSONResponse:
         now = _now()
         tracer = get_tracer()
+        _wakes_counter.add(1, {"session.id": session_id})
 
         with tracer.start_as_current_span(
-            "session.wake",
+            "harness.wake",
             attributes={"session.id": session_id},
         ) as span:
             record_invocation_event(
                 span,
                 StructuredEvent(
-                    name="session.wake.invocation",
-                    code="session_wake",
+                    name="harness.wake.invocation",
+                    code="harness_wake",
                     timestamp=now,
                 ),
             )

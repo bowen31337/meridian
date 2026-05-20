@@ -20,7 +20,7 @@ Tests cover:
   - messages are loaded from the most recent thread's messages.ndjson.
   - Most recent thread is determined by created_at in thread manifest.
   - messages are sorted by sequence field.
-  - OTel span "session.wake" is emitted on success.
+  - OTel span "harness.wake" is emitted on success.
   - OTel span is set to ERROR status on failure.
   - create_app wires the wake router when storage_root is supplied.
   - create_app omits the wake route when storage_root is None.
@@ -542,12 +542,12 @@ class TestWakeOtel:
         app = create_app(audit, storage_root=storage_root)
         return TestClient(app, raise_server_exceptions=False)
 
-    def test_success_emits_session_wake_span(self, storage_root: Path) -> None:
+    def test_success_emits_harness_wake_span(self, storage_root: Path) -> None:
         client = self._make_client(storage_root)
         _write_session(storage_root, "otel-wake-sess", _default_session("otel-wake-sess"))
         client.post("/v1/x/sessions/otel-wake-sess/wake")
         span_names = [s.name for s in _otel_exporter.get_finished_spans()]
-        assert "session.wake" in span_names
+        assert "harness.wake" in span_names
 
     def test_failure_span_has_error_status(self, storage_root: Path) -> None:
         from opentelemetry.trace import StatusCode
@@ -555,7 +555,7 @@ class TestWakeOtel:
         client = self._make_client(storage_root)
         client.post("/v1/x/sessions/no-such-otel-sess/wake")
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
-        wake_span = spans.get("session.wake")
+        wake_span = spans.get("harness.wake")
         assert wake_span is not None
         assert wake_span.status.status_code == StatusCode.ERROR
 

@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/memory-stores-d-system-reconciliation-events-recorded-a/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/harness-run-loo-system-harness-wake-latency-p99-100ms-t/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
