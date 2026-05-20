@@ -29,7 +29,7 @@ from meridian_sdk_provider.errors import (
     ProviderTimeoutError,
 )
 from meridian_sdk_provider.protocol import ModelCapabilities, ModelEntry, ProviderCapabilities
-from meridian_sdk_provider.telemetry import get_tracer, record_invocation_event, record_provider_failure
+from meridian_sdk_provider.telemetry import get_tracer, record_cache_metrics, record_invocation_event, record_provider_failure
 from meridian_sdk_provider.types import (
     MessageStartEvent,
     MessageStopEvent,
@@ -194,7 +194,7 @@ class AnthropicApiKeyProvider:
                 routing_rule=None,
             )
             try:
-                async for event in self._do_stream(opts):
+                async for event in self._do_stream(opts, span):
                     yield event
             except ProviderCallError as exc:
                 record_provider_failure(span, exc, provider_name=self.name, model=opts.model)
@@ -228,7 +228,7 @@ class AnthropicApiKeyProvider:
                 )
                 raise err from exc
 
-    async def _do_stream(self, opts: ModelCallOpts) -> AsyncIterator[ModelEvent]:
+    async def _do_stream(self, opts: ModelCallOpts, span: Any) -> AsyncIterator[ModelEvent]:
         messages = _convert_messages(opts.messages)
 
         kwargs: dict[str, Any] = {
@@ -238,7 +238,11 @@ class AnthropicApiKeyProvider:
             "stream": True,
         }
         if opts.system:
-            kwargs["system"] = opts.system
+            # Per-call prompt-cache header injection: wrap system prompt with ephemeral
+            # cache_control so repeated calls share the cached prefix.
+            kwargs["system"] = [
+                {"type": "text", "text": opts.system, "cache_control": {"type": "ephemeral"}}
+            ]
         if opts.tools:
             kwargs["tools"] = _convert_tools(opts.tools)
             kwargs["tool_choice"] = {"type": "auto"}
@@ -257,12 +261,17 @@ class AnthropicApiKeyProvider:
             input_tokens: int | None = None
             output_tokens: int | None = None
             stop_reason: str | None = None
+            cache_creation_input_tokens: int = 0
+            cache_read_input_tokens: int = 0
 
             async for raw in stream:
                 etype = raw.type
 
                 if etype == "message_start":
-                    input_tokens = raw.message.usage.input_tokens
+                    usage = raw.message.usage
+                    input_tokens = usage.input_tokens
+                    cache_creation_input_tokens = getattr(usage, "cache_creation_input_tokens", 0) or 0
+                    cache_read_input_tokens = getattr(usage, "cache_read_input_tokens", 0) or 0
                     yield MessageStartEvent(
                         type="message_start",
                         model=raw.message.model,
@@ -308,6 +317,13 @@ class AnthropicApiKeyProvider:
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 stop_reason=stop_reason,
+                cache_creation_input_tokens=cache_creation_input_tokens,
+                cache_read_input_tokens=cache_read_input_tokens,
+            )
+            record_cache_metrics(
+                span,
+                cache_creation_input_tokens=cache_creation_input_tokens,
+                cache_read_input_tokens=cache_read_input_tokens,
             )
 
         except ProviderCallError:

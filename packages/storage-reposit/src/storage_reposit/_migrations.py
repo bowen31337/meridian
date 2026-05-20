@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _TRACKING_DDL = """
 CREATE TABLE IF NOT EXISTS _schema_migrations (
@@ -74,6 +74,14 @@ _MIGRATIONS: list[tuple[int, str, str]] = [
 
         CREATE INDEX IF NOT EXISTS message_index_session_id
             ON message_index (session_id)
+        """,
+    ),
+    (
+        3,
+        "add_cache_columns_to_usage_rollups",
+        """
+        ALTER TABLE usage_rollups ADD COLUMN cache_creation_tokens INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE usage_rollups ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0
         """,
     ),
 ]

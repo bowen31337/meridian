@@ -118,6 +118,8 @@ class MessageStopEvent(BaseModel):
     input_tokens: int | None = None
     output_tokens: int | None = None
     stop_reason: str | None = None
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
 
 
 ModelEvent = Annotated[

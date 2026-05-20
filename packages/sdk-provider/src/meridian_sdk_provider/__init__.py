@@ -40,7 +40,7 @@ from .router import (
     RoutingCondition,
     TokenRange,
 )
-from .telemetry import get_tracer, record_invocation_event, record_provider_failure
+from .telemetry import get_tracer, record_cache_metrics, record_invocation_event, record_provider_failure
 from .types import (
     CacheControl,
     ContentBlock,
@@ -112,6 +112,7 @@ __all__ = [
     "OpenRouterProvider",
     # Telemetry helpers
     "get_tracer",
+    "record_cache_metrics",
     "record_invocation_event",
     "record_provider_failure",
     # Errors

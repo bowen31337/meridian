@@ -470,7 +470,10 @@ class TestCallStreamingEvents:
 
         provider = AnthropicApiKeyProvider(_API_KEY, name="test-anthropic", _client=mock_client)
         [e async for e in provider.call(_make_opts(system="Be concise."))]
-        assert captured[0]["system"] == "Be concise."
+        # System prompt is wrapped with cache_control for per-call prompt caching.
+        assert captured[0]["system"] == [
+            {"type": "text", "text": "Be concise.", "cache_control": {"type": "ephemeral"}}
+        ]
 
     async def test_temperature_forwarded(self, mock_span: MockSpan) -> None:
         captured: list[dict[str, Any]] = []
@@ -891,3 +894,186 @@ class TestClose:
         provider = AnthropicApiKeyProvider(_API_KEY, _client=mock_client)
         await provider.close()
         mock_client.close.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# call() — per-call prompt-cache header injection
+# ---------------------------------------------------------------------------
+
+
+def _msg_start_with_cache(
+    cache_creation: int = 0,
+    cache_read: int = 0,
+    model: str = "claude-sonnet-4-6",
+    input_tokens: int = 10,
+) -> Any:
+    return SimpleNamespace(
+        type="message_start",
+        message=SimpleNamespace(
+            model=model,
+            usage=SimpleNamespace(
+                input_tokens=input_tokens,
+                cache_creation_input_tokens=cache_creation,
+                cache_read_input_tokens=cache_read,
+            ),
+        ),
+    )
+
+
+class TestCacheControlInjection:
+    async def test_system_wrapped_with_cache_control_list(self, mock_span: MockSpan) -> None:
+        captured: list[dict[str, Any]] = []
+
+        async def _create(**kwargs: Any) -> Any:
+            captured.append(kwargs)
+
+            async def _gen() -> Any:
+                for e in _text_events():
+                    yield e
+
+            return _gen()
+
+        mock_messages: Any = MagicMock()
+        mock_messages.create = _create
+        mock_client: Any = MagicMock()
+        mock_client.messages = mock_messages
+
+        provider = AnthropicApiKeyProvider(_API_KEY, name="test-anthropic", _client=mock_client)
+        [e async for e in provider.call(_make_opts(system="You are helpful."))]
+        sys = captured[0]["system"]
+        assert isinstance(sys, list)
+        assert len(sys) == 1
+        assert sys[0]["type"] == "text"
+        assert sys[0]["text"] == "You are helpful."
+        assert sys[0]["cache_control"] == {"type": "ephemeral"}
+
+    async def test_no_system_key_without_system_prompt(self, mock_span: MockSpan) -> None:
+        captured: list[dict[str, Any]] = []
+
+        async def _create(**kwargs: Any) -> Any:
+            captured.append(kwargs)
+
+            async def _gen() -> Any:
+                for e in _text_events():
+                    yield e
+
+            return _gen()
+
+        mock_messages: Any = MagicMock()
+        mock_messages.create = _create
+        mock_client: Any = MagicMock()
+        mock_client.messages = mock_messages
+
+        provider = AnthropicApiKeyProvider(_API_KEY, name="test-anthropic", _client=mock_client)
+        [e async for e in provider.call(_make_opts())]
+        assert "system" not in captured[0]
+
+    async def test_count_tokens_system_not_wrapped(self) -> None:
+        captured: list[dict[str, Any]] = []
+
+        async def _count(**kwargs: Any) -> Any:
+            captured.append(kwargs)
+            return SimpleNamespace(input_tokens=50)
+
+        mock_messages: Any = MagicMock()
+        mock_messages.count_tokens = _count
+        mock_client: Any = MagicMock()
+        mock_client.messages = mock_messages
+
+        provider = AnthropicApiKeyProvider(_API_KEY, name="test-anthropic", _client=mock_client)
+        await provider.count_tokens(
+            ModelCountReq(model="claude-sonnet-4-6", messages=[], system="Count tokens.")
+        )
+        assert captured[0]["system"] == "Count tokens."
+
+
+# ---------------------------------------------------------------------------
+# call() — cache hit/miss token extraction
+# ---------------------------------------------------------------------------
+
+
+class TestCacheMetrics:
+    async def test_cache_creation_tokens_in_message_stop(self, mock_span: MockSpan) -> None:
+        raw = [
+            _msg_start_with_cache(cache_creation=150, cache_read=0),
+            _block_start_text(),
+            _text_delta("hi"),
+            _block_stop(),
+            _msg_delta(),
+            _msg_stop(),
+        ]
+        provider = _make_provider(events=raw)
+        events = [e async for e in provider.call(_make_opts())]
+        stop = next(e for e in events if isinstance(e, MessageStopEvent))
+        assert stop.cache_creation_input_tokens == 150
+        assert stop.cache_read_input_tokens == 0
+
+    async def test_cache_read_tokens_in_message_stop(self, mock_span: MockSpan) -> None:
+        raw = [
+            _msg_start_with_cache(cache_creation=0, cache_read=200),
+            _block_start_text(),
+            _text_delta("hi"),
+            _block_stop(),
+            _msg_delta(),
+            _msg_stop(),
+        ]
+        provider = _make_provider(events=raw)
+        events = [e async for e in provider.call(_make_opts())]
+        stop = next(e for e in events if isinstance(e, MessageStopEvent))
+        assert stop.cache_read_input_tokens == 200
+        assert stop.cache_creation_input_tokens == 0
+
+    async def test_cache_metrics_event_on_span(self, mock_span: MockSpan) -> None:
+        raw = [
+            _msg_start_with_cache(cache_creation=50, cache_read=100),
+            _block_start_text(),
+            _text_delta("hi"),
+            _block_stop(),
+            _msg_delta(),
+            _msg_stop(),
+        ]
+        provider = _make_provider(events=raw)
+        [e async for e in provider.call(_make_opts())]
+        event_names = [e[0] for e in mock_span.events]
+        assert "provider.cache_metrics" in event_names
+
+    async def test_cache_metrics_hit_true_when_read_tokens_nonzero(
+        self, mock_span: MockSpan
+    ) -> None:
+        raw = [
+            _msg_start_with_cache(cache_creation=0, cache_read=300),
+            _block_start_text(),
+            _text_delta("hi"),
+            _block_stop(),
+            _msg_delta(),
+            _msg_stop(),
+        ]
+        provider = _make_provider(events=raw)
+        [e async for e in provider.call(_make_opts())]
+        cm = next(e for e in mock_span.events if e[0] == "provider.cache_metrics")
+        assert cm[1]["cache.hit"] is True
+        assert cm[1]["cache.read_tokens"] == 300
+
+    async def test_cache_metrics_hit_false_when_no_read_tokens(
+        self, mock_span: MockSpan
+    ) -> None:
+        raw = [
+            _msg_start_with_cache(cache_creation=80, cache_read=0),
+            _block_start_text(),
+            _text_delta("hi"),
+            _block_stop(),
+            _msg_delta(),
+            _msg_stop(),
+        ]
+        provider = _make_provider(events=raw)
+        [e async for e in provider.call(_make_opts())]
+        cm = next(e for e in mock_span.events if e[0] == "provider.cache_metrics")
+        assert cm[1]["cache.hit"] is False
+        assert cm[1]["cache.creation_tokens"] == 80
+
+    async def test_zero_cache_tokens_when_absent_from_api(self, mock_span: MockSpan) -> None:
+        provider = _make_provider(events=_text_events())
+        events = [e async for e in provider.call(_make_opts())]
+        stop = next(e for e in events if isinstance(e, MessageStopEvent))
+        assert stop.cache_creation_input_tokens == 0
+        assert stop.cache_read_input_tokens == 0

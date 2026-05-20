@@ -38,6 +38,23 @@ def record_invocation_event(
     span.add_event("provider.invocation", attrs)
 
 
+def record_cache_metrics(
+    span: Span,
+    *,
+    cache_creation_input_tokens: int,
+    cache_read_input_tokens: int,
+) -> None:
+    """Attach a provider.cache_metrics event carrying cache hit/miss counters."""
+    span.add_event(
+        "provider.cache_metrics",
+        {
+            "cache.creation_tokens": cache_creation_input_tokens,
+            "cache.read_tokens": cache_read_input_tokens,
+            "cache.hit": cache_read_input_tokens > 0,
+        },
+    )
+
+
 def record_provider_failure(
     span: Span,
     error: Exception,

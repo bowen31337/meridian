@@ -46,6 +46,8 @@ class UsageDelta:
 
     input_tokens: int
     output_tokens: int
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
 
 
 @dataclass
@@ -485,6 +487,7 @@ async def run_harness_loop(
                 tool_use_blocks: list[dict[str, Any]] = []
                 current_tool: dict[str, Any] | None = None
                 stop_reason = "end_turn"
+                _stop_event: MessageStopEvent | None = None
 
                 if (
                     final_phase == "waiting_for_model"
@@ -518,7 +521,11 @@ async def run_harness_loop(
                         elif isinstance(event, ToolInputDeltaEvent) and current_tool is not None:
                             if current_tool["id"] == event.id:
                                 current_tool["input_json"] += event.partial_json
-                        elif isinstance(event, (MessageDeltaEvent, MessageStopEvent)):
+                        elif isinstance(event, MessageStopEvent):
+                            if event.stop_reason is not None:
+                                stop_reason = event.stop_reason
+                            _stop_event = event
+                        elif isinstance(event, MessageDeltaEvent):
                             if event.stop_reason is not None:
                                 stop_reason = event.stop_reason
                 else:
@@ -545,7 +552,27 @@ async def run_harness_loop(
                             stop_reason = event.get("stop_reason") or "end_turn"
 
                 if on_usage_delta is not None:
-                    on_usage_delta(UsageDelta(input_tokens=100, output_tokens=50))
+                    if _stop_event is not None:
+                        on_usage_delta(UsageDelta(
+                            input_tokens=_stop_event.input_tokens or 0,
+                            output_tokens=_stop_event.output_tokens or 0,
+                            cache_creation_tokens=_stop_event.cache_creation_input_tokens,
+                            cache_read_tokens=_stop_event.cache_read_input_tokens,
+                        ))
+                    else:
+                        on_usage_delta(UsageDelta(input_tokens=100, output_tokens=50))
+
+                if event_log is not None and _stop_event is not None:
+                    await event_log.append(
+                        session_id,
+                        "usage.delta",
+                        {
+                            "prompt_tokens": _stop_event.input_tokens or 0,
+                            "completion_tokens": _stop_event.output_tokens or 0,
+                            "cache_creation_tokens": _stop_event.cache_creation_input_tokens,
+                            "cache_read_tokens": _stop_event.cache_read_input_tokens,
+                        },
+                    )
 
                 if not tool_use_blocks or stop_reason != "tool_use":
                     final_phase = "idle"

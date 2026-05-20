@@ -2,6 +2,9 @@
 # Audit log
 from ._audit import AuditLog, NoopAuditLog
 
+# Usage rollup
+from ._usage_rollup import UsageRollupProjector
+
 # Contract
 from ._contract import EventHandler
 from ._indexer import BackgroundIndexer
@@ -87,6 +90,8 @@ __all__ = [
     "IndexerRuntime",
     "ReaderOptions",
     "ReaderRuntime",
+    # Usage rollup
+    "UsageRollupProjector",
     # Version
     "INDEXER_SDK_VERSION",
 ]

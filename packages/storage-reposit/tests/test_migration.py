@@ -3,28 +3,30 @@ Migration system tests.
 
 Covers:
   _migrations module:
-    - SCHEMA_VERSION is 2.
+    - SCHEMA_VERSION is 3.
     - migrate() creates _schema_migrations table.
     - migrate() applies migration 1: _watermarks table exists.
     - migrate() applies migration 2: sessions table exists.
     - migrate() applies migration 2: tool_calls table exists.
     - migrate() applies migration 2: usage_rollups table exists.
     - migrate() applies migration 2: message_index table exists.
+    - migrate() applies migration 3: usage_rollups has cache_creation_tokens column.
+    - migrate() applies migration 3: usage_rollups has cache_read_tokens column.
     - migrate() creates sessions_phase index.
     - migrate() creates tool_calls_session_id index.
     - migrate() creates usage_rollups_session_id index.
     - migrate() creates message_index_session_id index.
-    - migrate() returns 2 on a fresh database.
+    - migrate() returns 3 on a fresh database.
     - migrate() returns 0 when called again (idempotent).
-    - _schema_migrations records both applied versions.
+    - _schema_migrations records all applied versions.
 
   SQLiteProjectionStore.migrate():
-    - Returns 2 on a fresh database.
+    - Returns 3 on a fresh database.
     - Returns 0 on second call (idempotent).
     - All projection tables exist after migrate().
     - sessions table has expected columns.
     - tool_calls table has expected columns.
-    - usage_rollups table has expected columns.
+    - usage_rollups table has expected columns (including cache_creation_tokens, cache_read_tokens).
     - message_index table has expected columns.
 """
 
@@ -75,8 +77,8 @@ def column_names(conn: sqlite3.Connection, table: str) -> set[str]:
 
 
 class TestSchemaVersion:
-    def test_schema_version_is_2(self) -> None:
-        assert SCHEMA_VERSION == 2
+    def test_schema_version_is_3(self) -> None:
+        assert SCHEMA_VERSION == 3
 
 
 class TestMigrateFunction:
@@ -140,10 +142,10 @@ class TestMigrateFunction:
         with sqlite3.connect(tmp_path / "m.db") as conn:
             assert "message_index_session_id" in index_names(conn)
 
-    def test_returns_2_on_fresh_database(self, tmp_path: Path) -> None:
+    def test_returns_3_on_fresh_database(self, tmp_path: Path) -> None:
         with open_fresh(tmp_path) as conn:
             count = _mig.migrate(conn, applied_at="2024-01-01T00:00:00+00:00")
-        assert count == 2
+        assert count == 3
 
     def test_returns_0_on_second_call(self, tmp_path: Path) -> None:
         with open_fresh(tmp_path) as conn:
@@ -152,7 +154,7 @@ class TestMigrateFunction:
             count = _mig.migrate(conn, applied_at="2024-01-01T00:00:01+00:00")
         assert count == 0
 
-    def test_schema_migrations_records_both_versions(self, tmp_path: Path) -> None:
+    def test_schema_migrations_records_all_versions(self, tmp_path: Path) -> None:
         with open_fresh(tmp_path) as conn:
             _mig.migrate(conn, applied_at="2024-01-01T00:00:00+00:00")
         with sqlite3.connect(tmp_path / "m.db") as conn:
@@ -160,7 +162,21 @@ class TestMigrateFunction:
                 row[0]
                 for row in conn.execute("SELECT version FROM _schema_migrations").fetchall()
             }
-        assert versions == {1, 2}
+        assert versions == {1, 2, 3}
+
+    def test_migration_3_adds_cache_creation_tokens_column(self, tmp_path: Path) -> None:
+        with open_fresh(tmp_path) as conn:
+            _mig.migrate(conn, applied_at="2024-01-01T00:00:00+00:00")
+        with sqlite3.connect(tmp_path / "m.db") as conn:
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(usage_rollups)").fetchall()}
+        assert "cache_creation_tokens" in cols
+
+    def test_migration_3_adds_cache_read_tokens_column(self, tmp_path: Path) -> None:
+        with open_fresh(tmp_path) as conn:
+            _mig.migrate(conn, applied_at="2024-01-01T00:00:00+00:00")
+        with sqlite3.connect(tmp_path / "m.db") as conn:
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(usage_rollups)").fetchall()}
+        assert "cache_read_tokens" in cols
 
     def test_idempotent_on_existing_watermarks(self, tmp_path: Path) -> None:
         with open_fresh(tmp_path) as conn:
@@ -176,7 +192,7 @@ class TestMigrateFunction:
             conn.commit()
         with sqlite3.connect(tmp_path / "m.db") as conn:
             count = _mig.migrate(conn, applied_at="2024-01-01T00:00:00+00:00")
-        assert count == 2
+        assert count == SCHEMA_VERSION
         with sqlite3.connect(tmp_path / "m.db") as conn:
             assert "_watermarks" in table_names(conn)
 
@@ -187,9 +203,9 @@ class TestMigrateFunction:
 
 
 class TestSQLiteProjectionStoreMigrate:
-    def test_returns_2_on_fresh_database(self, tmp_path: Path) -> None:
+    def test_returns_3_on_fresh_database(self, tmp_path: Path) -> None:
         store = SQLiteProjectionStore(tmp_path / "p.db")
-        assert store.migrate() == 2
+        assert store.migrate() == 3
 
     def test_returns_0_on_second_call(self, tmp_path: Path) -> None:
         store = SQLiteProjectionStore(tmp_path / "p.db")
@@ -228,6 +244,8 @@ class TestSQLiteProjectionStoreMigrate:
             "input_tokens",
             "output_tokens",
             "cache_tokens",
+            "cache_creation_tokens",
+            "cache_read_tokens",
             "dollars",
         } <= cols
 

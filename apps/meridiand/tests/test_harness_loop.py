@@ -1801,3 +1801,158 @@ class TestHarnessLoopWaitingForTool:
                 )
             )
         assert len(exc_info.value.message) > 0
+
+
+# ---------------------------------------------------------------------------
+# Tests: cache token capture via model_router path
+# ---------------------------------------------------------------------------
+
+
+def _router_end_turn_with_cache(
+    input_tokens: int = 10,
+    output_tokens: int = 5,
+    cache_creation: int = 0,
+    cache_read: int = 0,
+) -> list:
+    return [
+        MessageStartEvent(type="message_start", model="fake", provider="fake"),
+        TextDeltaEvent(type="text_delta", text="done"),
+        MessageStopEvent(
+            type="message_stop",
+            stop_reason="end_turn",
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_creation_input_tokens=cache_creation,
+            cache_read_input_tokens=cache_read,
+        ),
+    ]
+
+
+class TestHarnessLoopCacheMetrics:
+    def test_usage_delta_carries_cache_creation_tokens_from_router(
+        self, tmp_path: Path
+    ) -> None:
+        router = _FakeModelRouter([_router_end_turn_with_cache(cache_creation=150)])
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        deltas: list[UsageDelta] = []
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                model_router=router,
+                model_call_opts=_opts(),
+                on_usage_delta=deltas.append,
+            )
+        )
+        assert len(deltas) == 1
+        assert deltas[0].cache_creation_tokens == 150
+
+    def test_usage_delta_carries_cache_read_tokens_from_router(
+        self, tmp_path: Path
+    ) -> None:
+        router = _FakeModelRouter([_router_end_turn_with_cache(cache_read=200)])
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        deltas: list[UsageDelta] = []
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                model_router=router,
+                model_call_opts=_opts(),
+                on_usage_delta=deltas.append,
+            )
+        )
+        assert len(deltas) == 1
+        assert deltas[0].cache_read_tokens == 200
+
+    def test_usage_delta_carries_real_input_output_tokens(self, tmp_path: Path) -> None:
+        router = _FakeModelRouter([_router_end_turn_with_cache(input_tokens=42, output_tokens=7)])
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        deltas: list[UsageDelta] = []
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                model_router=router,
+                model_call_opts=_opts(),
+                on_usage_delta=deltas.append,
+            )
+        )
+        assert deltas[0].input_tokens == 42
+        assert deltas[0].output_tokens == 7
+
+    def test_usage_delta_emitted_to_event_log_on_router_path(self, tmp_path: Path) -> None:
+        router = _FakeModelRouter([_router_end_turn_with_cache(cache_creation=50, cache_read=100)])
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+        usage_events = [d for _, et, d in event_log.events if et == "usage.delta"]
+        assert len(usage_events) == 1
+        assert usage_events[0]["cache_creation_tokens"] == 50
+        assert usage_events[0]["cache_read_tokens"] == 100
+
+    def test_usage_delta_not_emitted_to_event_log_on_fake_adapter_path(
+        self, tmp_path: Path
+    ) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["created"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        usage_events = [d for _, et, d in event_log.events if et == "usage.delta"]
+        assert usage_events == []
+
+    def test_cache_tokens_zero_by_default_on_fake_adapter(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["created"])
+        audit = FileAuditLog(tmp_path)
+        deltas: list[UsageDelta] = []
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                on_usage_delta=deltas.append,
+            )
+        )
+        assert deltas[0].cache_creation_tokens == 0
+        assert deltas[0].cache_read_tokens == 0
