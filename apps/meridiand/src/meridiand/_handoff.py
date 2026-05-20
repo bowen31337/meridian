@@ -18,6 +18,9 @@ from core_errors import (
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sdk_sandbox import ExecutionContext
+
+from ._hook_dispatch import dispatch_hooks
 
 
 def _now() -> str:
@@ -180,6 +183,18 @@ def make_handoff_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter
 
         manifest["status"] = "completed"
         manifest_path.write_text(json.dumps(manifest))
+
+        await dispatch_hooks(
+            "on_handoff",
+            {
+                "session_id": session_id,
+                "parent_session_id": manifest.get("parent_session_id"),
+                "status": "completed",
+            },
+            ExecutionContext(session_id=session_id),
+            hooks_dir=storage_root / "hooks",
+            audit_log=audit_log,
+        )
 
         return JSONResponse(
             content={

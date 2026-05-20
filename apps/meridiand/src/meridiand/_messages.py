@@ -4,6 +4,7 @@ import json
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from core_errors import (
@@ -33,6 +34,9 @@ from meridian_sdk_provider.types import (
     ToolUseStartEvent,
 )
 from pydantic import BaseModel
+from sdk_sandbox import ExecutionContext
+
+from ._hook_dispatch import dispatch_hooks
 
 
 def _now() -> str:
@@ -150,7 +154,9 @@ async def _collect(
 # ---------------------------------------------------------------------------
 
 
-def make_messages_router(*, audit_log: AuditLog, model_router: ModelRouter) -> APIRouter:
+def make_messages_router(
+    *, audit_log: AuditLog, model_router: ModelRouter, hooks_dir: Path | None = None
+) -> APIRouter:
     router = APIRouter()
 
     @router.post("/v1/messages")
@@ -172,6 +178,15 @@ def make_messages_router(*, audit_log: AuditLog, model_router: ModelRouter) -> A
             )
 
             try:
+                session_id = (body.metadata or {}).get("session_id", "") if body.metadata else ""
+                if hooks_dir is not None:
+                    await dispatch_hooks(
+                        "on_model_call",
+                        {"session_id": session_id, "model": body.model, "max_tokens": body.max_tokens},
+                        ExecutionContext(session_id=session_id),
+                        hooks_dir=hooks_dir,
+                        audit_log=audit_log,
+                    )
                 opts = ModelCallOpts(
                     model=body.model,
                     messages=body.messages,

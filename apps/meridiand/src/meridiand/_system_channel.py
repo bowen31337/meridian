@@ -50,6 +50,9 @@ from sdk_channel import (
     SendRequest,
 )
 
+from sdk_sandbox import ExecutionContext
+
+from ._hook_dispatch import dispatch_hooks
 from ._webhook_channel_driver import SecretResolver, NoopSecretResolver, _sign_payload
 
 
@@ -294,6 +297,7 @@ def make_system_channel_router(
     _resolver: SecretResolver = secret_resolver if secret_resolver is not None else NoopSecretResolver()
 
     channels_dir = storage_root / "channels"
+    hooks_dir = storage_root / "hooks"
     pairing_tokens_dir = storage_root / "pairing_tokens"
     channel_pairings_dir = storage_root / "channel_pairings"
     channel_sessions_dir = storage_root / "channel_sessions"
@@ -518,6 +522,19 @@ def make_system_channel_router(
                                 channel_id=channel_id, timestamp=now
                             )
 
+                await dispatch_hooks(
+                    "pre_message",
+                    {
+                        "channel_id": channel_id,
+                        "sender_id": body.sender_id,
+                        "content": body.content,
+                        "content_type": body.content_type,
+                    },
+                    ExecutionContext(session_id=""),
+                    hooks_dir=hooks_dir,
+                    audit_log=audit_log,
+                )
+
                 inbound_policy: str = channel.get("inbound_policy", "open")
 
                 user_profile_id: str | None = None
@@ -595,6 +612,20 @@ def make_system_channel_router(
                     "created_at": now,
                 }
                 (s_dir / f"{session_id}.json").write_text(json.dumps(session_record))
+
+                await dispatch_hooks(
+                    "post_message",
+                    {
+                        "channel_id": channel_id,
+                        "sender_id": body.sender_id,
+                        "session_id": session_id,
+                        "user_profile_id": user_profile_id,
+                        "agent_id": agent_id,
+                    },
+                    ExecutionContext(session_id=session_id),
+                    hooks_dir=hooks_dir,
+                    audit_log=audit_log,
+                )
 
                 # Fan out: register this session on every other channel where the same
                 # UserProfile is paired, so the Session is reachable from all paired channels.
@@ -674,6 +705,20 @@ def make_system_channel_router(
                 if latency_ms > _INBOUND_LATENCY_TARGET_MS:
                     span.set_attribute("channel.inbound.latency_target_exceeded", True)
 
+        await dispatch_hooks(
+            "on_channel_inbound",
+            {
+                "channel_id": channel_id,
+                "sender_id": body.sender_id,
+                "session_id": session_id,
+                "user_profile_id": user_profile_id,
+                "quarantined": quarantined,
+            },
+            ExecutionContext(session_id=session_id),
+            hooks_dir=hooks_dir,
+            audit_log=audit_log,
+        )
+
         response_body: dict[str, Any] = {
             "user_profile_id": user_profile_id,
             "agent_id": agent_id,
@@ -733,6 +778,21 @@ def make_system_channel_router(
                 result = await channel_runtime.send(
                     send_request,
                     RuntimeOptions(audit_log=NoopAuditLog()),
+                )
+
+                await dispatch_hooks(
+                    "on_channel_outbound",
+                    {
+                        "channel_id": channel_id,
+                        "session_id": body.session_id,
+                        "recipient": body.recipient,
+                        "content_type": body.content_type,
+                        "message_id": result.message_id,
+                        "delivered": result.delivered,
+                    },
+                    ExecutionContext(session_id=body.session_id),
+                    hooks_dir=hooks_dir,
+                    audit_log=audit_log,
                 )
 
             except (

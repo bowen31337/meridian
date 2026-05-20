@@ -213,8 +213,9 @@ def create_app(
                     allow_headers=cors.allow_headers,
                     allow_credentials=cors.allow_credentials,
                 )
+            _hooks_dir = storage_root / "hooks" if storage_root is not None else None
             app.add_middleware(AuthMiddleware, audit_log=audit_log, bearer_token=bearer_token)
-            app.add_middleware(ErrorEnvelopeMiddleware, audit_log=audit_log)
+            app.add_middleware(ErrorEnvelopeMiddleware, audit_log=audit_log, hooks_dir=_hooks_dir)
 
             install_error_handler(app, HandlerOptions(audit_log=audit_log))
 
@@ -347,7 +348,11 @@ def create_app(
                 )
             if model_router is not None:
                 app.include_router(
-                    make_messages_router(audit_log=audit_log, model_router=model_router)
+                    make_messages_router(
+                        audit_log=audit_log,
+                        model_router=model_router,
+                        hooks_dir=_hooks_dir,
+                    )
                 )
 
             record_create_event(

@@ -17,7 +17,9 @@ from core_errors import (
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sdk_sandbox import ExecutionContext
 
+from ._hook_dispatch import dispatch_hooks
 from ._replay import FakeModelAdapter, FakeSandboxAdapter, _run_harness
 
 
@@ -87,6 +89,11 @@ def make_sessions_router(*, audit_log: AuditLog, storage_root: Path) -> APIRoute
                 ),
             )
 
+            hooks_dir = storage_root / "hooks"
+            ctx = ExecutionContext(session_id=session_id)
+            model_calls = 0
+            tool_calls = 0
+
             try:
                 # Step 1: Create session manifest (POST /v1/sessions creates it)
                 session_dir = storage_root / "sessions" / session_id
@@ -98,6 +105,14 @@ def make_sessions_router(*, audit_log: AuditLog, storage_root: Path) -> APIRoute
                     "created_at": now,
                 }
                 (session_dir / "manifest.json").write_text(json.dumps(manifest))
+
+                await dispatch_hooks(
+                    "session_start",
+                    {"session_id": session_id, "agent_id": body.agent_id},
+                    ctx,
+                    hooks_dir=hooks_dir,
+                    audit_log=audit_log,
+                )
 
                 # Step 2: Wake — locate model fixture
                 model_fixture = fixture_dir / "model_responses.ndjson"
@@ -153,6 +168,18 @@ def make_sessions_router(*, audit_log: AuditLog, storage_root: Path) -> APIRoute
                     )
                 )
                 raise err
+            finally:
+                await dispatch_hooks(
+                    "session_end",
+                    {
+                        "session_id": session_id,
+                        "model_call_count": model_calls,
+                        "tool_call_count": tool_calls,
+                    },
+                    ctx,
+                    hooks_dir=hooks_dir,
+                    audit_log=audit_log,
+                )
 
         # Step 4: idle
         return JSONResponse(

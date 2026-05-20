@@ -13,6 +13,7 @@ from core_errors import (
     AuditLog,
     AuditLogEntry,
     MeridianError,
+    NoopAuditLog,
     StructuredEvent,
     get_tracer,
     record_error,
@@ -20,6 +21,9 @@ from core_errors import (
 )
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+from sdk_sandbox import ExecutionContext
+
+from ._hook_dispatch import dispatch_hooks
 
 
 def _now() -> str:
@@ -148,6 +152,10 @@ async def _run_harness(
     sandbox_adapter: FakeSandboxAdapter,
     on_usage_delta: Callable[[UsageDelta], None] | None = None,
     cancel_event: asyncio.Event | None = None,
+    *,
+    session_id: str = "",
+    hooks_dir: Path | None = None,
+    audit_log: AuditLog | None = None,
 ) -> tuple[int, int]:
     """Run the agent harness loop with fake adapters. Returns (model_calls, tool_calls).
 
@@ -158,6 +166,8 @@ async def _run_harness(
     """
     model_calls = 0
     tool_calls = 0
+    _hooks_log = audit_log or NoopAuditLog()
+    _ctx = ExecutionContext(session_id=session_id)
 
     while True:
         if cancel_event is not None and cancel_event.is_set():
@@ -167,6 +177,15 @@ async def _run_harness(
         tool_use_blocks: list[dict[str, Any]] = []
         current_tool: dict[str, Any] | None = None
         stop_reason = "end_turn"
+
+        if hooks_dir is not None:
+            await dispatch_hooks(
+                "on_model_call",
+                {"session_id": session_id, "model_call_number": model_calls},
+                _ctx,
+                hooks_dir=hooks_dir,
+                audit_log=_hooks_log,
+            )
 
         async for event in model_adapter.call():
             etype = event.get("type", "")
@@ -186,11 +205,49 @@ async def _run_harness(
             on_usage_delta(UsageDelta(input_tokens=100, output_tokens=50))
 
         if not tool_use_blocks or stop_reason != "tool_use":
+            if hooks_dir is not None:
+                await dispatch_hooks(
+                    "on_stop",
+                    {
+                        "session_id": session_id,
+                        "stop_reason": stop_reason,
+                        "model_calls": model_calls,
+                        "tool_calls": tool_calls,
+                    },
+                    _ctx,
+                    hooks_dir=hooks_dir,
+                    audit_log=_hooks_log,
+                )
             break
 
-        for _block in tool_use_blocks:
+        for block in tool_use_blocks:
             tool_calls += 1
-            sandbox_adapter.next_result()
+            if hooks_dir is not None:
+                await dispatch_hooks(
+                    "pre_tool_call",
+                    {
+                        "session_id": session_id,
+                        "tool_id": block["id"],
+                        "tool_name": block["name"],
+                    },
+                    _ctx,
+                    hooks_dir=hooks_dir,
+                    audit_log=_hooks_log,
+                )
+            result = sandbox_adapter.next_result()
+            if hooks_dir is not None:
+                await dispatch_hooks(
+                    "post_tool_call",
+                    {
+                        "session_id": session_id,
+                        "tool_id": block["id"],
+                        "tool_name": block["name"],
+                        "tool_result": result.get("content", ""),
+                    },
+                    _ctx,
+                    hooks_dir=hooks_dir,
+                    audit_log=_hooks_log,
+                )
 
     return model_calls, tool_calls
 
@@ -294,6 +351,7 @@ async def run_harness_loop(
     phase_reader: _PhaseReader,
     audit_log: AuditLog,
     on_usage_delta: Callable[[UsageDelta], None] | None = None,
+    hooks_dir: Path | None = None,
 ) -> tuple[int, int, str]:
     """Run harness while phase is not in {idle, paused, terminated}.
 
@@ -307,6 +365,7 @@ async def run_harness_loop(
     """
     now = _now()
     tracer = get_tracer()
+    _ctx = ExecutionContext(session_id=session_id)
 
     with tracer.start_as_current_span(
         "harness.run_loop",
@@ -336,6 +395,15 @@ async def run_harness_loop(
                 current_tool: dict[str, Any] | None = None
                 stop_reason = "end_turn"
 
+                if hooks_dir is not None:
+                    await dispatch_hooks(
+                        "on_model_call",
+                        {"session_id": session_id, "model_call_number": model_calls},
+                        _ctx,
+                        hooks_dir=hooks_dir,
+                        audit_log=audit_log,
+                    )
+
                 async for event in model_adapter.call():
                     etype = event.get("type", "")
                     if etype == "tool_use_start":
@@ -355,11 +423,49 @@ async def run_harness_loop(
 
                 if not tool_use_blocks or stop_reason != "tool_use":
                     final_phase = "idle"
+                    if hooks_dir is not None:
+                        await dispatch_hooks(
+                            "on_stop",
+                            {
+                                "session_id": session_id,
+                                "stop_reason": stop_reason,
+                                "model_calls": model_calls,
+                                "tool_calls": tool_calls,
+                            },
+                            _ctx,
+                            hooks_dir=hooks_dir,
+                            audit_log=audit_log,
+                        )
                     break  # end_turn: release session
 
-                for _block in tool_use_blocks:
+                for block in tool_use_blocks:
                     tool_calls += 1
-                    sandbox_adapter.next_result()
+                    if hooks_dir is not None:
+                        await dispatch_hooks(
+                            "pre_tool_call",
+                            {
+                                "session_id": session_id,
+                                "tool_id": block["id"],
+                                "tool_name": block["name"],
+                            },
+                            _ctx,
+                            hooks_dir=hooks_dir,
+                            audit_log=audit_log,
+                        )
+                    result = sandbox_adapter.next_result()
+                    if hooks_dir is not None:
+                        await dispatch_hooks(
+                            "post_tool_call",
+                            {
+                                "session_id": session_id,
+                                "tool_id": block["id"],
+                                "tool_name": block["name"],
+                                "tool_result": result.get("content", ""),
+                            },
+                            _ctx,
+                            hooks_dir=hooks_dir,
+                            audit_log=audit_log,
+                        )
 
         except HarnessLoopError:
             raise

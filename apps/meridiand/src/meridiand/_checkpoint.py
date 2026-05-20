@@ -19,6 +19,9 @@ from core_errors import (
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sdk_sandbox import ExecutionContext
+
+from ._hook_dispatch import dispatch_hooks
 
 
 def _now() -> str:
@@ -108,6 +111,18 @@ def make_checkpoint_router(*, audit_log: AuditLog, storage_root: Path) -> APIRou
                 encoded = json.dumps(body.model_dump(), default=str).encode()
                 _write_atomic(checkpoint_dir / f"{body.seq}.json", encoded)
                 _write_atomic(checkpoint_dir / "latest.json", encoded)
+
+                await dispatch_hooks(
+                    "on_checkpoint",
+                    {
+                        "session_id": session_id,
+                        "seq": body.seq,
+                        "phase": body.phase,
+                    },
+                    ExecutionContext(session_id=session_id),
+                    hooks_dir=storage_root / "hooks",
+                    audit_log=audit_log,
+                )
             except CheckpointError:
                 raise
             except Exception as exc:

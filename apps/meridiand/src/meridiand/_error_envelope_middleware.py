@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from core_errors import AuditLog, AuditLogEntry, MeridianError, StructuredEvent, record_invocation_event
 from opentelemetry.trace import Status, StatusCode
+from sdk_sandbox import ExecutionContext
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from ._hook_dispatch import dispatch_hooks
 from ._telemetry import get_tracer
 
 
@@ -28,9 +31,10 @@ class ErrorEnvelopeMiddleware:
     - On failure to send the error envelope: writes to the audit log.
     """
 
-    def __init__(self, app: ASGIApp, *, audit_log: AuditLog) -> None:
+    def __init__(self, app: ASGIApp, *, audit_log: AuditLog, hooks_dir: Path | None = None) -> None:
         self._app = app
         self._audit_log = audit_log
+        self._hooks_dir = hooks_dir
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -75,6 +79,18 @@ class ErrorEnvelopeMiddleware:
                     detail={"message": exc.message},
                 )
             )
+
+        if self._hooks_dir is not None:
+            try:
+                await dispatch_hooks(
+                    "on_error",
+                    {"error_code": exc.code, "error_message": exc.message},
+                    ExecutionContext(session_id=""),
+                    hooks_dir=self._hooks_dir,
+                    audit_log=self._audit_log,
+                )
+            except Exception:
+                pass  # on_error hooks must never block the error response
 
         try:
             await self._send_envelope(send, exc.http_status(), exc.code, exc.message, {})
@@ -121,6 +137,18 @@ class ErrorEnvelopeMiddleware:
                     detail={"error_type": type(exc).__name__, "error": str(exc)},
                 )
             )
+
+        if self._hooks_dir is not None:
+            try:
+                await dispatch_hooks(
+                    "on_error",
+                    {"error_code": code, "error_message": str(exc)},
+                    ExecutionContext(session_id=""),
+                    hooks_dir=self._hooks_dir,
+                    audit_log=self._audit_log,
+                )
+            except Exception:
+                pass  # on_error hooks must never block the error response
 
         try:
             await self._send_envelope(send, 500, code, message, {})

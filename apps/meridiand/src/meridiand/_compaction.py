@@ -20,9 +20,11 @@ from core_errors import (
 )
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+from sdk_sandbox import ExecutionContext
 from storage_blob._local import LocalBlobStore
 
 from ._config import CompactionConfig
+from ._hook_dispatch import dispatch_hooks
 
 
 def _now() -> str:
@@ -287,6 +289,7 @@ async def run_compaction_loop(
         idle_days=policy.idle_days,
         tail_events=policy.tail_events,
     )
+    hooks_dir = storage_root / "hooks"
     while True:
         now = _now()
         tracer = get_tracer()
@@ -305,6 +308,19 @@ async def run_compaction_loop(
             try:
                 results = await compactor.run()
                 span.set_attribute("compaction.session_count", len(results))
+                for manifest in results:
+                    sid = manifest.get("session_id", "")
+                    await dispatch_hooks(
+                        "on_compact",
+                        {
+                            "session_id": sid,
+                            "original_event_count": manifest.get("original_event_count", 0),
+                            "archive_key": manifest.get("archive_key", ""),
+                        },
+                        ExecutionContext(session_id=sid),
+                        hooks_dir=hooks_dir,
+                        audit_log=audit_log,
+                    )
             except Exception as exc:
                 err = CompactionError(
                     message=f"Auto-compaction run failed: {exc}",
@@ -405,6 +421,18 @@ def make_compaction_router(
                     )
                 )
                 raise err2
+
+            await dispatch_hooks(
+                "on_compact",
+                {
+                    "session_id": session_id,
+                    "original_event_count": manifest.get("original_event_count", 0),
+                    "archive_key": manifest.get("archive_key", ""),
+                },
+                ExecutionContext(session_id=session_id),
+                hooks_dir=storage_root / "hooks",
+                audit_log=audit_log,
+            )
 
         return JSONResponse(content=manifest, status_code=200)
 

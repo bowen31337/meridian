@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/lifecycle-hooks-system-hook-verdict-types-continue-no-o/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/lifecycle-hooks-system-hook-events-session-start-sessio/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
