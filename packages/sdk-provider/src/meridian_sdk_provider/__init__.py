@@ -22,6 +22,7 @@ from .fake import FakeModelAdapter, write_model_fixture
 from .ollama import OllamaProvider
 from .openai import OpenAIProvider
 from .openrouter import OpenRouterProvider
+from .registry import ProviderRegistry
 from .errors import (
     NoProviderFoundError,
     ProviderCallError,
@@ -106,6 +107,8 @@ __all__ = [
     # Fake / testing
     "FakeModelAdapter",
     "write_model_fixture",
+    # Registry
+    "ProviderRegistry",
     # Providers
     "OllamaProvider",
     "OpenAIProvider",

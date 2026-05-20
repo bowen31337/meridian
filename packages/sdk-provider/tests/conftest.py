@@ -42,6 +42,8 @@ class FakeProvider:
         self._raise_on_call = raise_on_call
         self.call_count = 0
         self.last_opts: ModelCallOpts | None = None
+        self.closed: bool = False
+        self.close_count: int = 0
 
     async def call(self, opts: ModelCallOpts) -> AsyncIterator[ModelEvent]:
         self.call_count += 1
@@ -58,7 +60,8 @@ class FakeProvider:
         return TokenCount(input_tokens=42)
 
     async def close(self) -> None:
-        pass
+        self.closed = True
+        self.close_count += 1
 
 
 class CollectingAuditLog:

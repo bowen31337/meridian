@@ -14,8 +14,11 @@ from storage_repository import RepositoryFailure, SqliteRepositoryDriver
 
 from ._app import create_app
 from ._config import load_config, resolve_config_location, validate_config
+from ._provider_factory import ProviderFactoryError, build_model_router, build_provider_registry
+from ._secret_ref import SecretRefResolver
 from ._services import init_services
 from ._telemetry import get_tracer, record_daemon_failure, record_daemon_start_event
+from ._vault_backend_os_keychain import OsKeychainVaultBackend
 
 _LOG = logging.getLogger("meridiand")
 
@@ -106,6 +109,36 @@ def main(argv: list[str] | None = None) -> int:
         print(f"meridiand: migration error: {exc}", file=sys.stderr)
         return 1
 
+    # Build the provider registry and model router when providers are configured.
+    model_router = None
+    if config.providers:
+        os_keychain = OsKeychainVaultBackend()
+        secret_resolver = SecretRefResolver(
+            storage_root=config.storage_root,
+            os_keychain_backend=os_keychain,
+            audit_log=services.audit_log,
+        )
+        try:
+            registry = build_provider_registry(
+                config,
+                secret_resolver=secret_resolver,
+                audit_log=services.audit_log,
+            )
+            model_router = build_model_router(config, registry, audit_log=services.audit_log)
+        except ProviderFactoryError as exc:
+            with contextlib.suppress(Exception):
+                services.audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="meridiand.provider_init_failed",
+                        code=exc.code,
+                        timestamp=exc.timestamp,
+                        detail={"message": exc.message},
+                    )
+                )
+            print(f"meridiand: provider init error: {exc.message}", file=sys.stderr)
+            return 1
+
     app = create_app(
         services.audit_log,
         plugin_loader=services.plugin_loader,
@@ -113,6 +146,7 @@ def main(argv: list[str] | None = None) -> int:
         event_log=services.event_log,
         cors=config.cors,
         auth_config=config.auth,
+        model_router=model_router,
     )
 
     bind = config.bind

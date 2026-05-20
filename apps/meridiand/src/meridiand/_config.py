@@ -15,6 +15,8 @@ from core_errors import (
     record_error,
     record_invocation_event,
 )
+from typing import Any, Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 DEFAULT_CONFIG_PATH = Path.home() / ".meridian" / "config.yaml"
@@ -29,7 +31,7 @@ _DEFAULT_CORS_METHODS = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 _DEFAULT_CORS_HEADERS = ["*"]
 _VALID_LOG_LEVELS = {"debug", "info", "warning", "error", "critical"}
 _VALID_VAULT_BACKENDS = {"os_keychain", "encrypted_file"}
-_VALID_PROVIDER_KINDS = {"anthropic", "openai", "local"}
+_VALID_PROVIDER_KINDS = {"anthropic", "openai", "openrouter", "ollama", "local"}
 _SECRET_REF_VAULT_PREFIX = "secret_ref://vault/"
 
 
@@ -174,6 +176,45 @@ class VaultConfig(BaseModel):
     backend: str = "os_keychain"
 
 
+class TokenRangeConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    gt: int | None = None
+    gte: int | None = None
+    lt: int | None = None
+    lte: int | None = None
+
+
+class RoutingConditionConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    skill_id: str | None = None
+    estimated_input_tokens: TokenRangeConfig | None = None
+    metadata_match: dict[str, Any] | None = None
+    role: str | None = None
+
+
+class RoutingRuleConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    when: RoutingConditionConfig | None = None
+    model: str  # "provider_name:model_id" form
+
+
+class FallbackRuleConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    on: Literal["rate_limit", "timeout", "5xx", "any"]
+    model: str  # "provider_name:model_id" form
+
+
+class RoutingConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    rules: list[RoutingRuleConfig] = Field(default_factory=list)
+    fallbacks: list[FallbackRuleConfig] = Field(default_factory=list)
+
+
 class ProviderConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -221,6 +262,7 @@ class MeridianConfig(BaseModel):
     auth: AuthConfig = Field(default_factory=AuthConfig)
     vaults: list[VaultConfig] = Field(default_factory=list)
     providers: list[ProviderConfig] = Field(default_factory=list)
+    routing: RoutingConfig | None = None
     daemon: DaemonConfig | None = None
     storage: StorageConfig | None = None
 
@@ -428,6 +470,35 @@ def validate_config(config: MeridianConfig, audit_log: AuditLog | None = None) -
                         errors.append(
                             f"{prefix}.auth: invalid secret_ref format; "
                             f"expected secret_ref://vault/{{vault_id}}/{{key}}"
+                        )
+
+        # Validate routing section
+        if config.routing is not None:
+            for i, rule in enumerate(config.routing.rules):
+                if ":" not in rule.model:
+                    errors.append(
+                        f"routing.rules[{i}].model: {rule.model!r} must be in "
+                        "'provider_name:model_id' form"
+                    )
+                else:
+                    pname = rule.model.split(":")[0]
+                    if pname not in seen_names:
+                        errors.append(
+                            f"routing.rules[{i}].model: provider '{pname}' "
+                            "is not declared in the providers section"
+                        )
+            for i, fb in enumerate(config.routing.fallbacks):
+                if ":" not in fb.model:
+                    errors.append(
+                        f"routing.fallbacks[{i}].model: {fb.model!r} must be in "
+                        "'provider_name:model_id' form"
+                    )
+                else:
+                    pname = fb.model.split(":")[0]
+                    if pname not in seen_names:
+                        errors.append(
+                            f"routing.fallbacks[{i}].model: provider '{pname}' "
+                            "is not declared in the providers section"
                         )
 
         # Emit config.plaintext_secret warning for each provider with plaintext auth

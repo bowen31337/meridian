@@ -24,6 +24,7 @@ dependencies = [
     "meridian-storage-reposit>=0.1.0",
     "meridian-sdk-channel>=0.1.0",
     "meridian-sdk-provider>=0.1.0",
+    "meridian-provider-anthropic-apikey>=0.1.0",
     "meridian-api-models>=0.1.0",
     "sqlite-vec>=0.1.6",
     "sqlean-py>=3.50.4",
@@ -54,6 +55,7 @@ meridian-storage-event-log = { workspace = true }
 meridian-storage-reposit = { workspace = true }
 meridian-sdk-channel = { workspace = true }
 meridian-sdk-provider = { workspace = true }
+meridian-provider-anthropic-apikey = { workspace = true }
 meridian-sdk-sandbox = { workspace = true }
 meridian-api-models = { workspace = true }
 
@@ -74,6 +76,7 @@ pythonpath = [
     "../../packages/storage-reposit/src",
     "../../packages/sdk-channel/src",
     "../../packages/sdk-provider/src",
+    "../../packages/provider-anthropic-apikey/src",
     "../../packages/sdk-sandbox/src",
     "../../packages/api-models/src",
 ]

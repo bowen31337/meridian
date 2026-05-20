@@ -15,6 +15,7 @@ from .errors import (
     RoutingError,
 )
 from .protocol import ModelEntry, ModelProvider, ProviderCapabilities
+from .registry import ProviderRegistry, _ProviderSlot
 from .telemetry import get_tracer, record_invocation_event, record_provider_failure
 from .types import (
     ContentBlock,
@@ -184,30 +185,57 @@ class ModelRouter:
 
     The span closes when the last event is yielded, when an exception escapes,
     or when the caller closes the generator early (``aclose()``).
+
+    When a ``ProviderRegistry`` is supplied the router acquires the provider
+    slot before each call and releases it when the call finishes (or fails).
+    This enables the registry's drain-then-close hot-swap mechanism.
     """
 
     def __init__(
         self,
         policy: ModelRoutingPolicy,
         providers: dict[str, ModelProvider] | None = None,
+        registry: ProviderRegistry | None = None,
         audit_log: AuditLog | None = None,
     ) -> None:
         self._policy = policy
         self._providers: dict[str, ModelProvider] = providers or {}
+        self._registry = registry
         self._audit = audit_log or NoopAuditLog()
 
     def register_provider(self, provider: ModelProvider) -> None:
-        """Add or replace a provider in the registry by its ``name``."""
-        self._providers[provider.name] = provider
+        """Add or replace a provider by its ``name``.
 
-    def _resolve(self, model_ref: str) -> tuple[ModelProvider, str]:
+        When a ProviderRegistry is attached, delegates to the registry
+        (synchronous, no drain).  For hot-swap with drain call registry.swap().
+        """
+        if self._registry is not None:
+            self._registry.register(provider)
+        else:
+            self._providers[provider.name] = provider
+
+    def _resolve(self, model_ref: str) -> tuple[ModelProvider, str, _ProviderSlot | None]:
+        """Return ``(provider, model_id, slot_or_None)`` for *model_ref*.
+
+        When a registry is in use the slot is returned so the caller can
+        acquire/release it for drain tracking.  When only the plain dict is
+        used the slot is ``None``.
+        """
         provider_name, model_id = _parse_model_ref(model_ref)
+        if self._registry is not None:
+            slot = self._registry.get_slot(provider_name)
+            if slot is None:
+                raise NoProviderFoundError(
+                    f"Provider '{provider_name}' not registered in registry "
+                    f"(known: {sorted(self._registry.names())})."
+                )
+            return slot.provider, model_id, slot
         provider = self._providers.get(provider_name)
         if provider is None:
             raise NoProviderFoundError(
                 f"Provider '{provider_name}' not registered (known: {sorted(self._providers)})."
             )
-        return provider, model_id
+        return provider, model_id, None
 
     def _write_audit_failure(
         self,
@@ -256,6 +284,10 @@ class ModelRouter:
                 **({"session.id": opts.session_id} if opts.session_id else {}),
             },
         )
+
+        # Tracks the slot currently held by this invocation; released in finally.
+        _slot: _ProviderSlot | None = None
+
         try:
             if rule is None:
                 err = NoProviderFoundError(
@@ -267,7 +299,10 @@ class ModelRouter:
                 self._write_audit_failure(err, "<none>", "<none>", None, opts, rule_label)
                 raise err
 
-            provider, model_id = self._resolve(rule.model)
+            provider, model_id, _slot = self._resolve(rule.model)
+            if _slot is not None:
+                _slot.acquire()
+
             effective_opts = _apply_cap_constraints(
                 opts.model_copy(update={"model": model_id}),
                 provider.capabilities,
@@ -290,6 +325,11 @@ class ModelRouter:
             except StopAsyncIteration:
                 return
             except Exception as primary_exc:
+                # Primary failed before any events; release its slot before fallback.
+                if _slot is not None:
+                    _slot.release()
+                    _slot = None
+
                 record_provider_failure(
                     span, primary_exc, provider_name=provider.name, model=model_id
                 )
@@ -307,7 +347,9 @@ class ModelRouter:
                     raise
 
                 # Attempt the fallback provider.
-                fb_provider, fb_model_id = self._resolve(fb_rule.model)
+                fb_provider, fb_model_id, _slot = self._resolve(fb_rule.model)
+                if _slot is not None:
+                    _slot.acquire()
                 fb_opts = _apply_cap_constraints(
                     opts.model_copy(update={"model": fb_model_id}),
                     fb_provider.capabilities,
@@ -351,6 +393,8 @@ class ModelRouter:
                 raise
 
         finally:
+            if _slot is not None:
+                _slot.release()
             span.end()
 
     async def count_tokens(self, req: ModelCountReq) -> TokenCount:
@@ -358,7 +402,11 @@ class ModelRouter:
 
         Falls back to a character-based estimate when no such provider is registered.
         """
-        for provider in self._providers.values():
+        all_providers = (
+            self._registry.providers() if self._registry is not None
+            else list(self._providers.values())
+        )
+        for provider in all_providers:
             if provider.capabilities.count_tokens:
                 return await provider.count_tokens(req)
 
@@ -375,12 +423,19 @@ class ModelRouter:
 
     def list_models(self) -> list[ModelEntry]:
         """Aggregate model listings from all registered providers."""
+        all_providers = (
+            self._registry.providers() if self._registry is not None
+            else list(self._providers.values())
+        )
         result: list[ModelEntry] = []
-        for provider in self._providers.values():
+        for provider in all_providers:
             result.extend(provider.list_models())
         return result
 
     async def close(self) -> None:
         """Close all registered provider adapters."""
-        for provider in self._providers.values():
-            await provider.close()
+        if self._registry is not None:
+            await self._registry.close_all()
+        else:
+            for provider in self._providers.values():
+                await provider.close()
