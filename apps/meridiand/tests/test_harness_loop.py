@@ -79,6 +79,18 @@ Tests cover:
   - Audit detail includes message on hook dispatch failure.
   - Fake adapter model call error transitions to "terminated" (no hooks).
   - Fake adapter model call error dispatches on_error hooks when hooks_dir is set.
+  On stop_reason max_tokens:
+  - Without policy (None): transitions final_phase to "waiting_for_user".
+  - With continue_allowed=False: transitions final_phase to "waiting_for_user".
+  - With continue_allowed=True: loop continues (model_calls incremented again).
+  - Emits message.truncated event to event_log with model_call_number.
+  - No message.truncated event emitted when event_log is None.
+  - Emits session.phase_change event with after="waiting_for_user" and reason="max_tokens".
+  - session.phase_change event not emitted when continue_allowed=True (loop continues).
+  - Without event_log: still transitions to waiting_for_user when not continuing.
+  - Without event_log: still loops when continue_allowed=True.
+  - Event log failure on message.truncated raises HarnessLoopError.
+  - Event log failure on message.truncated writes harness.run_loop.failed to audit log.
 """
 
 from __future__ import annotations
@@ -96,6 +108,7 @@ from meridiand._replay import (
     FakeSandboxAdapter,
     HarnessLoopError,
     IterationBudget,
+    MaxTokensPolicy,
     UsageDelta,
     run_harness_loop,
 )
@@ -2375,3 +2388,329 @@ class TestHarnessLoopModelCallError:
         record = next(r for r in records if r.get("event") == "harness.model_call_error.failed")
         assert "message" in record["detail"]
         assert len(record["detail"]["message"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# Helpers: max_tokens fixtures
+# ---------------------------------------------------------------------------
+
+
+def _max_tokens_call(text: str = "partial") -> list[dict[str, Any]]:
+    return [
+        {"type": "message_start", "model": "fake", "provider": "fake"},
+        {"type": "text_delta", "text": text},
+        {"type": "message_stop", "stop_reason": "max_tokens"},
+    ]
+
+
+def _router_max_tokens(*chunks: str) -> list:
+    events: list = [MessageStartEvent(type="message_start", model="fake", provider="fake")]
+    for chunk in chunks:
+        events.append(TextDeltaEvent(type="text_delta", text=chunk))
+    events.append(MessageStopEvent(type="message_stop", stop_reason="max_tokens"))
+    return events
+
+
+# ---------------------------------------------------------------------------
+# Tests: stop_reason max_tokens
+# ---------------------------------------------------------------------------
+
+
+class TestHarnessLoopMaxTokens:
+    def test_no_policy_transitions_to_waiting_for_user(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_max_tokens_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        _, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
+        )
+        assert final_phase == "waiting_for_user"
+
+    def test_continue_false_transitions_to_waiting_for_user(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_max_tokens_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        _, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                max_tokens_policy=MaxTokensPolicy(continue_allowed=False),
+            )
+        )
+        assert final_phase == "waiting_for_user"
+
+    def test_continue_true_loops_and_calls_model_again(self, tmp_path: Path) -> None:
+        # First call returns max_tokens; second returns end_turn.
+        model, sandbox = _adapters(tmp_path / "fix", [_max_tokens_call(), _end_turn_call()])
+        reader = _FakePhaseReader(["running", "running"])
+        audit = FileAuditLog(tmp_path)
+        model_calls, _, _ = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                max_tokens_policy=MaxTokensPolicy(continue_allowed=True),
+            )
+        )
+        assert model_calls == 2
+
+    def test_continue_true_final_phase_idle_after_end_turn(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_max_tokens_call(), _end_turn_call()])
+        reader = _FakePhaseReader(["running", "running"])
+        audit = FileAuditLog(tmp_path)
+        _, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                max_tokens_policy=MaxTokensPolicy(continue_allowed=True),
+            )
+        )
+        assert final_phase == "idle"
+
+    def test_emits_message_truncated_event(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_max_tokens_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        truncated = [d for _, et, d in event_log.events if et == "message.truncated"]
+        assert len(truncated) == 1
+
+    def test_message_truncated_has_model_call_number(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_max_tokens_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        truncated = [d for _, et, d in event_log.events if et == "message.truncated"]
+        assert truncated[0]["model_call_number"] == 1
+
+    def test_no_truncated_event_without_event_log(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_max_tokens_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=None,
+            )
+        )
+        # No exception raised; implicit pass if reached.
+
+    def test_emits_phase_change_event_when_not_continuing(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_max_tokens_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        phase_changes = [d for _, et, d in event_log.events if et == "session.phase_change"]
+        assert len(phase_changes) == 1
+
+    def test_phase_change_after_is_waiting_for_user(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_max_tokens_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        phase_changes = [d for _, et, d in event_log.events if et == "session.phase_change"]
+        assert phase_changes[0]["after"] == "waiting_for_user"
+
+    def test_phase_change_reason_is_max_tokens(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_max_tokens_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        phase_changes = [d for _, et, d in event_log.events if et == "session.phase_change"]
+        assert phase_changes[0]["reason"] == "max_tokens"
+
+    def test_no_phase_change_event_when_continue_true(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_max_tokens_call(), _end_turn_call()])
+        reader = _FakePhaseReader(["running", "running"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+                max_tokens_policy=MaxTokensPolicy(continue_allowed=True),
+            )
+        )
+        phase_changes = [d for _, et, d in event_log.events if et == "session.phase_change"]
+        assert len(phase_changes) == 0
+
+    def test_without_event_log_still_transitions_to_waiting_for_user(
+        self, tmp_path: Path
+    ) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_max_tokens_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        _, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=None,
+            )
+        )
+        assert final_phase == "waiting_for_user"
+
+    def test_without_event_log_continue_true_still_loops(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_max_tokens_call(), _end_turn_call()])
+        reader = _FakePhaseReader(["running", "running"])
+        audit = FileAuditLog(tmp_path)
+        model_calls, _, _ = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=None,
+                max_tokens_policy=MaxTokensPolicy(continue_allowed=True),
+            )
+        )
+        assert model_calls == 2
+
+    def test_event_log_failure_raises_harness_loop_error(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_max_tokens_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                    event_log=_FailingEventLogWriter(),
+                )
+            )
+
+    def test_event_log_failure_writes_to_audit_log(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(tmp_path / "fix", [_max_tokens_call()])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                    event_log=_FailingEventLogWriter(),
+                )
+            )
+        records = _read_audit(tmp_path)
+        assert any(r.get("event") == "harness.run_loop.failed" for r in records)
+
+    def test_router_max_tokens_without_policy_transitions_to_waiting_for_user(
+        self, tmp_path: Path
+    ) -> None:
+        router = _FakeModelRouter([_router_max_tokens("partial text")])
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        _, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+        assert final_phase == "waiting_for_user"
+
+    def test_router_max_tokens_continue_true_loops(self, tmp_path: Path) -> None:
+        router = _FakeModelRouter([_router_max_tokens("partial"), _router_end_turn("done")])
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model", "waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        model_calls, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                model_router=router,
+                model_call_opts=_opts(),
+                max_tokens_policy=MaxTokensPolicy(continue_allowed=True),
+            )
+        )
+        assert model_calls == 2
+        assert final_phase == "idle"

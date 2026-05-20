@@ -62,6 +62,17 @@ class IterationBudget:
     soft: int | None = None
 
 
+@dataclass
+class MaxTokensPolicy:
+    """Policy applied when the model response has stop_reason="max_tokens".
+
+    continue_allowed: if True the loop re-calls the model; if False (default)
+    the session transitions to waiting_for_user.
+    """
+
+    continue_allowed: bool = False
+
+
 # Phases in which the harness releases the session so any harness can re-wake.
 _STOP_PHASES: frozenset[str] = frozenset({"idle", "paused", "terminated"})
 
@@ -76,6 +87,7 @@ __all__ = [
     "FakeSandboxAdapter",
     "HarnessLoopError",
     "IterationBudget",
+    "MaxTokensPolicy",
     "UsageDelta",
     "_run_harness",
     "_run_harness_capturing",
@@ -381,6 +393,7 @@ async def run_harness_loop(
     event_log: EventLogWriter | None = None,
     model_router: ModelRouter | None = None,
     model_call_opts: ModelCallOpts | None = None,
+    max_tokens_policy: MaxTokensPolicy | None = None,
 ) -> tuple[int, int, str]:
     """Run harness while phase is not in {idle, paused, terminated}.
 
@@ -412,6 +425,15 @@ async def run_harness_loop(
       4. Dispatches "post_tool_call" hooks (if hooks_dir is set) after dispatch.
       5. Continues the loop without incrementing model_calls; the phase_reader drives
          transition back to waiting_for_model.
+
+    When stop_reason is "max_tokens":
+      - Partial message chunks were already emitted as "message.delta" events during streaming.
+      - Emits a "message.truncated" event to event_log (if provided) with model_call_number.
+      - If max_tokens_policy.continue_allowed is True, loops and re-calls the model.
+      - Otherwise (policy absent or continue_allowed=False), emits a "session.phase_change"
+        event with after="waiting_for_user" and reason="max_tokens", sets final_phase to
+        "waiting_for_user", and stops the loop. event_log must be provided to persist these
+        events; without it the loop still stops or loops correctly but no events are written.
 
     Returns (model_calls, tool_calls, final_phase).
     """
@@ -637,6 +659,29 @@ async def run_harness_loop(
                             "cache_read_tokens": _stop_event.cache_read_input_tokens,
                         },
                     )
+
+                if stop_reason == "max_tokens":
+                    if event_log is not None:
+                        await event_log.append(
+                            session_id,
+                            "message.truncated",
+                            {"model_call_number": model_calls, "timestamp": _now()},
+                        )
+                    if max_tokens_policy is not None and max_tokens_policy.continue_allowed:
+                        continue
+                    if event_log is not None:
+                        await event_log.append(
+                            session_id,
+                            "session.phase_change",
+                            {
+                                "before": final_phase,
+                                "after": "waiting_for_user",
+                                "timestamp": _now(),
+                                "reason": "max_tokens",
+                            },
+                        )
+                    final_phase = "waiting_for_user"
+                    break
 
                 if not tool_use_blocks or stop_reason != "tool_use":
                     final_phase = "idle"
