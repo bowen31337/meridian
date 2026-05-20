@@ -1,0 +1,72 @@
+from __future__ import annotations
+
+from opentelemetry import trace
+from opentelemetry.trace import Span, Status, StatusCode
+
+from core_errors import BudgetExceededError
+
+from ._version import SDK_BUDGET_VERSION
+
+_TRACER_NAME = "meridian.sdk-budget"
+
+
+def get_tracer() -> trace.Tracer:
+    return trace.get_tracer(_TRACER_NAME, SDK_BUDGET_VERSION)
+
+
+def record_invocation_event(span: Span, scope: str, scope_id: str, timestamp: str) -> None:
+    """Attaches a structured "budget.check.invocation" event to the active span."""
+    span.add_event(
+        "budget.check.invocation",
+        {
+            "budget.scope": scope,
+            "budget.scope_id": scope_id,
+            "timestamp": timestamp,
+        },
+    )
+
+
+def record_budget_warning(
+    span: Span,
+    scope: str,
+    scope_id: str,
+    dimension: str,
+    limit: float,
+    actual: float,
+    timestamp: str,
+) -> None:
+    """Attaches a structured "budget.warning" event for a soft-threshold breach."""
+    span.add_event(
+        "budget.warning",
+        {
+            "budget.scope": scope,
+            "budget.scope_id": scope_id,
+            "budget.dimension": dimension,
+            "budget.limit": limit,
+            "budget.actual": actual,
+            "timestamp": timestamp,
+        },
+    )
+
+
+def record_budget_exceeded(
+    span: Span,
+    error: BudgetExceededError,
+    dimension: str,
+    limit: float,
+    actual: float,
+) -> None:
+    """Sets span status to ERROR, adds a "budget.exceeded" event, and records the cause."""
+    span.set_status(Status(StatusCode.ERROR, error.message))
+    span.add_event(
+        "budget.exceeded",
+        {
+            "error.code": error.code,
+            "error.message": error.message,
+            "budget.dimension": dimension,
+            "budget.limit": limit,
+            "budget.actual": actual,
+        },
+    )
+    if error.cause is not None:
+        span.record_exception(error.cause)

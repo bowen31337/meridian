@@ -22,6 +22,7 @@ members = [
     "packages/storage-reposit",
     "packages/storage-repository",
     "packages/sdk-py",
+    "packages/sdk-budget",
     "packages/system-ulid",
 ]
 
@@ -72,5 +73,6 @@ testpaths = [
     "packages/storage-event-log/tests",
     "packages/storage-reposit/tests",
     "packages/storage-repository/tests",
+    "packages/sdk-budget/tests",
     "packages/system-ulid/tests",
 ]
