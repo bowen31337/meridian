@@ -22,6 +22,7 @@ from core_errors import (
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from sdk_sandbox import ExecutionContext
+from storage_event_log import EventLogWriter
 
 from ._hook_dispatch import dispatch_hooks
 
@@ -38,6 +39,18 @@ class UsageDelta:
     output_tokens: int
 
 
+@dataclass
+class IterationBudget:
+    """Per-iteration budget thresholds checked after each model call in the harness loop.
+
+    soft: warn + pause for user approval when model_calls reaches this value.
+    hard: terminate the session when model_calls reaches this value.
+    """
+
+    hard: int | None = None
+    soft: int | None = None
+
+
 # Phases in which the harness releases the session so any harness can re-wake.
 _STOP_PHASES: frozenset[str] = frozenset({"idle", "paused", "terminated"})
 
@@ -51,6 +64,7 @@ __all__ = [
     "FakeModelAdapter",
     "FakeSandboxAdapter",
     "HarnessLoopError",
+    "IterationBudget",
     "UsageDelta",
     "_run_harness",
     "_run_harness_capturing",
@@ -352,6 +366,8 @@ async def run_harness_loop(
     audit_log: AuditLog,
     on_usage_delta: Callable[[UsageDelta], None] | None = None,
     hooks_dir: Path | None = None,
+    iteration_budget: IterationBudget | None = None,
+    event_log: EventLogWriter | None = None,
 ) -> tuple[int, int, str]:
     """Run harness while phase is not in {idle, paused, terminated}.
 
@@ -360,6 +376,14 @@ async def run_harness_loop(
     harness can re-wake. Emits OTel span "harness.run_loop" with session.id attribute
     and logs a structured invocation event on each call. On failure surfaces an error
     message to the caller and writes the failure to the audit log.
+
+    When iteration_budget is provided, a per-iteration check runs after each model call
+    that returns tool_use (i.e., would otherwise continue). A hard breach (model_calls
+    >= budget.hard) writes a session.phase_change event to terminated with
+    reason="budget_exceeded" and stops the loop. A soft breach (model_calls >= budget.soft)
+    writes a budget.warning event plus a session.phase_change event to waiting_for_user and
+    stops the loop pending user approval. event_log must be provided to persist these
+    transitions; without it the loop still stops but no events are written.
 
     Returns (model_calls, tool_calls, final_phase).
     """
@@ -437,6 +461,53 @@ async def run_harness_loop(
                             audit_log=audit_log,
                         )
                     break  # end_turn: release session
+
+                # Per-iteration budget check: only reached when tool_use would continue.
+                if iteration_budget is not None:
+                    before_phase = final_phase
+                    if (
+                        iteration_budget.hard is not None
+                        and model_calls >= iteration_budget.hard
+                    ):
+                        if event_log is not None:
+                            await event_log.append(
+                                session_id,
+                                "session.phase_change",
+                                {
+                                    "before": before_phase,
+                                    "after": "terminated",
+                                    "timestamp": _now(),
+                                    "reason": "budget_exceeded",
+                                },
+                            )
+                        final_phase = "terminated"
+                        break
+                    elif (
+                        iteration_budget.soft is not None
+                        and model_calls >= iteration_budget.soft
+                    ):
+                        if event_log is not None:
+                            await event_log.append(
+                                session_id,
+                                "budget.warning",
+                                {
+                                    "model_calls": model_calls,
+                                    "budget_soft": iteration_budget.soft,
+                                    "timestamp": _now(),
+                                },
+                            )
+                            await event_log.append(
+                                session_id,
+                                "session.phase_change",
+                                {
+                                    "before": before_phase,
+                                    "after": "waiting_for_user",
+                                    "timestamp": _now(),
+                                    "reason": "budget_warning",
+                                },
+                            )
+                        final_phase = "waiting_for_user"
+                        break
 
                 for block in tool_use_blocks:
                     tool_calls += 1

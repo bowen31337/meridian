@@ -24,6 +24,19 @@ Tests cover:
   - HarnessLoopError has code "harness_loop_failed".
   - on_usage_delta callback is called once per model call.
   - release: returns cleanly so another harness can re-wake the session.
+  Per-iteration budget check:
+  - Hard breach (model_calls >= hard) transitions final_phase to "terminated".
+  - Hard breach writes session.phase_change event with reason "budget_exceeded" to event log.
+  - Hard breach stops the loop (model_calls does not exceed hard limit).
+  - Soft breach (model_calls >= soft, < hard) emits budget.warning event to event log.
+  - Soft breach transitions final_phase to "waiting_for_user".
+  - Soft breach writes session.phase_change event with after "waiting_for_user" to event log.
+  - Soft breach stops the loop (model_calls does not exceed soft limit).
+  - No breach below soft threshold: loop runs to completion normally.
+  - Hard breach without event_log: still transitions final_phase to "terminated".
+  - Soft breach without event_log: still transitions final_phase to "waiting_for_user".
+  - Event log failure during budget check raises HarnessLoopError.
+  - Event log failure during budget check writes failure to audit log.
 """
 
 from __future__ import annotations
@@ -40,6 +53,7 @@ from meridiand._replay import (
     FakeModelAdapter,
     FakeSandboxAdapter,
     HarnessLoopError,
+    IterationBudget,
     UsageDelta,
     run_harness_loop,
 )
@@ -638,3 +652,429 @@ class TestHarnessLoopRelease:
         assert isinstance(model_calls, int)
         assert isinstance(tool_calls, int)
         assert isinstance(final_phase, str)
+
+
+# ---------------------------------------------------------------------------
+# Helpers: fake event log writer
+# ---------------------------------------------------------------------------
+
+
+class _FakeEventLogWriter:
+    """In-memory EventLogWriter that records appended events for assertions."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str, dict[str, Any]]] = []
+        self._seq = 0
+
+    async def append(
+        self,
+        session_id: str,
+        event_type: str,
+        data: dict[str, Any],
+        *,
+        thread_id: str | None = None,
+    ) -> int:
+        self.events.append((session_id, event_type, data))
+        seq = self._seq
+        self._seq += 1
+        return seq
+
+
+class _FailingEventLogWriter:
+    """EventLogWriter that always raises on append."""
+
+    async def append(
+        self,
+        session_id: str,
+        event_type: str,
+        data: dict[str, Any],
+        *,
+        thread_id: str | None = None,
+    ) -> int:
+        raise OSError("event log write failed")
+
+
+# ---------------------------------------------------------------------------
+# Tests: per-iteration budget check
+# ---------------------------------------------------------------------------
+
+
+class TestHarnessLoopIterationBudget:
+    # --- Hard breach ---
+
+    def test_hard_breach_sets_final_phase_to_terminated(self, tmp_path: Path) -> None:
+        # hard=1: after 1 tool_use model call the hard budget is hit
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call(), _end_turn_call()],
+            [{"content": "result"}],
+        )
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        _, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                iteration_budget=IterationBudget(hard=1),
+            )
+        )
+        assert final_phase == "terminated"
+
+    def test_hard_breach_writes_phase_change_event_to_terminated(
+        self, tmp_path: Path
+    ) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call(), _end_turn_call()],
+            [{"content": "result"}],
+        )
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                iteration_budget=IterationBudget(hard=1),
+                event_log=event_log,
+            )
+        )
+        phase_changes = [
+            (sid, et, d) for sid, et, d in event_log.events if et == "session.phase_change"
+        ]
+        assert len(phase_changes) == 1
+        _, _, data = phase_changes[0]
+        assert data["after"] == "terminated"
+        assert data["reason"] == "budget_exceeded"
+
+    def test_hard_breach_stops_loop_at_hard_limit(self, tmp_path: Path) -> None:
+        # hard=1: loop must stop after 1 model call even though fixtures have more
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call(), _tool_use_call(), _end_turn_call()],
+            [{"content": "r1"}, {"content": "r2"}],
+        )
+        reader = _FakePhaseReader(["running", "running", "running"])
+        audit = FileAuditLog(tmp_path)
+        model_calls, _, _ = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                iteration_budget=IterationBudget(hard=1),
+            )
+        )
+        assert model_calls == 1
+
+    def test_hard_breach_without_event_log_still_terminates(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call(), _end_turn_call()],
+            [{"content": "result"}],
+        )
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        _, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                iteration_budget=IterationBudget(hard=1),
+                event_log=None,
+            )
+        )
+        assert final_phase == "terminated"
+
+    def test_hard_breach_phase_change_event_session_id(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call(), _end_turn_call()],
+            [{"content": "result"}],
+        )
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "budget-sess-1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                iteration_budget=IterationBudget(hard=1),
+                event_log=event_log,
+            )
+        )
+        phase_changes = [
+            (sid, et, d) for sid, et, d in event_log.events if et == "session.phase_change"
+        ]
+        assert phase_changes[0][0] == "budget-sess-1"
+
+    # --- Soft breach ---
+
+    def test_soft_breach_emits_budget_warning_event(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call(), _end_turn_call()],
+            [{"content": "result"}],
+        )
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                iteration_budget=IterationBudget(soft=1),
+                event_log=event_log,
+            )
+        )
+        warnings = [(sid, et, d) for sid, et, d in event_log.events if et == "budget.warning"]
+        assert len(warnings) == 1
+
+    def test_soft_breach_sets_final_phase_to_waiting_for_user(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call(), _end_turn_call()],
+            [{"content": "result"}],
+        )
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        _, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                iteration_budget=IterationBudget(soft=1),
+            )
+        )
+        assert final_phase == "waiting_for_user"
+
+    def test_soft_breach_writes_phase_change_event_to_waiting_for_user(
+        self, tmp_path: Path
+    ) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call(), _end_turn_call()],
+            [{"content": "result"}],
+        )
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                iteration_budget=IterationBudget(soft=1),
+                event_log=event_log,
+            )
+        )
+        phase_changes = [
+            (sid, et, d) for sid, et, d in event_log.events if et == "session.phase_change"
+        ]
+        assert len(phase_changes) == 1
+        _, _, data = phase_changes[0]
+        assert data["after"] == "waiting_for_user"
+
+    def test_soft_breach_stops_loop_at_soft_limit(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call(), _tool_use_call(), _end_turn_call()],
+            [{"content": "r1"}, {"content": "r2"}],
+        )
+        reader = _FakePhaseReader(["running", "running", "running"])
+        audit = FileAuditLog(tmp_path)
+        model_calls, _, _ = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                iteration_budget=IterationBudget(soft=1),
+            )
+        )
+        assert model_calls == 1
+
+    def test_soft_breach_without_event_log_still_pauses(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call(), _end_turn_call()],
+            [{"content": "result"}],
+        )
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        _, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                iteration_budget=IterationBudget(soft=1),
+                event_log=None,
+            )
+        )
+        assert final_phase == "waiting_for_user"
+
+    def test_budget_warning_event_includes_model_calls_and_soft_threshold(
+        self, tmp_path: Path
+    ) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call(), _end_turn_call()],
+            [{"content": "result"}],
+        )
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                iteration_budget=IterationBudget(soft=1),
+                event_log=event_log,
+            )
+        )
+        warnings = [(sid, et, d) for sid, et, d in event_log.events if et == "budget.warning"]
+        _, _, data = warnings[0]
+        assert data["model_calls"] == 1
+        assert data["budget_soft"] == 1
+
+    # --- No breach ---
+
+    def test_no_breach_below_soft_threshold_runs_to_completion(self, tmp_path: Path) -> None:
+        # soft=5, hard=10, but only 2 model calls — loop should complete normally
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call(), _end_turn_call()],
+            [{"content": "result"}],
+        )
+        reader = _FakePhaseReader(["running", "running"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        model_calls, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                iteration_budget=IterationBudget(soft=5, hard=10),
+                event_log=event_log,
+            )
+        )
+        assert final_phase == "idle"
+        assert model_calls == 2
+        assert event_log.events == []
+
+    # --- Hard takes precedence over soft ---
+
+    def test_hard_takes_precedence_over_soft_at_same_threshold(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call(), _end_turn_call()],
+            [{"content": "result"}],
+        )
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        _, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                iteration_budget=IterationBudget(soft=1, hard=1),
+            )
+        )
+        assert final_phase == "terminated"
+
+    # --- Event log failure ---
+
+    def test_event_log_failure_raises_harness_loop_error(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call(), _end_turn_call()],
+            [{"content": "result"}],
+        )
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                    iteration_budget=IterationBudget(hard=1),
+                    event_log=_FailingEventLogWriter(),
+                )
+            )
+
+    def test_event_log_failure_writes_to_audit_log(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call(), _end_turn_call()],
+            [{"content": "result"}],
+        )
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                    iteration_budget=IterationBudget(hard=1),
+                    event_log=_FailingEventLogWriter(),
+                )
+            )
+        records = _read_audit(tmp_path)
+        assert any(r.get("event") == "harness.run_loop.failed" for r in records)
+
+    def test_event_log_failure_error_message_surfaced(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call(), _end_turn_call()],
+            [{"content": "result"}],
+        )
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError) as exc_info:
+            asyncio.run(
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                    iteration_budget=IterationBudget(soft=1),
+                    event_log=_FailingEventLogWriter(),
+                )
+            )
+        assert len(exc_info.value.message) > 0
