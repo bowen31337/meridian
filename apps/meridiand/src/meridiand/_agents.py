@@ -18,7 +18,10 @@ from core_errors import (
 )
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
+from sdk_capabilities import CapabilityParseError, parse as _parse_capability
+
+from meridiand._config import RoutingConfig
 
 from meridiand._pagination import (
     CursorDecodeError,
@@ -31,6 +34,73 @@ from meridiand._pagination import (
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+_INSTRUCTIONS_MAX_LEN = 32_768
+
+
+# ---------------------------------------------------------------------------
+# Pydantic v2 body schema validator
+# ---------------------------------------------------------------------------
+
+
+class _AgentBodyValidator(BaseModel):
+    """Schema rules applied to every agent body before it is stored."""
+
+    model_config = ConfigDict(frozen=True)
+
+    instructions: str = ""
+    model_routing: dict[str, Any] = {}
+    capabilities: list[str] = []
+    tools: list[dict[str, Any]] = []
+
+    @field_validator("instructions")
+    @classmethod
+    def _check_instructions_length(cls, v: str) -> str:
+        if len(v) > _INSTRUCTIONS_MAX_LEN:
+            raise ValueError(
+                f"'instructions' must not exceed {_INSTRUCTIONS_MAX_LEN} characters"
+            )
+        return v
+
+    @field_validator("model_routing")
+    @classmethod
+    def _check_model_routing_rules(cls, v: dict[str, Any]) -> dict[str, Any]:
+        try:
+            RoutingConfig.model_validate(v)
+        except ValidationError as exc:
+            first = exc.errors()[0]
+            raise ValueError(
+                f"'model_routing' is malformed: {first['msg']}"
+            ) from exc
+        return v
+
+    @field_validator("capabilities")
+    @classmethod
+    def _check_capabilities_grammar(cls, v: list[str]) -> list[str]:
+        for cap in v:
+            try:
+                _parse_capability(cap)
+            except CapabilityParseError as exc:
+                raise ValueError(str(exc)) from exc
+        return v
+
+    @field_validator("tools")
+    @classmethod
+    def _check_tools_names(cls, v: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        for i, tool in enumerate(v):
+            name = tool.get("name")
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError(f"tools[{i}] must declare a non-empty 'name'")
+        return v
+
+
+def _extract_validation_message(exc: ValidationError) -> str:
+    err = exc.errors()[0]
+    ctx = err.get("ctx", {})
+    if "error" in ctx:
+        return str(ctx["error"])
+    return err["msg"]
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +300,20 @@ def _validate_request(body: AgentCreateRequest) -> AgentInvalidRequestError | No
             message="'kind' must not be empty",
             timestamp=_now(),
         )
+    try:
+        _AgentBodyValidator.model_validate(
+            {
+                "instructions": body.instructions,
+                "model_routing": body.model_routing,
+                "capabilities": body.capabilities,
+                "tools": body.tools,
+            }
+        )
+    except ValidationError as exc:
+        return AgentInvalidRequestError(
+            message=_extract_validation_message(exc),
+            timestamp=_now(),
+        )
     return None
 
 
@@ -242,6 +326,20 @@ def _validate_version_request(body: AgentVersionCreateRequest) -> AgentInvalidRe
     if not body.kind.strip():
         return AgentInvalidRequestError(
             message="'kind' must not be empty",
+            timestamp=_now(),
+        )
+    try:
+        _AgentBodyValidator.model_validate(
+            {
+                "instructions": body.instructions,
+                "model_routing": body.model_routing,
+                "capabilities": body.capabilities,
+                "tools": body.tools,
+            }
+        )
+    except ValidationError as exc:
+        return AgentInvalidRequestError(
+            message=_extract_validation_message(exc),
             timestamp=_now(),
         )
     return None

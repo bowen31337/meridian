@@ -196,7 +196,7 @@ class TestAgentCreateSuccess:
 
     def test_with_capabilities_returns_201(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        resp = client.post("/v1/agents", json=_body(capabilities=["read", "write"]))
+        resp = client.post("/v1/agents", json=_body(capabilities=["core.read", "core.write"]))
         assert resp.status_code == 201
 
     def test_minimal_body_returns_201(self, storage_root: Path) -> None:
@@ -258,14 +258,14 @@ class TestAgentCreateResponse:
 
     def test_version_id_is_content_addressed(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.post("/v1/agents", json=_body(config={"k": "v"}, capabilities=["read"])).json()
+        body = client.post("/v1/agents", json=_body(config={"k": "v"}, capabilities=["core.read"])).json()
         agent_id = body["id"]
         expected = _content_version_id(
             agent_id=agent_id,
             name="my-agent",
             kind="claude",
             config={"k": "v"},
-            capabilities=["read"],
+            capabilities=["core.read"],
         )
         assert body["version"]["id"] == expected
 
@@ -328,8 +328,8 @@ class TestAgentCreateResponse:
 
     def test_version_capabilities_stored_when_provided(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.post("/v1/agents", json=_body(capabilities=["read", "write"])).json()
-        assert body["version"]["capabilities"] == ["read", "write"]
+        body = client.post("/v1/agents", json=_body(capabilities=["core.read", "core.write"])).json()
+        assert body["version"]["capabilities"] == ["core.read", "core.write"]
 
 
 # ---------------------------------------------------------------------------
@@ -371,10 +371,10 @@ class TestAgentPersistence:
 
     def test_persisted_version_capabilities(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        resp_body = client.post("/v1/agents", json=_body(capabilities=["search"])).json()
+        resp_body = client.post("/v1/agents", json=_body(capabilities=["core.search"])).json()
         version_id = resp_body["version"]["id"]
         resource = _version_resource(storage_root, version_id)
-        assert resource["capabilities"] == ["search"]
+        assert resource["capabilities"] == ["core.search"]
 
     def test_persisted_version_agent_id_matches(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
@@ -949,7 +949,7 @@ class TestAgentVersionCreateSuccess:
         agent_id = _create_agent(client)
         resp = client.post(
             f"/v1/agents/{agent_id}/versions",
-            json=_ver_body(capabilities=["read", "write"]),
+            json=_ver_body(capabilities=["core.read", "core.write"]),
         )
         assert resp.status_code == 201
 
@@ -971,7 +971,7 @@ class TestAgentVersionCreateIdempotency:
     def test_same_content_returns_same_version_id(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         agent_id = _create_agent(client)
-        payload = _ver_body(name="stable", capabilities=["search"])
+        payload = _ver_body(name="stable", capabilities=["core.search"])
         id1 = client.post(f"/v1/agents/{agent_id}/versions", json=payload).json()["id"]
         id2 = client.post(f"/v1/agents/{agent_id}/versions", json=payload).json()["id"]
         assert id1 == id2
@@ -1007,14 +1007,14 @@ class TestAgentVersionCreateResponse:
     def test_version_id_is_content_addressed(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         agent_id = _create_agent(client)
-        payload = _ver_body(name="v2", config={"k": "v"}, capabilities=["read"])
+        payload = _ver_body(name="v2", config={"k": "v"}, capabilities=["core.read"])
         body = client.post(f"/v1/agents/{agent_id}/versions", json=payload).json()
         expected = _content_version_id(
             agent_id=agent_id,
             name="v2",
             kind="claude",
             config={"k": "v"},
-            capabilities=["read"],
+            capabilities=["core.read"],
         )
         assert body["id"] == expected
 
@@ -1069,9 +1069,9 @@ class TestAgentVersionCreateResponse:
         agent_id = _create_agent(client)
         body = client.post(
             f"/v1/agents/{agent_id}/versions",
-            json=_ver_body(name="v2", capabilities=["search", "write"]),
+            json=_ver_body(name="v2", capabilities=["core.search", "core.write"]),
         ).json()
-        assert body["capabilities"] == ["search", "write"]
+        assert body["capabilities"] == ["core.search", "core.write"]
 
     def test_version_number_increments_for_new_content(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
@@ -1102,13 +1102,13 @@ class TestAgentVersionCreatePersistence:
         cfg = {"model": "gpt-4"}
         resp = client.post(
             f"/v1/agents/{agent_id}/versions",
-            json=_ver_body(name="v2", kind="openai", config=cfg, capabilities=["search"]),
+            json=_ver_body(name="v2", kind="openai", config=cfg, capabilities=["core.search"]),
         ).json()
         resource = _version_resource(storage_root, resp["id"])
         assert resource["name"] == "v2"
         assert resource["kind"] == "openai"
         assert resource["config"] == cfg
-        assert resource["capabilities"] == ["search"]
+        assert resource["capabilities"] == ["core.search"]
         assert resource["agent_id"] == agent_id
 
 
@@ -1366,7 +1366,7 @@ class TestAgentVersionGetSuccess:
 
     def test_response_has_capabilities(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        caps = ["read", "write"]
+        caps = ["core.read", "core.write"]
         resp = client.post("/v1/agents", json=_body(capabilities=caps)).json()
         agent_id, version_id = resp["id"], resp["version"]["id"]
         body = client.get(f"/v1/agents/{agent_id}/versions/{version_id}").json()
@@ -2181,3 +2181,312 @@ class TestAgentVersionListOtel:
             if s.name == "agent.versions.list"
         ]
         assert any(s.attributes.get("agent.id") == agent_id for s in spans)
+
+
+# ---------------------------------------------------------------------------
+# Agent body schema validation (Pydantic v2)
+# ---------------------------------------------------------------------------
+
+
+class TestAgentBodySchemaValidation:
+    """POST /v1/agents: instructions cap, model_routing.rules, capabilities §6 grammar, tools names."""
+
+    # -- instructions length cap --
+
+    def test_instructions_at_max_length_returns_201(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/agents", json=_body(instructions="x" * 32_768))
+        assert resp.status_code == 201
+
+    def test_instructions_over_max_length_returns_422(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/agents", json=_body(instructions="x" * 32_769))
+        assert resp.status_code == 422
+
+    def test_instructions_over_max_length_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/agents", json=_body(instructions="x" * 32_769)).json()
+        assert body["error"]["code"] == "agent_invalid_request"
+
+    def test_instructions_over_max_length_error_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/agents", json=_body(instructions="x" * 32_769)).json()
+        assert len(body["error"]["message"]) > 0
+
+    # -- model_routing.rules well-formed --
+
+    def test_valid_model_routing_rules_returns_201(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        routing = {"rules": [{"model": "anthropic:claude-3-opus"}]}
+        resp = client.post("/v1/agents", json=_body(model_routing=routing))
+        assert resp.status_code == 201
+
+    def test_model_routing_rule_missing_model_returns_422(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        routing = {"rules": [{"when": None}]}
+        resp = client.post("/v1/agents", json=_body(model_routing=routing))
+        assert resp.status_code == 422
+
+    def test_model_routing_rule_missing_model_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        routing = {"rules": [{"when": None}]}
+        body = client.post("/v1/agents", json=_body(model_routing=routing)).json()
+        assert body["error"]["code"] == "agent_invalid_request"
+
+    # -- capabilities §6 grammar --
+
+    def test_valid_capabilities_returns_201(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/agents", json=_body(capabilities=["net.fetch", "fs.read[/tmp]"]))
+        assert resp.status_code == 201
+
+    def test_capability_without_namespace_returns_422(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/agents", json=_body(capabilities=["nonamespace"]))
+        assert resp.status_code == 422
+
+    def test_capability_without_namespace_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/agents", json=_body(capabilities=["nonamespace"])).json()
+        assert body["error"]["code"] == "agent_invalid_request"
+
+    def test_capability_uppercase_returns_422(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/agents", json=_body(capabilities=["NS.name"]))
+        assert resp.status_code == 422
+
+    # -- tools[] reference declared tool names --
+
+    def test_tool_with_name_returns_201(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/agents", json=_body(tools=[{"name": "my_tool", "description": "d"}]))
+        assert resp.status_code == 201
+
+    def test_tool_missing_name_returns_422(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/agents", json=_body(tools=[{"description": "no name"}]))
+        assert resp.status_code == 422
+
+    def test_tool_missing_name_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/agents", json=_body(tools=[{"description": "no name"}])).json()
+        assert body["error"]["code"] == "agent_invalid_request"
+
+    def test_tool_empty_name_returns_422(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/agents", json=_body(tools=[{"name": "   "}]))
+        assert resp.status_code == 422
+
+    # -- audit log on schema failure --
+
+    def test_schema_failure_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/agents", json=_body(instructions="x" * 32_769))
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "agent.create.failed" for r in records)
+
+    def test_schema_failure_audit_level_is_error(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/agents", json=_body(instructions="x" * 32_769))
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "agent.create.failed"
+        )
+        assert record["level"] == "error"
+
+    def test_schema_failure_audit_code_is_agent_invalid_request(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/agents", json=_body(instructions="x" * 32_769))
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "agent.create.failed"
+        )
+        assert record["code"] == "agent_invalid_request"
+
+    def test_schema_failure_audit_detail_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/agents", json=_body(instructions="x" * 32_769))
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "agent.create.failed"
+        )
+        assert len(record["detail"]["message"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# Agent version body schema validation (Pydantic v2)
+# ---------------------------------------------------------------------------
+
+
+class TestAgentVersionBodySchemaValidation:
+    """POST /v1/agents/{id}/versions: same four schema rules as agent create."""
+
+    # -- instructions length cap --
+
+    def test_instructions_at_max_length_returns_201(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        resp = client.post(
+            f"/v1/agents/{agent_id}/versions",
+            json=_ver_body(instructions="x" * 32_768),
+        )
+        assert resp.status_code == 201
+
+    def test_instructions_over_max_length_returns_422(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        resp = client.post(
+            f"/v1/agents/{agent_id}/versions",
+            json=_ver_body(instructions="x" * 32_769),
+        )
+        assert resp.status_code == 422
+
+    def test_instructions_over_max_length_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        body = client.post(
+            f"/v1/agents/{agent_id}/versions",
+            json=_ver_body(instructions="x" * 32_769),
+        ).json()
+        assert body["error"]["code"] == "agent_invalid_request"
+
+    # -- model_routing.rules well-formed --
+
+    def test_valid_model_routing_rules_returns_201(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        routing = {"rules": [{"model": "anthropic:claude-3-opus"}]}
+        resp = client.post(
+            f"/v1/agents/{agent_id}/versions",
+            json=_ver_body(model_routing=routing),
+        )
+        assert resp.status_code == 201
+
+    def test_model_routing_rule_missing_model_returns_422(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        routing = {"rules": [{"when": None}]}
+        resp = client.post(
+            f"/v1/agents/{agent_id}/versions",
+            json=_ver_body(model_routing=routing),
+        )
+        assert resp.status_code == 422
+
+    def test_model_routing_rule_missing_model_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        routing = {"rules": [{"when": None}]}
+        body = client.post(
+            f"/v1/agents/{agent_id}/versions",
+            json=_ver_body(model_routing=routing),
+        ).json()
+        assert body["error"]["code"] == "agent_invalid_request"
+
+    # -- capabilities §6 grammar --
+
+    def test_valid_capabilities_returns_201(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        resp = client.post(
+            f"/v1/agents/{agent_id}/versions",
+            json=_ver_body(capabilities=["net.fetch", "fs.read[/tmp]"]),
+        )
+        assert resp.status_code == 201
+
+    def test_capability_without_namespace_returns_422(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        resp = client.post(
+            f"/v1/agents/{agent_id}/versions",
+            json=_ver_body(capabilities=["nonamespace"]),
+        )
+        assert resp.status_code == 422
+
+    def test_capability_without_namespace_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        body = client.post(
+            f"/v1/agents/{agent_id}/versions",
+            json=_ver_body(capabilities=["nonamespace"]),
+        ).json()
+        assert body["error"]["code"] == "agent_invalid_request"
+
+    # -- tools[] reference declared tool names --
+
+    def test_tool_with_name_returns_201(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        resp = client.post(
+            f"/v1/agents/{agent_id}/versions",
+            json=_ver_body(tools=[{"name": "my_tool"}]),
+        )
+        assert resp.status_code == 201
+
+    def test_tool_missing_name_returns_422(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        resp = client.post(
+            f"/v1/agents/{agent_id}/versions",
+            json=_ver_body(tools=[{"description": "no name"}]),
+        )
+        assert resp.status_code == 422
+
+    def test_tool_missing_name_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        body = client.post(
+            f"/v1/agents/{agent_id}/versions",
+            json=_ver_body(tools=[{"description": "no name"}]),
+        ).json()
+        assert body["error"]["code"] == "agent_invalid_request"
+
+    # -- audit log on schema failure --
+
+    def test_schema_failure_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        client.post(
+            f"/v1/agents/{agent_id}/versions",
+            json=_ver_body(instructions="x" * 32_769),
+        )
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "agent.version.create.failed" for r in records)
+
+    def test_schema_failure_audit_level_is_error(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        client.post(
+            f"/v1/agents/{agent_id}/versions",
+            json=_ver_body(instructions="x" * 32_769),
+        )
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "agent.version.create.failed"
+        )
+        assert record["level"] == "error"
+
+    def test_schema_failure_audit_code_is_agent_invalid_request(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        client.post(
+            f"/v1/agents/{agent_id}/versions",
+            json=_ver_body(instructions="x" * 32_769),
+        )
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "agent.version.create.failed"
+        )
+        assert record["code"] == "agent_invalid_request"
+
+    def test_schema_failure_audit_detail_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        agent_id = _create_agent(client)
+        client.post(
+            f"/v1/agents/{agent_id}/versions",
+            json=_ver_body(instructions="x" * 32_769),
+        )
+        record = next(
+            r for r in _audit_records(storage_root)
+            if r.get("event") == "agent.version.create.failed"
+        )
+        assert len(record["detail"]["message"]) > 0
