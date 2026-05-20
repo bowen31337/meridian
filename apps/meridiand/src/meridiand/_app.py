@@ -229,9 +229,6 @@ def create_app(
 
             if storage_root is not None:
                 app.include_router(
-                    make_sessions_router(audit_log=audit_log, storage_root=storage_root)
-                )
-                app.include_router(
                     make_files_router(audit_log=audit_log, storage_root=storage_root)
                 )
                 app.include_router(
@@ -353,6 +350,13 @@ def create_app(
                         )
                     )
                 if event_log is not None:
+                    app.include_router(
+                        make_sessions_router(
+                            audit_log=audit_log,
+                            storage_root=storage_root,
+                            event_log=event_log,
+                        )
+                    )
                     app.include_router(
                         make_phase_router(
                             audit_log=audit_log,

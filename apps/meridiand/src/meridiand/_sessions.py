@@ -4,6 +4,7 @@ import json
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from core_errors import (
     AuditLog,
@@ -17,10 +18,7 @@ from core_errors import (
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sdk_sandbox import ExecutionContext
-
-from ._hook_dispatch import dispatch_hooks
-from ._replay import FakeModelAdapter, FakeSandboxAdapter, _run_harness
+from storage_event_log import EventLogWriter
 
 
 def _now() -> str:
@@ -32,7 +30,7 @@ def _now() -> str:
 # ---------------------------------------------------------------------------
 
 
-class SessionRunError(MeridianError):
+class SessionCreateError(MeridianError):
     def __init__(
         self,
         *,
@@ -41,11 +39,11 @@ class SessionRunError(MeridianError):
         cause: BaseException | None = None,
     ) -> None:
         super().__init__(
-            code="session_run_failed", message=message, timestamp=timestamp, cause=cause
+            code="session_create_failed", message=message, timestamp=timestamp, cause=cause
         )
 
     def http_status(self) -> int:
-        return 422
+        return 500
 
 
 # ---------------------------------------------------------------------------
@@ -55,7 +53,6 @@ class SessionRunError(MeridianError):
 
 class SessionCreateRequest(BaseModel):
     agent_id: str | None = None
-    fixture_session_id: str
 
 
 # ---------------------------------------------------------------------------
@@ -63,93 +60,81 @@ class SessionCreateRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def make_sessions_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
+def make_sessions_router(
+    *, audit_log: AuditLog, storage_root: Path, event_log: EventLogWriter
+) -> APIRouter:
     router = APIRouter()
+    agents_dir = storage_root / "agents"
 
     @router.post("/v1/sessions", status_code=201)
     async def create_session(body: SessionCreateRequest) -> JSONResponse:
         now = _now()
         tracer = get_tracer()
         session_id = f"sess_{uuid.uuid4().hex}"
-        fixture_dir = storage_root / "fixtures" / body.fixture_session_id
+        thread_id = f"thread_{uuid.uuid4().hex}"
 
         with tracer.start_as_current_span(
-            "session.run",
-            attributes={
-                "session.id": session_id,
-                "session.fixture_session_id": body.fixture_session_id,
-            },
+            "session.create",
+            attributes={"session.id": session_id},
         ) as span:
             record_invocation_event(
                 span,
                 StructuredEvent(
-                    name="session.run.invocation",
-                    code="session_run",
+                    name="session.create.invocation",
+                    code="session_create",
                     timestamp=now,
                 ),
             )
 
-            hooks_dir = storage_root / "hooks"
-            ctx = ExecutionContext(session_id=session_id)
-            model_calls = 0
-            tool_calls = 0
+            agent_version_id: str | None = None
 
             try:
-                # Step 1: Create session manifest (POST /v1/sessions creates it)
+                if body.agent_id is not None:
+                    agent_file = agents_dir / f"{body.agent_id}.json"
+                    if agent_file.exists():
+                        agent_record: dict[str, Any] = json.loads(agent_file.read_text())
+                        version = agent_record.get("version") or {}
+                        agent_version_id = version.get("id")
+
                 session_dir = storage_root / "sessions" / session_id
                 session_dir.mkdir(parents=True, exist_ok=True)
-                manifest = {
+                manifest: dict[str, Any] = {
                     "session_id": session_id,
                     "agent_id": body.agent_id,
-                    "status": "active",
+                    "agent_version_id": agent_version_id,
+                    "thread_id": thread_id,
+                    "status": "idle",
                     "created_at": now,
                 }
                 (session_dir / "manifest.json").write_text(json.dumps(manifest))
 
-                await dispatch_hooks(
-                    "session_start",
-                    {"session_id": session_id, "agent_id": body.agent_id},
-                    ctx,
-                    hooks_dir=hooks_dir,
-                    audit_log=audit_log,
+                threads_dir = session_dir / "threads"
+                threads_dir.mkdir(parents=True, exist_ok=True)
+                thread_record: dict[str, Any] = {
+                    "thread_id": thread_id,
+                    "session_id": session_id,
+                    "created_at": now,
+                }
+                (threads_dir / f"{thread_id}.json").write_text(json.dumps(thread_record))
+
+                await event_log.append(
+                    session_id,
+                    "session.created",
+                    {
+                        "session_id": session_id,
+                        "agent_id": body.agent_id,
+                        "agent_version_id": agent_version_id,
+                        "thread_id": thread_id,
+                        "created_at": now,
+                    },
+                    thread_id=thread_id,
                 )
 
-                # Step 2: Wake — locate model fixture
-                model_fixture = fixture_dir / "model_responses.ndjson"
-                if not model_fixture.exists():
-                    err = SessionRunError(
-                        message=(
-                            f"Fixture not found for fixture_session_id "
-                            f"{body.fixture_session_id!r}: {model_fixture}"
-                        ),
-                        timestamp=_now(),
-                    )
-                    record_error(span, err)
-                    audit_log.write(
-                        AuditLogEntry(
-                            level="error",
-                            event="session.run.failed",
-                            code=err.code,
-                            timestamp=err.timestamp,
-                            detail={
-                                "session_id": session_id,
-                                "fixture_session_id": body.fixture_session_id,
-                                "message": err.message,
-                            },
-                        )
-                    )
-                    raise err
-
-                # Step 3: model call → tool dispatch → tool result → end_turn
-                model_adapter = FakeModelAdapter(model_fixture)
-                sandbox_adapter = FakeSandboxAdapter(fixture_dir / "tool_responses.ndjson")
-                model_calls, tool_calls = await _run_harness(model_adapter, sandbox_adapter)
-
-            except SessionRunError:
+            except SessionCreateError:
                 raise
             except Exception as exc:
-                err = SessionRunError(
-                    message=f"Session run failed for {session_id!r}: {exc}",
+                err = SessionCreateError(
+                    message=f"Failed to create session: {exc}",
                     timestamp=_now(),
                     cause=exc,
                 )
@@ -157,38 +142,26 @@ def make_sessions_router(*, audit_log: AuditLog, storage_root: Path) -> APIRoute
                 audit_log.write(
                     AuditLogEntry(
                         level="error",
-                        event="session.run.failed",
+                        event="session.create.failed",
                         code=err.code,
                         timestamp=err.timestamp,
                         detail={
                             "session_id": session_id,
-                            "fixture_session_id": body.fixture_session_id,
+                            "agent_id": body.agent_id,
                             "message": err.message,
                         },
                     )
                 )
                 raise err
-            finally:
-                await dispatch_hooks(
-                    "session_end",
-                    {
-                        "session_id": session_id,
-                        "model_call_count": model_calls,
-                        "tool_call_count": tool_calls,
-                    },
-                    ctx,
-                    hooks_dir=hooks_dir,
-                    audit_log=audit_log,
-                )
 
-        # Step 4: idle
         return JSONResponse(
             content={
                 "session_id": session_id,
+                "agent_id": body.agent_id,
+                "agent_version_id": agent_version_id,
+                "thread_id": thread_id,
                 "status": "idle",
-                "phase": "idle",
-                "model_call_count": model_calls,
-                "tool_call_count": tool_calls,
+                "created_at": now,
             },
             status_code=201,
         )

@@ -1,35 +1,38 @@
 """
-System integration test: full POST /v1/sessions flow.
+System integration test: POST /v1/sessions creates a Session.
 
 Tests cover:
-  - POST /v1/sessions → wake → model call → tool dispatch → tool result → end_turn → idle
-    flow with FakeModel and FakeSandbox.
-  - Returns 201 with session_id, status, phase, model_call_count, tool_call_count fields.
+  - POST /v1/sessions returns 201 with session_id, thread_id, agent_id,
+    agent_version_id, status, created_at fields.
   - session_id starts with "sess_".
-  - status is "idle" after the harness runs to end_turn.
-  - phase is "idle" after the harness runs to end_turn.
-  - model_call_count reflects the number of fake model calls made.
-  - tool_call_count reflects the number of fake tool dispatches made.
-  - Session manifest is created at sessions/{session_id}/manifest.json.
-  - Manifest contains session_id, agent_id, status, created_at fields.
-  - Single end_turn call: model_call_count=1, tool_call_count=0.
-  - Full tool dispatch → tool result → continue → end_turn: model_call_count=2,
-    tool_call_count=1.
-  - agent_id propagated into session manifest when supplied in request body.
-  - agent_id is None in manifest when not supplied.
-  - Missing model fixture returns 422 with code "session_run_failed".
-  - Missing fixture writes an audit log entry with event "session.run.failed".
+  - thread_id starts with "thread_".
+  - status is "idle" after creation.
+  - created_at is present and non-empty.
+  - agent_id is propagated from request body.
+  - agent_id is None when not supplied.
+  - agent_version_id is pinned to the current agent version when agent_id resolves.
+  - agent_version_id is None when agent_id is None.
+  - agent_version_id is None when agent_id is provided but agent file is absent.
+  - Session manifest created at sessions/{session_id}/manifest.json.
+  - Manifest contains session_id, agent_id, agent_version_id, thread_id, status, created_at.
+  - Initial thread file created at sessions/{session_id}/threads/{thread_id}.json.
+  - Thread file contains thread_id, session_id, created_at.
+  - session.created event is written to the event log.
+  - Event type is "session.created".
+  - Event data contains session_id, agent_id, agent_version_id, thread_id, created_at.
+  - Event thread_id matches the thread_id returned in the response.
+  - On failure, returns 500 with code "session_create_failed".
+  - On failure, error message is surfaced in response body.
+  - On failure, audit log entry is written with event "session.create.failed".
   - Audit entry level is "error" on failure.
-  - Audit detail includes session_id and fixture_session_id on failure.
-  - Audit detail includes message on failure.
-  - On failure, error message is surfaced in response body (error.message present).
-  - OTel span "session.run" is emitted on success.
+  - Audit detail includes session_id, agent_id, and message on failure.
+  - OTel span "session.create" is emitted on success.
   - OTel span has session.id attribute.
-  - OTel span has session.fixture_session_id attribute.
   - OTel span carries a structured invocation event on each call.
   - OTel span is set to ERROR status on failure.
-  - create_app wires the sessions router when storage_root is supplied.
+  - create_app wires the sessions router when storage_root and event_log are supplied.
   - create_app omits the sessions route when storage_root is None.
+  - create_app omits the sessions route when event_log is None.
 """
 
 from __future__ import annotations
@@ -37,11 +40,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
+from storage_event_log import EventLogWriter, LocalEventLogWriter
 
 from tests._otel_shared import otel_exporter as _otel_exporter
 
@@ -51,46 +56,22 @@ from tests._otel_shared import otel_exporter as _otel_exporter
 # ---------------------------------------------------------------------------
 
 
-def _make_client(storage_root: Path) -> TestClient:
-    app = create_app(FileAuditLog(storage_root), storage_root=storage_root)
+def _make_client(
+    storage_root: Path,
+    audit_log: FileAuditLog | None = None,
+    event_log: EventLogWriter | None = None,
+) -> TestClient:
+    audit = audit_log or FileAuditLog(storage_root)
+    writer = event_log or LocalEventLogWriter(storage_root)
+    app = create_app(audit, storage_root=storage_root, event_log=writer)
     return TestClient(app, raise_server_exceptions=False)
-
-
-def _write_model_fixture(fixture_dir: Path, calls: list[list[dict[str, Any]]]) -> None:
-    fixture_dir.mkdir(parents=True, exist_ok=True)
-    lines = [json.dumps(events) for events in calls]
-    (fixture_dir / "model_responses.ndjson").write_text("\n".join(lines) + "\n")
-
-
-def _write_tool_fixture(fixture_dir: Path, results: list[dict[str, Any]]) -> None:
-    fixture_dir.mkdir(parents=True, exist_ok=True)
-    lines = [json.dumps(r) for r in results]
-    (fixture_dir / "tool_responses.ndjson").write_text("\n".join(lines) + "\n")
-
-
-def _end_turn_call() -> list[dict[str, Any]]:
-    return [
-        {"type": "message_start", "model": "fake", "provider": "fake"},
-        {"type": "text_delta", "text": "Done."},
-        {"type": "message_stop", "stop_reason": "end_turn"},
-    ]
-
-
-def _tool_use_call(tool_id: str = "tu_1", tool_name: str = "bash") -> list[dict[str, Any]]:
-    return [
-        {"type": "message_start", "model": "fake", "provider": "fake"},
-        {"type": "tool_use_start", "id": tool_id, "name": tool_name},
-        {"type": "tool_input_delta", "id": tool_id, "partial_json": '{"cmd":"ls"}'},
-        {"type": "message_stop", "stop_reason": "tool_use"},
-    ]
 
 
 def _post_session(
     client: TestClient,
-    fixture_session_id: str,
     agent_id: str | None = None,
 ) -> dict[str, Any]:
-    body: dict[str, Any] = {"fixture_session_id": fixture_session_id}
+    body: dict[str, Any] = {}
     if agent_id is not None:
         body["agent_id"] = agent_id
     resp = client.post("/v1/sessions", json=body)
@@ -104,84 +85,92 @@ def _audit_records(storage_root: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
+def _read_events(storage_root: Path, session_id: str) -> list[dict[str, Any]]:
+    files = list((storage_root / "events").glob(f"**/{session_id}.ndjson"))
+    if not files:
+        return []
+    return [
+        json.loads(line)
+        for line in files[0].read_text().splitlines()
+        if line.strip()
+    ]
+
+
+def _seed_agent(storage_root: Path, agent_id: str, version_id: str) -> None:
+    agents_dir = storage_root / "agents"
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    agent_record = {
+        "id": agent_id,
+        "name": "Test Agent",
+        "kind": "test",
+        "created_at": "2026-01-01T00:00:00+00:00",
+        "version": {"id": version_id},
+    }
+    (agents_dir / f"{agent_id}.json").write_text(json.dumps(agent_record))
+
+
 # ---------------------------------------------------------------------------
-# Basic response shape — single end_turn call
+# Basic response shape
 # ---------------------------------------------------------------------------
 
 
 class TestSessionCreateSuccess:
-    def _setup(self, storage_root: Path, fixture_id: str = "fix-basic") -> None:
-        _write_model_fixture(
-            storage_root / "fixtures" / fixture_id,
-            [_end_turn_call()],
-        )
-
     def test_returns_201(self, storage_root: Path) -> None:
-        self._setup(storage_root)
-        result = _post_session(_make_client(storage_root), "fix-basic")
+        result = _post_session(_make_client(storage_root))
         assert result["_status"] == 201
 
     def test_session_id_in_response(self, storage_root: Path) -> None:
-        self._setup(storage_root)
-        result = _post_session(_make_client(storage_root), "fix-basic")
+        result = _post_session(_make_client(storage_root))
         assert "session_id" in result
 
     def test_session_id_starts_with_sess(self, storage_root: Path) -> None:
-        self._setup(storage_root)
-        result = _post_session(_make_client(storage_root), "fix-basic")
+        result = _post_session(_make_client(storage_root))
         assert result["session_id"].startswith("sess_")
 
+    def test_thread_id_in_response(self, storage_root: Path) -> None:
+        result = _post_session(_make_client(storage_root))
+        assert "thread_id" in result
+
+    def test_thread_id_starts_with_thread(self, storage_root: Path) -> None:
+        result = _post_session(_make_client(storage_root))
+        assert result["thread_id"].startswith("thread_")
+
     def test_status_is_idle(self, storage_root: Path) -> None:
-        self._setup(storage_root)
-        result = _post_session(_make_client(storage_root), "fix-basic")
+        result = _post_session(_make_client(storage_root))
         assert result["status"] == "idle"
 
-    def test_phase_is_idle(self, storage_root: Path) -> None:
-        self._setup(storage_root)
-        result = _post_session(_make_client(storage_root), "fix-basic")
-        assert result["phase"] == "idle"
+    def test_created_at_present(self, storage_root: Path) -> None:
+        result = _post_session(_make_client(storage_root))
+        assert "created_at" in result
+        assert len(result["created_at"]) > 0
 
-    def test_model_call_count_is_one(self, storage_root: Path) -> None:
-        self._setup(storage_root)
-        result = _post_session(_make_client(storage_root), "fix-basic")
-        assert result["model_call_count"] == 1
+    def test_agent_id_none_when_not_provided(self, storage_root: Path) -> None:
+        result = _post_session(_make_client(storage_root))
+        assert result["agent_id"] is None
 
-    def test_tool_call_count_is_zero(self, storage_root: Path) -> None:
-        self._setup(storage_root)
-        result = _post_session(_make_client(storage_root), "fix-basic")
-        assert result["tool_call_count"] == 0
+    def test_agent_version_id_none_when_no_agent_id(self, storage_root: Path) -> None:
+        result = _post_session(_make_client(storage_root))
+        assert result["agent_version_id"] is None
 
 
 # ---------------------------------------------------------------------------
-# Full flow: tool dispatch → tool result → end_turn
+# Agent propagation and version pinning
 # ---------------------------------------------------------------------------
 
 
-class TestSessionFullFlow:
-    def _setup(self, storage_root: Path, fixture_id: str = "fix-full") -> None:
-        fixture_dir = storage_root / "fixtures" / fixture_id
-        _write_model_fixture(fixture_dir, [_tool_use_call(), _end_turn_call()])
-        _write_tool_fixture(fixture_dir, [{"content": "file1.txt\nfile2.txt"}])
+class TestAgentVersionPinning:
+    def test_agent_id_propagated_in_response(self, storage_root: Path) -> None:
+        result = _post_session(_make_client(storage_root), agent_id="agent-42")
+        assert result["agent_id"] == "agent-42"
 
-    def test_returns_201_on_full_flow(self, storage_root: Path) -> None:
-        self._setup(storage_root)
-        result = _post_session(_make_client(storage_root), "fix-full")
-        assert result["_status"] == 201
+    def test_agent_version_id_pinned_when_agent_exists(self, storage_root: Path) -> None:
+        _seed_agent(storage_root, "agent-pin", "agentver_abc123")
+        result = _post_session(_make_client(storage_root), agent_id="agent-pin")
+        assert result["agent_version_id"] == "agentver_abc123"
 
-    def test_model_call_count_is_two(self, storage_root: Path) -> None:
-        self._setup(storage_root)
-        result = _post_session(_make_client(storage_root), "fix-full")
-        assert result["model_call_count"] == 2
-
-    def test_tool_call_count_is_one(self, storage_root: Path) -> None:
-        self._setup(storage_root)
-        result = _post_session(_make_client(storage_root), "fix-full")
-        assert result["tool_call_count"] == 1
-
-    def test_phase_is_idle_after_full_flow(self, storage_root: Path) -> None:
-        self._setup(storage_root)
-        result = _post_session(_make_client(storage_root), "fix-full")
-        assert result["phase"] == "idle"
+    def test_agent_version_id_none_when_agent_file_absent(self, storage_root: Path) -> None:
+        result = _post_session(_make_client(storage_root), agent_id="agent-missing")
+        assert result["agent_version_id"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -190,40 +179,37 @@ class TestSessionFullFlow:
 
 
 class TestSessionManifest:
-    def _setup(self, storage_root: Path, fixture_id: str) -> None:
-        _write_model_fixture(
-            storage_root / "fixtures" / fixture_id,
-            [_end_turn_call()],
-        )
-
     def test_manifest_file_created(self, storage_root: Path) -> None:
-        self._setup(storage_root, "fix-manifest")
-        result = _post_session(_make_client(storage_root), "fix-manifest")
+        result = _post_session(_make_client(storage_root))
         session_id = result["session_id"]
-        manifest_path = storage_root / "sessions" / session_id / "manifest.json"
-        assert manifest_path.exists()
+        assert (storage_root / "sessions" / session_id / "manifest.json").exists()
 
     def test_manifest_has_session_id(self, storage_root: Path) -> None:
-        self._setup(storage_root, "fix-manifest-sid")
-        result = _post_session(_make_client(storage_root), "fix-manifest-sid")
+        result = _post_session(_make_client(storage_root))
         session_id = result["session_id"]
         manifest = json.loads(
             (storage_root / "sessions" / session_id / "manifest.json").read_text()
         )
         assert manifest["session_id"] == session_id
 
-    def test_manifest_has_status_active(self, storage_root: Path) -> None:
-        self._setup(storage_root, "fix-manifest-status")
-        result = _post_session(_make_client(storage_root), "fix-manifest-status")
+    def test_manifest_has_thread_id(self, storage_root: Path) -> None:
+        result = _post_session(_make_client(storage_root))
         session_id = result["session_id"]
         manifest = json.loads(
             (storage_root / "sessions" / session_id / "manifest.json").read_text()
         )
-        assert manifest["status"] == "active"
+        assert manifest["thread_id"] == result["thread_id"]
+
+    def test_manifest_has_status_idle(self, storage_root: Path) -> None:
+        result = _post_session(_make_client(storage_root))
+        session_id = result["session_id"]
+        manifest = json.loads(
+            (storage_root / "sessions" / session_id / "manifest.json").read_text()
+        )
+        assert manifest["status"] == "idle"
 
     def test_manifest_has_created_at(self, storage_root: Path) -> None:
-        self._setup(storage_root, "fix-manifest-ts")
-        result = _post_session(_make_client(storage_root), "fix-manifest-ts")
+        result = _post_session(_make_client(storage_root))
         session_id = result["session_id"]
         manifest = json.loads(
             (storage_root / "sessions" / session_id / "manifest.json").read_text()
@@ -232,75 +218,188 @@ class TestSessionManifest:
         assert len(manifest["created_at"]) > 0
 
     def test_manifest_agent_id_set_when_provided(self, storage_root: Path) -> None:
-        self._setup(storage_root, "fix-manifest-agent")
-        result = _post_session(
-            _make_client(storage_root), "fix-manifest-agent", agent_id="agent-42"
-        )
+        result = _post_session(_make_client(storage_root), agent_id="agent-manifest")
         session_id = result["session_id"]
         manifest = json.loads(
             (storage_root / "sessions" / session_id / "manifest.json").read_text()
         )
-        assert manifest["agent_id"] == "agent-42"
+        assert manifest["agent_id"] == "agent-manifest"
 
     def test_manifest_agent_id_none_when_not_provided(self, storage_root: Path) -> None:
-        self._setup(storage_root, "fix-manifest-noagent")
-        result = _post_session(_make_client(storage_root), "fix-manifest-noagent")
+        result = _post_session(_make_client(storage_root))
         session_id = result["session_id"]
         manifest = json.loads(
             (storage_root / "sessions" / session_id / "manifest.json").read_text()
         )
         assert manifest["agent_id"] is None
 
+    def test_manifest_agent_version_id_pinned(self, storage_root: Path) -> None:
+        _seed_agent(storage_root, "agent-mver", "agentver_mver")
+        result = _post_session(_make_client(storage_root), agent_id="agent-mver")
+        session_id = result["session_id"]
+        manifest = json.loads(
+            (storage_root / "sessions" / session_id / "manifest.json").read_text()
+        )
+        assert manifest["agent_version_id"] == "agentver_mver"
+
 
 # ---------------------------------------------------------------------------
-# Failure: missing fixture
+# Initial thread creation
 # ---------------------------------------------------------------------------
 
 
-class TestSessionMissingFixture:
-    def test_missing_fixture_returns_422(self, storage_root: Path) -> None:
-        result = _post_session(_make_client(storage_root), "no-such-fixture")
-        assert result["_status"] == 422
+class TestInitialThread:
+    def test_thread_file_created(self, storage_root: Path) -> None:
+        result = _post_session(_make_client(storage_root))
+        session_id = result["session_id"]
+        thread_id = result["thread_id"]
+        assert (
+            storage_root / "sessions" / session_id / "threads" / f"{thread_id}.json"
+        ).exists()
 
-    def test_missing_fixture_error_code(self, storage_root: Path) -> None:
-        result = _post_session(_make_client(storage_root), "no-such-fixture-2")
-        assert result["error"]["code"] == "session_run_failed"
+    def test_thread_file_has_thread_id(self, storage_root: Path) -> None:
+        result = _post_session(_make_client(storage_root))
+        session_id = result["session_id"]
+        thread_id = result["thread_id"]
+        thread = json.loads(
+            (storage_root / "sessions" / session_id / "threads" / f"{thread_id}.json").read_text()
+        )
+        assert thread["thread_id"] == thread_id
 
-    def test_missing_fixture_error_message_present(self, storage_root: Path) -> None:
-        result = _post_session(_make_client(storage_root), "no-such-fixture-3")
+    def test_thread_file_has_session_id(self, storage_root: Path) -> None:
+        result = _post_session(_make_client(storage_root))
+        session_id = result["session_id"]
+        thread_id = result["thread_id"]
+        thread = json.loads(
+            (storage_root / "sessions" / session_id / "threads" / f"{thread_id}.json").read_text()
+        )
+        assert thread["session_id"] == session_id
+
+    def test_thread_file_has_created_at(self, storage_root: Path) -> None:
+        result = _post_session(_make_client(storage_root))
+        session_id = result["session_id"]
+        thread_id = result["thread_id"]
+        thread = json.loads(
+            (storage_root / "sessions" / session_id / "threads" / f"{thread_id}.json").read_text()
+        )
+        assert "created_at" in thread
+        assert len(thread["created_at"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# session.created event
+# ---------------------------------------------------------------------------
+
+
+class TestSessionCreatedEvent:
+    def test_session_created_event_written(self, storage_root: Path) -> None:
+        result = _post_session(_make_client(storage_root))
+        events = _read_events(storage_root, result["session_id"])
+        assert any(e["type"] == "session.created" for e in events)
+
+    def test_event_seq_is_zero(self, storage_root: Path) -> None:
+        result = _post_session(_make_client(storage_root))
+        events = _read_events(storage_root, result["session_id"])
+        ev = next(e for e in events if e["type"] == "session.created")
+        assert ev["seq"] == 0
+
+    def test_event_data_has_session_id(self, storage_root: Path) -> None:
+        result = _post_session(_make_client(storage_root))
+        events = _read_events(storage_root, result["session_id"])
+        ev = next(e for e in events if e["type"] == "session.created")
+        assert ev["data"]["session_id"] == result["session_id"]
+
+    def test_event_data_has_agent_id(self, storage_root: Path) -> None:
+        result = _post_session(_make_client(storage_root), agent_id="agent-ev")
+        events = _read_events(storage_root, result["session_id"])
+        ev = next(e for e in events if e["type"] == "session.created")
+        assert ev["data"]["agent_id"] == "agent-ev"
+
+    def test_event_data_agent_id_none_when_not_provided(self, storage_root: Path) -> None:
+        result = _post_session(_make_client(storage_root))
+        events = _read_events(storage_root, result["session_id"])
+        ev = next(e for e in events if e["type"] == "session.created")
+        assert ev["data"]["agent_id"] is None
+
+    def test_event_data_has_thread_id(self, storage_root: Path) -> None:
+        result = _post_session(_make_client(storage_root))
+        events = _read_events(storage_root, result["session_id"])
+        ev = next(e for e in events if e["type"] == "session.created")
+        assert ev["data"]["thread_id"] == result["thread_id"]
+
+    def test_event_data_has_created_at(self, storage_root: Path) -> None:
+        result = _post_session(_make_client(storage_root))
+        events = _read_events(storage_root, result["session_id"])
+        ev = next(e for e in events if e["type"] == "session.created")
+        assert "created_at" in ev["data"]
+
+    def test_event_thread_id_matches_response(self, storage_root: Path) -> None:
+        result = _post_session(_make_client(storage_root))
+        events = _read_events(storage_root, result["session_id"])
+        ev = next(e for e in events if e["type"] == "session.created")
+        assert ev["thread_id"] == result["thread_id"]
+
+    def test_event_data_has_agent_version_id(self, storage_root: Path) -> None:
+        _seed_agent(storage_root, "agent-evver", "agentver_evver")
+        result = _post_session(_make_client(storage_root), agent_id="agent-evver")
+        events = _read_events(storage_root, result["session_id"])
+        ev = next(e for e in events if e["type"] == "session.created")
+        assert ev["data"]["agent_version_id"] == "agentver_evver"
+
+
+# ---------------------------------------------------------------------------
+# Failure handling
+# ---------------------------------------------------------------------------
+
+
+class _FailingEventLogWriter(EventLogWriter):
+    async def append(self, *args: Any, **kwargs: Any) -> int:
+        raise RuntimeError("simulated write failure")
+
+
+class TestSessionCreateFailure:
+    def test_failure_returns_500(self, storage_root: Path) -> None:
+        failing = _FailingEventLogWriter()
+        result = _post_session(_make_client(storage_root, event_log=failing))
+        assert result["_status"] == 500
+
+    def test_failure_error_code(self, storage_root: Path) -> None:
+        failing = _FailingEventLogWriter()
+        result = _post_session(_make_client(storage_root, event_log=failing))
+        assert result["error"]["code"] == "session_create_failed"
+
+    def test_failure_error_message_present(self, storage_root: Path) -> None:
+        failing = _FailingEventLogWriter()
+        result = _post_session(_make_client(storage_root, event_log=failing))
         assert "message" in result["error"]
         assert len(result["error"]["message"]) > 0
 
-    def test_missing_fixture_writes_audit(self, storage_root: Path) -> None:
-        _post_session(_make_client(storage_root), "no-such-fixture-4")
+    def test_failure_writes_audit(self, storage_root: Path) -> None:
+        failing = _FailingEventLogWriter()
+        _post_session(_make_client(storage_root, event_log=failing))
         records = _audit_records(storage_root)
-        assert any(r.get("event") == "session.run.failed" for r in records)
+        assert any(r.get("event") == "session.create.failed" for r in records)
 
-    def test_missing_fixture_audit_level_is_error(self, storage_root: Path) -> None:
-        _post_session(_make_client(storage_root), "no-such-fixture-5")
+    def test_failure_audit_level_is_error(self, storage_root: Path) -> None:
+        failing = _FailingEventLogWriter()
+        _post_session(_make_client(storage_root, event_log=failing))
         records = _audit_records(storage_root)
-        record = next(r for r in records if r.get("event") == "session.run.failed")
+        record = next(r for r in records if r.get("event") == "session.create.failed")
         assert record["level"] == "error"
 
-    def test_missing_fixture_audit_detail_has_session_id(self, storage_root: Path) -> None:
-        _post_session(_make_client(storage_root), "no-such-fixture-6")
+    def test_failure_audit_detail_has_session_id(self, storage_root: Path) -> None:
+        failing = _FailingEventLogWriter()
+        _post_session(_make_client(storage_root, event_log=failing))
         records = _audit_records(storage_root)
-        record = next(r for r in records if r.get("event") == "session.run.failed")
+        record = next(r for r in records if r.get("event") == "session.create.failed")
         assert "session_id" in record["detail"]
         assert record["detail"]["session_id"].startswith("sess_")
 
-    def test_missing_fixture_audit_detail_has_fixture_session_id(
-        self, storage_root: Path
-    ) -> None:
-        _post_session(_make_client(storage_root), "no-such-fixture-7")
+    def test_failure_audit_detail_has_message(self, storage_root: Path) -> None:
+        failing = _FailingEventLogWriter()
+        _post_session(_make_client(storage_root, event_log=failing))
         records = _audit_records(storage_root)
-        record = next(r for r in records if r.get("event") == "session.run.failed")
-        assert record["detail"]["fixture_session_id"] == "no-such-fixture-7"
-
-    def test_missing_fixture_audit_detail_has_message(self, storage_root: Path) -> None:
-        _post_session(_make_client(storage_root), "no-such-fixture-8")
-        records = _audit_records(storage_root)
-        record = next(r for r in records if r.get("event") == "session.run.failed")
+        record = next(r for r in records if r.get("event") == "session.create.failed")
         assert "message" in record["detail"]
         assert len(record["detail"]["message"]) > 0
 
@@ -311,19 +410,22 @@ class TestSessionMissingFixture:
 
 
 class TestSessionRouterWiring:
-    def test_sessions_route_exists_with_storage_root(self, storage_root: Path) -> None:
-        _write_model_fixture(
-            storage_root / "fixtures" / "wire-fix",
-            [_end_turn_call()],
-        )
-        result = _post_session(_make_client(storage_root), "wire-fix")
+    def test_sessions_route_exists_with_storage_root_and_event_log(
+        self, storage_root: Path
+    ) -> None:
+        result = _post_session(_make_client(storage_root))
         assert result["_status"] == 201
 
     def test_no_storage_root_no_route(self, storage_root: Path) -> None:
-        audit = FileAuditLog(storage_root)
-        app = create_app(audit)
+        app = create_app(FileAuditLog(storage_root))
         client = TestClient(app, raise_server_exceptions=False)
-        resp = client.post("/v1/sessions", json={"fixture_session_id": "any"})
+        resp = client.post("/v1/sessions", json={})
+        assert resp.status_code == 404
+
+    def test_no_event_log_no_route(self, storage_root: Path) -> None:
+        app = create_app(FileAuditLog(storage_root), storage_root=storage_root)
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post("/v1/sessions", json={})
         assert resp.status_code == 404
 
 
@@ -336,39 +438,22 @@ class TestSessionOtel:
     def setup_method(self) -> None:
         _otel_exporter.clear()
 
-    def _setup(self, storage_root: Path, fixture_id: str) -> None:
-        _write_model_fixture(
-            storage_root / "fixtures" / fixture_id,
-            [_end_turn_call()],
-        )
-
-    def test_success_emits_session_run_span(self, storage_root: Path) -> None:
-        self._setup(storage_root, "otel-fix-1")
-        _post_session(_make_client(storage_root), "otel-fix-1")
+    def test_success_emits_session_create_span(self, storage_root: Path) -> None:
+        _post_session(_make_client(storage_root))
         span_names = [s.name for s in _otel_exporter.get_finished_spans()]
-        assert "session.run" in span_names
+        assert "session.create" in span_names
 
     def test_span_has_session_id_attribute(self, storage_root: Path) -> None:
-        self._setup(storage_root, "otel-fix-2")
-        result = _post_session(_make_client(storage_root), "otel-fix-2")
+        result = _post_session(_make_client(storage_root))
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
-        span = spans.get("session.run")
+        span = spans.get("session.create")
         assert span is not None
         assert span.attributes["session.id"] == result["session_id"]
 
-    def test_span_has_fixture_session_id_attribute(self, storage_root: Path) -> None:
-        self._setup(storage_root, "otel-fix-3")
-        _post_session(_make_client(storage_root), "otel-fix-3")
-        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
-        span = spans.get("session.run")
-        assert span is not None
-        assert span.attributes["session.fixture_session_id"] == "otel-fix-3"
-
     def test_span_has_invocation_event(self, storage_root: Path) -> None:
-        self._setup(storage_root, "otel-fix-4")
-        _post_session(_make_client(storage_root), "otel-fix-4")
+        _post_session(_make_client(storage_root))
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
-        span = spans.get("session.run")
+        span = spans.get("session.create")
         assert span is not None
         event_names = [e.name for e in span.events]
         assert "meridian.error.invocation" in event_names
@@ -376,8 +461,9 @@ class TestSessionOtel:
     def test_failure_span_has_error_status(self, storage_root: Path) -> None:
         from opentelemetry.trace import StatusCode
 
-        _post_session(_make_client(storage_root), "otel-missing-fix")
+        failing = _FailingEventLogWriter()
+        _post_session(_make_client(storage_root, event_log=failing))
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
-        span = spans.get("session.run")
+        span = spans.get("session.create")
         assert span is not None
         assert span.status.status_code == StatusCode.ERROR
