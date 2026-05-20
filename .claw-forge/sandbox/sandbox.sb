@@ -1,7 +1,7 @@
 (version 1)
 (allow default)
 (deny file-write* (subpath "/Users/bowenli/development/meridian"))
-(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/agents-resource-system-agent-body-schema-validated-via"))
+(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/yaml-configurat-system-reload-failure-invalid-new-confi"))
 (allow file-write* (subpath "/Users/bowenli/development/meridian/.git"))
 (deny file-write* (subpath "/Users/bowenli/.ssh"))
 (deny file-write* (subpath "/Users/bowenli/.aws"))

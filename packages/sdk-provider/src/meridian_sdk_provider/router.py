@@ -210,6 +210,15 @@ class ModelRouter:
         """Attach or replace the event log after construction."""
         self._event_log = event_log
 
+    def set_policy(self, policy: ModelRoutingPolicy) -> None:
+        """Replace the routing policy (used on config reload)."""
+        self._policy = policy
+
+    @property
+    def registry(self) -> ProviderRegistry | None:
+        """The backing ProviderRegistry, if one was supplied at construction."""
+        return self._registry
+
     def register_provider(self, provider: ModelProvider) -> None:
         """Add or replace a provider by its ``name``.
 

@@ -28,6 +28,8 @@ from ._skill_forge_soak import make_skill_forge_soak_router
 from ._vault_leak_soak import make_vault_leak_soak_router
 from ._compaction import make_compaction_router, run_compaction_loop
 from ._config import AuthConfig, CompactionConfig, CronSchedulerConfig, CorsConfig, SkillForgeConfig, WebhookSenderConfig
+from ._secret_ref import SecretRefResolver
+from ._system_config import make_system_config_router
 from ._cron import make_cron_router
 from ._cron_scheduler import run_cron_scheduler_loop
 from ._environments import make_environments_router
@@ -87,6 +89,7 @@ def create_app(
     acp_inbound_handler: AcpInboundHandler | None = None,
     cors: CorsConfig | None = None,
     model_router: ModelRouter | None = None,
+    secret_resolver: SecretRefResolver | None = None,
     compaction: CompactionConfig | None = None,
     cron_scheduler: CronSchedulerConfig | None = None,
     webhook_sender: WebhookSenderConfig | None = None,
@@ -393,6 +396,13 @@ def create_app(
                     make_models_router(
                         model_router=model_router,
                         audit_log=audit_log,
+                    )
+                )
+                app.include_router(
+                    make_system_config_router(
+                        audit_log=audit_log,
+                        model_router=model_router,
+                        secret_resolver=secret_resolver,
                     )
                 )
 

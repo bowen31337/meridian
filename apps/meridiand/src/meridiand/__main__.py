@@ -111,6 +111,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Build the provider registry and model router when providers are configured.
     model_router = None
+    secret_resolver: SecretRefResolver | None = None
     if config.providers:
         os_keychain = OsKeychainVaultBackend()
         secret_resolver = SecretRefResolver(
@@ -147,6 +148,7 @@ def main(argv: list[str] | None = None) -> int:
         cors=config.cors,
         auth_config=config.auth,
         model_router=model_router,
+        secret_resolver=secret_resolver,
     )
 
     bind = config.bind

@@ -66,6 +66,7 @@ class ConfigValidateError(MeridianError):
         *,
         message: str,
         timestamp: str,
+        errors: list[str] | None = None,
         cause: BaseException | None = None,
     ) -> None:
         super().__init__(
@@ -74,6 +75,7 @@ class ConfigValidateError(MeridianError):
             timestamp=timestamp,
             cause=cause,
         )
+        self.errors: list[str] = errors or []
 
 
 class ConfigResolveError(MeridianError):
@@ -275,6 +277,61 @@ class MeridianConfig(BaseModel):
 # ---------------------------------------------------------------------------
 # Config loader
 # ---------------------------------------------------------------------------
+
+
+def parse_config(yaml_content: str, audit_log: AuditLog | None = None) -> MeridianConfig:
+    """Parse a YAML string into MeridianConfig (used for API-submitted config payloads).
+
+    Mirrors load_config() but accepts a string instead of a file path.
+    Raises ConfigLoadError on YAML parse failures or Pydantic validation errors.
+    """
+    _audit = audit_log if audit_log is not None else NoopAuditLog()
+    tracer = get_tracer()
+
+    with tracer.start_as_current_span("config.parse") as span:
+        record_invocation_event(
+            span,
+            StructuredEvent(
+                name="config.parse.invocation",
+                code="config_parse",
+                timestamp=_now(),
+            ),
+        )
+        try:
+            raw = yaml.safe_load(yaml_content)
+            if not isinstance(raw, dict):
+                raise ValueError("Config content is not a YAML mapping")
+
+            config = MeridianConfig.model_validate(raw)
+
+            if config.version != MERIDIAN_CONFIG_VERSION:
+                raise ValueError(
+                    f"Config version {config.version!r} does not match "
+                    f"binary version {MERIDIAN_CONFIG_VERSION!r}"
+                )
+
+            span.set_attribute("config.version", config.version)
+            return config
+
+        except ConfigLoadError:
+            raise
+        except Exception as exc:
+            err = ConfigLoadError(
+                message=f"Failed to parse config: {exc}",
+                timestamp=_now(),
+                cause=exc,
+            )
+            record_error(span, err)
+            _audit.write(
+                AuditLogEntry(
+                    level="error",
+                    event="config.parse.failed",
+                    code=err.code,
+                    timestamp=err.timestamp,
+                    detail={"message": str(exc)},
+                )
+            )
+            raise err
 
 
 def load_config(path: Path, audit_log: AuditLog | None = None) -> MeridianConfig:
@@ -528,6 +585,7 @@ def validate_config(config: MeridianConfig, audit_log: AuditLog | None = None) -
         if errors:
             err = ConfigValidateError(
                 message=f"Config validation failed: {'; '.join(errors)}",
+                errors=errors,
                 timestamp=_now(),
             )
             record_error(span, err)
