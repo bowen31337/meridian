@@ -10,6 +10,7 @@ from typing import TypeVar
 from ._audit import AuditLog, NoopAuditLog
 from ._contract import (
     AgentRepository,
+    AuditLogEntryRepository,
     ChannelRepository,
     EnvironmentRepository,
     MemoryRepository,
@@ -27,6 +28,8 @@ from ._types import (
     Agent,
     AgentFilter,
     AuditLogEntry,
+    AuditLogEntryFilter,
+    AuditLogEntryRecord,
     Channel,
     ChannelFilter,
     Environment,
@@ -132,6 +135,10 @@ class RepositoryDriver(ABC):
     @property
     @abstractmethod
     def webhooks(self) -> WebhookRepository: ...
+
+    @property
+    @abstractmethod
+    def audit_log_entries(self) -> AuditLogEntryRepository: ...
 
     @abstractmethod
     async def migrate(self) -> None:
@@ -524,6 +531,22 @@ class _TracedWebhookRepo:
         return await _trace_op("webhook", "*", "list", self._opts, lambda: self._repo.list(filter))
 
 
+class _TracedAuditLogEntryRepo:
+    def __init__(self, repo: AuditLogEntryRepository, opts: RepositoryOptions) -> None:
+        self._repo = repo
+        self._opts = opts
+
+    async def append(self, entry: AuditLogEntryRecord) -> None:
+        await _trace_op(
+            "audit_log_entry", entry.id, "append", self._opts, lambda: self._repo.append(entry)
+        )
+
+    async def list(self, filter: AuditLogEntryFilter) -> list[AuditLogEntryRecord]:
+        return await _trace_op(
+            "audit_log_entry", "*", "list", self._opts, lambda: self._repo.list(filter)
+        )
+
+
 # ---------------------------------------------------------------------------
 # RepositoryRuntime — public entry point
 # ---------------------------------------------------------------------------
@@ -590,6 +613,10 @@ class RepositoryRuntime:
     @cached_property
     def webhooks(self) -> _TracedWebhookRepo:
         return _TracedWebhookRepo(self._driver.webhooks, self._opts)
+
+    @cached_property
+    def audit_log_entries(self) -> _TracedAuditLogEntryRepo:
+        return _TracedAuditLogEntryRepo(self._driver.audit_log_entries, self._opts)
 
     async def migrate(self) -> None:
         """Apply all pending DDL migrations via the underlying driver."""

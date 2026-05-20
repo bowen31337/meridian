@@ -54,6 +54,33 @@ class AuditLogEntry:
 
 
 @dataclass(frozen=True)
+class AuditLogEntryRecord:
+    """Stored audit log entry retrieved from the audit_log_entries table."""
+
+    id: str
+    level: Literal["info", "warn", "error"]
+    event: str
+    entity_type: str
+    entity_id: str
+    operation: str
+    timestamp: str
+    detail: dict[str, Any] | None = None
+    signature: str | None = None
+
+
+@dataclass(frozen=True)
+class AuditLogEntryFilter:
+    level: str | None = None
+    event: str | None = None
+    entity_type: str | None = None
+    entity_id: str | None = None
+    since: str | None = None  # ISO 8601 lower bound (inclusive)
+    until: str | None = None  # ISO 8601 upper bound (inclusive)
+    limit: int = 100
+    offset: int = 0
+
+
+@dataclass(frozen=True)
 class StructuredEvent:
     """Structured event attached to every OTel span, one per operation invocation."""
 

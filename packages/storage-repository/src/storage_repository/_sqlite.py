@@ -16,6 +16,7 @@ SQLite >= 3.24 (Python 3.11 ships with SQLite >= 3.39).  Placeholders are `?`.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,6 +28,7 @@ import sqlite_vec
 from ._audit import AuditLog, NoopAuditLog
 from ._contract import (
     AgentRepository,
+    AuditLogEntryRepository,
     ChannelRepository,
     EnvironmentRepository,
     MemoryRepository,
@@ -43,25 +45,27 @@ from ._migrations import SCHEMA_VERSION, load_migration_files
 from ._runtime import RepositoryDriver
 from ._telemetry import get_tracer, record_invocation_event, record_repo_failure
 from ._types import (
-    AuditLogEntry,
-    MemoryVecSearchFilter,
-    MemoryVecSearchResult,
-    RepositoryFailure,
-    StructuredEvent,
     Agent,
     AgentFilter,
+    AuditLogEntry,
+    AuditLogEntryFilter,
+    AuditLogEntryRecord,
     Channel,
     ChannelFilter,
     Environment,
     EnvironmentFilter,
     MemoryEntry,
     MemoryFilter,
+    MemoryVecSearchFilter,
+    MemoryVecSearchResult,
     Message,
     MessageFilter,
+    RepositoryFailure,
     Session,
     SessionFilter,
     Skill,
     SkillFilter,
+    StructuredEvent,
     Thread,
     ThreadFilter,
     ToolCall,
@@ -217,6 +221,21 @@ def _webhook(row: Row) -> Webhook:
         status=row[4],
         created_at=row[5],
         updated_at=row[6],
+    )
+
+
+def _audit_log_entry_record(row: Row) -> AuditLogEntryRecord:
+    detail_raw = row[7]
+    return AuditLogEntryRecord(
+        id=row[0],
+        level=row[1],
+        event=row[2],
+        entity_type=row[3],
+        entity_id=row[4],
+        operation=row[5],
+        timestamp=row[6],
+        detail=json.loads(detail_raw) if detail_raw is not None else None,
+        signature=row[8],
     )
 
 
@@ -1065,6 +1084,62 @@ class _SqliteWebhookRepo(WebhookRepository):
             return [_webhook(row) for row in await cur.fetchall()]
 
 
+class _SqliteAuditLogEntryRepo(AuditLogEntryRepository):
+    def __init__(self, conn: aiosqlite.Connection) -> None:
+        self._conn = conn
+
+    async def append(self, entry: AuditLogEntryRecord) -> None:
+        await self._conn.execute(
+            """
+            INSERT INTO audit_log_entries
+                (id, level, event, entity_type, entity_id, operation, timestamp, detail, signature)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                entry.id,
+                entry.level,
+                entry.event,
+                entry.entity_type,
+                entry.entity_id,
+                entry.operation,
+                entry.timestamp,
+                json.dumps(entry.detail) if entry.detail is not None else None,
+                entry.signature,
+            ),
+        )
+        await self._conn.commit()
+
+    async def list(self, filter: AuditLogEntryFilter) -> list[AuditLogEntryRecord]:
+        conditions: list[str] = []
+        params: list[Any] = []
+        if filter.level is not None:
+            conditions.append("level = ?")
+            params.append(filter.level)
+        if filter.event is not None:
+            conditions.append("event = ?")
+            params.append(filter.event)
+        if filter.entity_type is not None:
+            conditions.append("entity_type = ?")
+            params.append(filter.entity_type)
+        if filter.entity_id is not None:
+            conditions.append("entity_id = ?")
+            params.append(filter.entity_id)
+        if filter.since is not None:
+            conditions.append("timestamp >= ?")
+            params.append(filter.since)
+        if filter.until is not None:
+            conditions.append("timestamp <= ?")
+            params.append(filter.until)
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.extend([filter.limit, filter.offset])
+        async with self._conn.execute(
+            f"SELECT id, level, event, entity_type, entity_id, operation, timestamp, detail, signature"
+            f" FROM audit_log_entries {where} ORDER BY timestamp ASC LIMIT ? OFFSET ?",
+            params,
+        ) as cur:
+            return [_audit_log_entry_record(row) for row in await cur.fetchall()]
+
+
 # ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
@@ -1098,6 +1173,7 @@ class SqliteRepositoryDriver(RepositoryDriver):
         self._user_profiles = _SqliteUserProfileRepo(conn)
         self._channels = _SqliteChannelRepo(conn)
         self._webhooks = _SqliteWebhookRepo(conn)
+        self._audit_log_entries = _SqliteAuditLogEntryRepo(conn)
 
     @classmethod
     async def open(
@@ -1209,6 +1285,10 @@ class SqliteRepositoryDriver(RepositoryDriver):
     @property
     def webhooks(self) -> WebhookRepository:
         return self._webhooks
+
+    @property
+    def audit_log_entries(self) -> AuditLogEntryRepository:
+        return self._audit_log_entries
 
     async def migrate(self) -> None:
         """Apply pending SQL migrations from db/migrations/*.sql in order.

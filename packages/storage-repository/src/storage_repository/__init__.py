@@ -5,6 +5,7 @@ from ._audit import AuditLog, NoopAuditLog
 # Contracts — abstract repository interfaces
 from ._contract import (
     AgentRepository,
+    AuditLogEntryRepository,
     ChannelRepository,
     EnvironmentRepository,
     MemoryRepository,
@@ -33,6 +34,8 @@ from ._types import (
     Agent,
     AgentFilter,
     AuditLogEntry,
+    AuditLogEntryFilter,
+    AuditLogEntryRecord,
     Channel,
     ChannelFilter,
     Environment,
@@ -69,6 +72,8 @@ __all__ = [
     "Agent",
     "AgentFilter",
     "AuditLogEntry",
+    "AuditLogEntryFilter",
+    "AuditLogEntryRecord",
     "Channel",
     "ChannelFilter",
     "Environment",
@@ -97,6 +102,7 @@ __all__ = [
     "WebhookFilter",
     # Contracts
     "AgentRepository",
+    "AuditLogEntryRepository",
     "ChannelRepository",
     "EnvironmentRepository",
     "MemoryRepository",

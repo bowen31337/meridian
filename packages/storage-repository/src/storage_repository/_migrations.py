@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-SCHEMA_VERSION: int = 16
+SCHEMA_VERSION: int = 17
 
 _MIGRATIONS_DIR = Path(__file__).parent / "db" / "migrations"
 

@@ -5,6 +5,8 @@ from abc import ABC, abstractmethod
 from ._types import (
     Agent,
     AgentFilter,
+    AuditLogEntryFilter,
+    AuditLogEntryRecord,
     Channel,
     ChannelFilter,
     Environment,
@@ -30,6 +32,23 @@ from ._types import (
     Webhook,
     WebhookFilter,
 )
+
+
+class AuditLogEntryRepository(ABC):
+    """
+    Persistence contract for append-only audit log entries.
+
+    Records capability decisions, vault accesses, channel pairings, skill promotions,
+    and environment changes.  Entries are never updated or deleted.
+    """
+
+    @abstractmethod
+    async def append(self, entry: AuditLogEntryRecord) -> None:
+        """Insert a new audit log entry. Raises on duplicate id."""
+
+    @abstractmethod
+    async def list(self, filter: AuditLogEntryFilter) -> list[AuditLogEntryRecord]:
+        """Return entries matching the filter, ordered by timestamp ascending."""
 
 
 class AgentRepository(ABC):
