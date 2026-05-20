@@ -489,6 +489,8 @@ async def run_harness_loop(
                 stop_reason = "end_turn"
                 _stop_event: MessageStopEvent | None = None
 
+                _model_call_exc: Exception | None = None
+
                 if (
                     final_phase == "waiting_for_model"
                     and model_router is not None
@@ -503,31 +505,34 @@ async def run_harness_loop(
                             audit_log=audit_log,
                         )
                     opts = model_call_opts.model_copy(update={"session_id": session_id})
-                    async for event in model_router.call(opts):
-                        if isinstance(event, TextDeltaEvent):
-                            if event_log is not None:
-                                await event_log.append(
-                                    session_id,
-                                    "message.delta",
-                                    {"text": event.text, "model_call_number": model_calls},
-                                )
-                        elif isinstance(event, ToolUseStartEvent):
-                            current_tool = {
-                                "id": event.id,
-                                "name": event.name,
-                                "input_json": "",
-                            }
-                            tool_use_blocks.append(current_tool)
-                        elif isinstance(event, ToolInputDeltaEvent) and current_tool is not None:
-                            if current_tool["id"] == event.id:
-                                current_tool["input_json"] += event.partial_json
-                        elif isinstance(event, MessageStopEvent):
-                            if event.stop_reason is not None:
-                                stop_reason = event.stop_reason
-                            _stop_event = event
-                        elif isinstance(event, MessageDeltaEvent):
-                            if event.stop_reason is not None:
-                                stop_reason = event.stop_reason
+                    try:
+                        async for event in model_router.call(opts):
+                            if isinstance(event, TextDeltaEvent):
+                                if event_log is not None:
+                                    await event_log.append(
+                                        session_id,
+                                        "message.delta",
+                                        {"text": event.text, "model_call_number": model_calls},
+                                    )
+                            elif isinstance(event, ToolUseStartEvent):
+                                current_tool = {
+                                    "id": event.id,
+                                    "name": event.name,
+                                    "input_json": "",
+                                }
+                                tool_use_blocks.append(current_tool)
+                            elif isinstance(event, ToolInputDeltaEvent) and current_tool is not None:
+                                if current_tool["id"] == event.id:
+                                    current_tool["input_json"] += event.partial_json
+                            elif isinstance(event, MessageStopEvent):
+                                if event.stop_reason is not None:
+                                    stop_reason = event.stop_reason
+                                _stop_event = event
+                            elif isinstance(event, MessageDeltaEvent):
+                                if event.stop_reason is not None:
+                                    stop_reason = event.stop_reason
+                    except Exception as _exc:
+                        _model_call_exc = _exc
                 else:
                     if hooks_dir is not None:
                         await dispatch_hooks(
@@ -537,19 +542,78 @@ async def run_harness_loop(
                             hooks_dir=hooks_dir,
                             audit_log=audit_log,
                         )
-                    async for event in model_adapter.call():
-                        etype = event.get("type", "")
-                        if etype == "tool_use_start":
-                            current_tool = {
-                                "id": event.get("id", ""),
-                                "name": event.get("name", ""),
-                                "input_json": "",
-                            }
-                            tool_use_blocks.append(current_tool)
-                        elif etype == "tool_input_delta" and current_tool is not None:
-                            current_tool["input_json"] += event.get("partial_json", "")
-                        elif etype == "message_stop":
-                            stop_reason = event.get("stop_reason") or "end_turn"
+                    try:
+                        async for event in model_adapter.call():
+                            etype = event.get("type", "")
+                            if etype == "tool_use_start":
+                                current_tool = {
+                                    "id": event.get("id", ""),
+                                    "name": event.get("name", ""),
+                                    "input_json": "",
+                                }
+                                tool_use_blocks.append(current_tool)
+                            elif etype == "tool_input_delta" and current_tool is not None:
+                                current_tool["input_json"] += event.get("partial_json", "")
+                            elif etype == "message_stop":
+                                stop_reason = event.get("stop_reason") or "end_turn"
+                    except Exception as _exc:
+                        _model_call_exc = _exc
+
+                if _model_call_exc is not None:
+                    _err_now = _now()
+                    with tracer.start_as_current_span(
+                        "harness.model_call_error",
+                        attributes={"session.id": session_id},
+                    ) as _err_span:
+                        record_invocation_event(
+                            _err_span,
+                            StructuredEvent(
+                                name="harness.model_call_error.invocation",
+                                code="harness_model_call_error",
+                                timestamp=_err_now,
+                            ),
+                        )
+                        _recoverable = False
+                        if hooks_dir is not None:
+                            try:
+                                _hook_results = await dispatch_hooks(
+                                    "on_error",
+                                    {
+                                        "session_id": session_id,
+                                        "error": str(_model_call_exc),
+                                        "error_type": type(_model_call_exc).__name__,
+                                    },
+                                    _ctx,
+                                    hooks_dir=hooks_dir,
+                                    audit_log=audit_log,
+                                )
+                                _recoverable = any(
+                                    r.verdict == "recoverable" for r in _hook_results
+                                )
+                            except Exception as _hook_exc:
+                                _err = HarnessLoopError(
+                                    message=f"on_error hook dispatch failed for session {session_id!r}: {_hook_exc}",
+                                    timestamp=_err_now,
+                                    cause=_hook_exc,
+                                )
+                                record_error(_err_span, _err)
+                                audit_log.write(
+                                    AuditLogEntry(
+                                        level="error",
+                                        event="harness.model_call_error.failed",
+                                        code=_err.code,
+                                        timestamp=_err.timestamp,
+                                        detail={
+                                            "session_id": session_id,
+                                            "message": _err.message,
+                                        },
+                                    )
+                                )
+                                raise _err
+                    if not _recoverable:
+                        final_phase = "terminated"
+                        break
+                    continue  # recoverable: retry model call on next iteration
 
                 if on_usage_delta is not None:
                     if _stop_event is not None:

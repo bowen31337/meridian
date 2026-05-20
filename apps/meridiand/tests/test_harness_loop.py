@@ -47,10 +47,7 @@ Tests cover:
   - on_model_call hook NOT dispatched on router path (pre_message used instead).
   - Tool use blocks collected from router ToolUseStartEvent/ToolInputDeltaEvent.
   - stop_reason parsed from MessageDeltaEvent and MessageStopEvent.
-  - Router failure raises HarnessLoopError (error surfaced to caller).
-  - Router failure writes harness.run_loop.failed to audit log.
-  - Router failure audit detail includes session_id.
-  - Router failure error message is non-empty.
+  - Router failure (no hooks) transitions final_phase to "terminated" without raising.
   - Without model_router, waiting_for_model phase falls back to fake adapter.
   waiting_for_tool branch (sandbox dispatch path):
   - tool_call.result event emitted to event_log per tool dispatched.
@@ -67,6 +64,21 @@ Tests cover:
   - Sandbox failure writes harness.run_loop.failed to audit log.
   - Sandbox failure audit detail includes session_id.
   - Sandbox failure error message is non-empty.
+  On model call error (router and fake adapter paths):
+  - on_error hooks dispatched when hooks_dir is set.
+  - on_error hook payload includes session_id, error, and error_type.
+  - No on_error hooks dispatched when hooks_dir is None.
+  - Hook returning "recoverable" verdict allows loop to continue.
+  - Hook NOT returning "recoverable" transitions final_phase to "terminated".
+  - OTel span "harness.model_call_error" emitted on model call error.
+  - Span has session.id attribute.
+  - Span carries structured invocation event (meridian.error.invocation).
+  - on_error hook dispatch failure raises HarnessLoopError.
+  - on_error hook dispatch failure writes harness.model_call_error.failed to audit log.
+  - Audit detail includes session_id on hook dispatch failure.
+  - Audit detail includes message on hook dispatch failure.
+  - Fake adapter model call error transitions to "terminated" (no hooks).
+  - Fake adapter model call error dispatches on_error hooks when hooks_dir is set.
 """
 
 from __future__ import annotations
@@ -1375,102 +1387,23 @@ class TestHarnessLoopWaitingForModel:
         )
         assert "on_model_call" not in dispatched
 
-    def test_router_failure_raises_harness_loop_error(self, tmp_path: Path) -> None:
+    def test_router_failure_transitions_to_terminated(self, tmp_path: Path) -> None:
         router = _ErrorModelRouter()
         model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
         reader = _FakePhaseReader(["waiting_for_model"])
         audit = FileAuditLog(tmp_path)
-        with pytest.raises(HarnessLoopError):
-            asyncio.run(
-                run_harness_loop(
-                    "s1",
-                    model_adapter=model,
-                    sandbox_adapter=sandbox,
-                    phase_reader=reader,
-                    audit_log=audit,
-                    model_router=router,
-                    model_call_opts=_opts(),
-                )
+        _, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                model_router=router,
+                model_call_opts=_opts(),
             )
-
-    def test_router_failure_error_code_is_harness_loop_failed(self, tmp_path: Path) -> None:
-        router = _ErrorModelRouter()
-        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
-        reader = _FakePhaseReader(["waiting_for_model"])
-        audit = FileAuditLog(tmp_path)
-        with pytest.raises(HarnessLoopError) as exc_info:
-            asyncio.run(
-                run_harness_loop(
-                    "s1",
-                    model_adapter=model,
-                    sandbox_adapter=sandbox,
-                    phase_reader=reader,
-                    audit_log=audit,
-                    model_router=router,
-                    model_call_opts=_opts(),
-                )
-            )
-        assert exc_info.value.code == "harness_loop_failed"
-
-    def test_router_failure_writes_audit_log(self, tmp_path: Path) -> None:
-        router = _ErrorModelRouter()
-        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
-        reader = _FakePhaseReader(["waiting_for_model"])
-        audit = FileAuditLog(tmp_path)
-        with pytest.raises(HarnessLoopError):
-            asyncio.run(
-                run_harness_loop(
-                    "s1",
-                    model_adapter=model,
-                    sandbox_adapter=sandbox,
-                    phase_reader=reader,
-                    audit_log=audit,
-                    model_router=router,
-                    model_call_opts=_opts(),
-                )
-            )
-        records = _read_audit(tmp_path)
-        assert any(r.get("event") == "harness.run_loop.failed" for r in records)
-
-    def test_router_failure_audit_detail_has_session_id(self, tmp_path: Path) -> None:
-        router = _ErrorModelRouter()
-        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
-        reader = _FakePhaseReader(["waiting_for_model"])
-        audit = FileAuditLog(tmp_path)
-        with pytest.raises(HarnessLoopError):
-            asyncio.run(
-                run_harness_loop(
-                    "router-sess-1",
-                    model_adapter=model,
-                    sandbox_adapter=sandbox,
-                    phase_reader=reader,
-                    audit_log=audit,
-                    model_router=router,
-                    model_call_opts=_opts(),
-                )
-            )
-        records = _read_audit(tmp_path)
-        record = next(r for r in records if r.get("event") == "harness.run_loop.failed")
-        assert record["detail"]["session_id"] == "router-sess-1"
-
-    def test_router_failure_error_message_surfaced(self, tmp_path: Path) -> None:
-        router = _ErrorModelRouter()
-        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
-        reader = _FakePhaseReader(["waiting_for_model"])
-        audit = FileAuditLog(tmp_path)
-        with pytest.raises(HarnessLoopError) as exc_info:
-            asyncio.run(
-                run_harness_loop(
-                    "s1",
-                    model_adapter=model,
-                    sandbox_adapter=sandbox,
-                    phase_reader=reader,
-                    audit_log=audit,
-                    model_router=router,
-                    model_call_opts=_opts(),
-                )
-            )
-        assert len(exc_info.value.message) > 0
+        )
+        assert final_phase == "terminated"
 
     def test_waiting_for_model_without_router_uses_fake_adapter(self, tmp_path: Path) -> None:
         model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
@@ -1956,3 +1889,489 @@ class TestHarnessLoopCacheMetrics:
         )
         assert deltas[0].cache_creation_tokens == 0
         assert deltas[0].cache_read_tokens == 0
+
+
+# ---------------------------------------------------------------------------
+# Helpers: failing model adapter
+# ---------------------------------------------------------------------------
+
+
+class _ErrorModelAdapter:
+    """Fake model adapter that raises RuntimeError on call()."""
+
+    name = "error"
+    kind = "error"
+
+    async def call(self):
+        raise RuntimeError("model adapter exploded")
+        yield  # makes this an async generator
+
+    @property
+    def call_count(self) -> int:
+        return 0
+
+
+# ---------------------------------------------------------------------------
+# Tests: on model call error — on_error hooks + terminated transition
+# ---------------------------------------------------------------------------
+
+
+class TestHarnessLoopModelCallError:
+    def setup_method(self) -> None:
+        _otel_exporter.clear()
+
+    # --- Router path: no hooks → terminate ---
+
+    def test_router_failure_no_hooks_final_phase_terminated(self, tmp_path: Path) -> None:
+        router = _ErrorModelRouter()
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        _, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+        assert final_phase == "terminated"
+
+    def test_router_failure_no_hooks_does_not_raise(self, tmp_path: Path) -> None:
+        router = _ErrorModelRouter()
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        result = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+        assert result is not None
+
+    # --- Fake adapter path: no hooks → terminate ---
+
+    def test_fake_adapter_failure_no_hooks_final_phase_terminated(
+        self, tmp_path: Path
+    ) -> None:
+        model_fixture = tmp_path / "fix" / "model_responses.ndjson"
+        model_fixture.parent.mkdir(parents=True, exist_ok=True)
+        model_fixture.write_text("")
+        sandbox = FakeSandboxAdapter(tmp_path / "fix" / "tool_responses.ndjson")
+        reader = _FakePhaseReader(["created"])
+        audit = FileAuditLog(tmp_path)
+        _, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=_ErrorModelAdapter(),
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
+        )
+        assert final_phase == "terminated"
+
+    # --- on_error hooks dispatched ---
+
+    def test_on_error_hooks_dispatched_on_router_failure(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        dispatched: list[str] = []
+
+        async def _fake_dispatch(event, data, ctx, *, hooks_dir, audit_log):
+            dispatched.append(event)
+            return []
+
+        monkeypatch.setattr("meridiand._replay.dispatch_hooks", _fake_dispatch)
+
+        router = _ErrorModelRouter()
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                hooks_dir=tmp_path / "hooks",
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+        assert "on_error" in dispatched
+
+    def test_on_error_hooks_dispatched_on_fake_adapter_failure(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        dispatched: list[str] = []
+
+        async def _fake_dispatch(event, data, ctx, *, hooks_dir, audit_log):
+            dispatched.append(event)
+            return []
+
+        monkeypatch.setattr("meridiand._replay.dispatch_hooks", _fake_dispatch)
+
+        model_fixture = tmp_path / "fix" / "model_responses.ndjson"
+        model_fixture.parent.mkdir(parents=True, exist_ok=True)
+        model_fixture.write_text("")
+        sandbox = FakeSandboxAdapter(tmp_path / "fix" / "tool_responses.ndjson")
+        reader = _FakePhaseReader(["created"])
+        audit = FileAuditLog(tmp_path)
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=_ErrorModelAdapter(),
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                hooks_dir=tmp_path / "hooks",
+            )
+        )
+        assert "on_error" in dispatched
+
+    def test_no_on_error_hooks_without_hooks_dir(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        dispatched: list[str] = []
+
+        async def _fake_dispatch(event, data, ctx, *, hooks_dir, audit_log):
+            dispatched.append(event)
+            return []
+
+        monkeypatch.setattr("meridiand._replay.dispatch_hooks", _fake_dispatch)
+
+        router = _ErrorModelRouter()
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+        assert "on_error" not in dispatched
+
+    def test_on_error_hook_payload_includes_error_and_type(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        captured_data: list[dict] = []
+
+        async def _fake_dispatch(event, data, ctx, *, hooks_dir, audit_log):
+            if event == "on_error":
+                captured_data.append(data)
+            return []
+
+        monkeypatch.setattr("meridiand._replay.dispatch_hooks", _fake_dispatch)
+
+        router = _ErrorModelRouter()
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                hooks_dir=tmp_path / "hooks",
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+        assert len(captured_data) == 1
+        assert "error" in captured_data[0]
+        assert "error_type" in captured_data[0]
+
+    # --- recoverable verdict: loop continues ---
+
+    def test_recoverable_verdict_allows_loop_to_continue(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from meridiand._hook_dispatch import HookDispatchResult
+
+        call_count = 0
+
+        class _OnceErrorRouter:
+            """Fails on first call, succeeds on second."""
+
+            async def call(self, opts: Any):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    raise RuntimeError("transient error")
+                    yield
+                else:
+                    yield MessageStopEvent(type="message_stop", stop_reason="end_turn")
+
+        async def _fake_dispatch(event, data, ctx, *, hooks_dir, audit_log):
+            if event == "on_error":
+                return [
+                    HookDispatchResult(
+                        hook_id="h1",
+                        hook_name="recovery",
+                        is_error=False,
+                        verdict="recoverable",
+                    )
+                ]
+            return []
+
+        monkeypatch.setattr("meridiand._replay.dispatch_hooks", _fake_dispatch)
+
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model", "waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        _, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                hooks_dir=tmp_path / "hooks",
+                model_router=_OnceErrorRouter(),
+                model_call_opts=_opts(),
+            )
+        )
+        assert final_phase == "idle"
+
+    def test_non_recoverable_verdict_transitions_to_terminated(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from meridiand._hook_dispatch import HookDispatchResult
+
+        async def _fake_dispatch(event, data, ctx, *, hooks_dir, audit_log):
+            if event == "on_error":
+                return [
+                    HookDispatchResult(
+                        hook_id="h1",
+                        hook_name="noop",
+                        is_error=False,
+                        verdict="continue",
+                    )
+                ]
+            return []
+
+        monkeypatch.setattr("meridiand._replay.dispatch_hooks", _fake_dispatch)
+
+        router = _ErrorModelRouter()
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        _, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                hooks_dir=tmp_path / "hooks",
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+        assert final_phase == "terminated"
+
+    # --- OTel span emitted on model call error ---
+
+    def test_model_call_error_emits_otel_span(self, tmp_path: Path) -> None:
+        router = _ErrorModelRouter()
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "harness.model_call_error" in span_names
+
+    def test_model_call_error_span_has_session_id(self, tmp_path: Path) -> None:
+        router = _ErrorModelRouter()
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        asyncio.run(
+            run_harness_loop(
+                "mc-err-sess-1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("harness.model_call_error")
+        assert span is not None
+        assert span.attributes["session.id"] == "mc-err-sess-1"
+
+    def test_model_call_error_span_carries_invocation_event(self, tmp_path: Path) -> None:
+        router = _ErrorModelRouter()
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                model_router=router,
+                model_call_opts=_opts(),
+            )
+        )
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("harness.model_call_error")
+        assert span is not None
+        event_names = [e.name for e in span.events]
+        assert "meridian.error.invocation" in event_names
+
+    # --- on_error hook dispatch failure: surfaces error + writes audit ---
+
+    def test_on_error_hook_failure_raises_harness_loop_error(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        async def _failing_dispatch(event, data, ctx, *, hooks_dir, audit_log):
+            if event == "on_error":
+                raise OSError("hook system unavailable")
+            return []
+
+        monkeypatch.setattr("meridiand._replay.dispatch_hooks", _failing_dispatch)
+
+        router = _ErrorModelRouter()
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                    hooks_dir=tmp_path / "hooks",
+                    model_router=router,
+                    model_call_opts=_opts(),
+                )
+            )
+
+    def test_on_error_hook_failure_writes_audit_log(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        async def _failing_dispatch(event, data, ctx, *, hooks_dir, audit_log):
+            if event == "on_error":
+                raise OSError("hook system unavailable")
+            return []
+
+        monkeypatch.setattr("meridiand._replay.dispatch_hooks", _failing_dispatch)
+
+        router = _ErrorModelRouter()
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                    hooks_dir=tmp_path / "hooks",
+                    model_router=router,
+                    model_call_opts=_opts(),
+                )
+            )
+        records = _read_audit(tmp_path)
+        assert any(r.get("event") == "harness.model_call_error.failed" for r in records)
+
+    def test_on_error_hook_failure_audit_detail_has_session_id(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        async def _failing_dispatch(event, data, ctx, *, hooks_dir, audit_log):
+            if event == "on_error":
+                raise OSError("hook system unavailable")
+            return []
+
+        monkeypatch.setattr("meridiand._replay.dispatch_hooks", _failing_dispatch)
+
+        router = _ErrorModelRouter()
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(
+                run_harness_loop(
+                    "mc-err-sess-2",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                    hooks_dir=tmp_path / "hooks",
+                    model_router=router,
+                    model_call_opts=_opts(),
+                )
+            )
+        records = _read_audit(tmp_path)
+        record = next(r for r in records if r.get("event") == "harness.model_call_error.failed")
+        assert record["detail"]["session_id"] == "mc-err-sess-2"
+
+    def test_on_error_hook_failure_audit_detail_has_message(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        async def _failing_dispatch(event, data, ctx, *, hooks_dir, audit_log):
+            if event == "on_error":
+                raise OSError("hook system unavailable")
+            return []
+
+        monkeypatch.setattr("meridiand._replay.dispatch_hooks", _failing_dispatch)
+
+        router = _ErrorModelRouter()
+        model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
+        reader = _FakePhaseReader(["waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                    hooks_dir=tmp_path / "hooks",
+                    model_router=router,
+                    model_call_opts=_opts(),
+                )
+            )
+        records = _read_audit(tmp_path)
+        record = next(r for r in records if r.get("event") == "harness.model_call_error.failed")
+        assert "message" in record["detail"]
+        assert len(record["detail"]["message"]) > 0

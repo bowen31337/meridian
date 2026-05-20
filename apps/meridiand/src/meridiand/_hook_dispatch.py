@@ -25,6 +25,8 @@ veto (pre_* only)   : harness raises HookVetoError with the reason; audit writte
                       at info level.
 fail                : harness treats as hook error and applies failure_mode
                       semantics; reason becomes the error message.
+recoverable         : harness treats the triggering model call error as recoverable
+                      and continues the loop instead of transitioning to terminated.
 """
 
 from __future__ import annotations
@@ -147,7 +149,7 @@ class HookDispatchResult:
     hook_id: str
     hook_name: str
     is_error: bool
-    verdict: Literal["continue", "veto", "fail"] = "continue"
+    verdict: Literal["continue", "veto", "fail", "recoverable"] = "continue"
     mutations: dict[str, Any] | None = None
     error_code: str | None = None
     error_message: str | None = None
@@ -160,7 +162,7 @@ class HookDispatchResult:
 
 def _parse_verdict(
     content: Any,
-) -> tuple[Literal["continue", "veto", "fail"], dict[str, Any] | None, str]:
+) -> tuple[Literal["continue", "veto", "fail", "recoverable"], dict[str, Any] | None, str]:
     """
     Parse a hook's output into (verdict, mutations, reason).
 
@@ -189,6 +191,9 @@ def _parse_verdict(
 
     if raw_verdict == "fail":
         return "fail", None, data.get("reason") or ""
+
+    if raw_verdict == "recoverable":
+        return "recoverable", None, data.get("reason") or ""
 
     # "continue" or anything unrecognised → no-op, propagate mutations if any
     raw_mutations = data.get("mutations")
@@ -419,7 +424,7 @@ async def dispatch_hooks(
                 )
 
                 # Parse verdict from hook output when the sandbox call itself succeeded.
-                verdict: Literal["continue", "veto", "fail"] = "continue"
+                verdict: Literal["continue", "veto", "fail", "recoverable"] = "continue"
                 mutations: dict[str, Any] | None = None
 
                 if not result.is_error:
@@ -457,6 +462,7 @@ async def dispatch_hooks(
                             error_code="hook_verdict_fail",
                             error_message=reason or "Hook returned fail verdict",
                         )
+                    # "recoverable" passes through: caller inspects verdict on result
                 else:
                     verdict = "fail"
 
