@@ -20,6 +20,7 @@ from ._version import SDK_PROVIDER_VERSION
 from .audit import AuditLog, AuditLogEntry, NoopAuditLog
 from .fake import FakeModelAdapter, write_model_fixture
 from .ollama import OllamaProvider
+from .openai import OpenAIProvider
 from .openrouter import OpenRouterProvider
 from .errors import (
     NoProviderFoundError,
@@ -107,6 +108,7 @@ __all__ = [
     "write_model_fixture",
     # Providers
     "OllamaProvider",
+    "OpenAIProvider",
     "OpenRouterProvider",
     # Telemetry helpers
     "get_tracer",
