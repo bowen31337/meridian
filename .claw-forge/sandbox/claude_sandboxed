@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/testing-conform-system-internal-dogfood-checkpoint-mand/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/reliability-cra-system-e8-hardening-soak-test-multi-day/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
