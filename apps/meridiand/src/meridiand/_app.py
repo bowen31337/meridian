@@ -47,6 +47,7 @@ from ._channels import make_channels_router
 from ._system_channel import make_system_channel_router
 from ._webhook_channel_driver import SecretResolver
 from ._skill_activations import make_skill_activations_router
+from ._skill_forge_proposals import make_skill_forge_proposals_router
 from ._skill_suggestions import make_skill_suggestions_router
 from ._skills import make_skills_router
 from ._user_profiles import make_user_profiles_router
@@ -99,7 +100,7 @@ def create_app(
     skill_forge: SkillForgeConfig | None = None,
     auth_config: AuthConfig | None = None,
     channel_runtime: ChannelRuntime | None = None,
-    secret_resolver: SecretResolver | None = None,
+    channel_secret_resolver: SecretResolver | None = None,
     vault_backend: EncryptedFileVaultBackend | None = None,
     os_keychain_backend: OsKeychainVaultBackend | None = None,
     subscriber_bus: SubscriberBus | None = None,
@@ -317,6 +318,9 @@ def create_app(
                     make_skill_activations_router(audit_log=audit_log, storage_root=storage_root)
                 )
                 app.include_router(
+                    make_skill_forge_proposals_router(audit_log=audit_log, storage_root=storage_root)
+                )
+                app.include_router(
                     make_skill_suggestions_router(audit_log=audit_log, storage_root=storage_root)
                 )
                 app.include_router(
@@ -331,7 +335,7 @@ def create_app(
                             audit_log=audit_log,
                             storage_root=storage_root,
                             channel_runtime=channel_runtime,
-                            secret_resolver=secret_resolver,
+                            secret_resolver=channel_secret_resolver,
                         )
                     )
                 app.include_router(

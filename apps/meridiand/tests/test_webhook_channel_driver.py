@@ -131,7 +131,7 @@ def _make_client(
         FileAuditLog(storage_root),
         storage_root=storage_root,
         channel_runtime=rt,
-        secret_resolver=secret_resolver,
+        channel_secret_resolver=secret_resolver,
     )
     return TestClient(app, raise_server_exceptions=False)
 
@@ -473,7 +473,7 @@ def _make_inbound_client(
         FileAuditLog(storage_root),
         storage_root=storage_root,
         channel_runtime=rt,
-        secret_resolver=resolver,
+        channel_secret_resolver=resolver,
     )
     client = TestClient(app, raise_server_exceptions=False)
     return client, channel_id
@@ -667,7 +667,7 @@ class TestInboundHmacVerification:
             FileAuditLog(storage_root),
             storage_root=storage_root,
             channel_runtime=rt,
-            secret_resolver=FixedSecretResolver(_INBOUND_SECRET),
+            channel_secret_resolver=FixedSecretResolver(_INBOUND_SECRET),
         )
         client = TestClient(app, raise_server_exceptions=False)
         body = json.dumps({"sender_id": "ext-1", "content": "hi"}).encode()
@@ -723,7 +723,7 @@ class TestInboundHmacVerification:
             FileAuditLog(storage_root),
             storage_root=storage_root,
             channel_runtime=rt,
-            secret_resolver=resolver,
+            channel_secret_resolver=resolver,
         )
         client = TestClient(app, raise_server_exceptions=False)
         body = json.dumps({"sender_id": "ext-1", "content": "hi"}).encode()

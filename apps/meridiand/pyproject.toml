@@ -77,6 +77,7 @@ pythonpath = [
     "../../packages/sdk-channel/src",
     "../../packages/sdk-provider/src",
     "../../packages/provider-anthropic-apikey/src",
+    "../../packages/provider-claude-code-oauth/src",
     "../../packages/sdk-sandbox/src",
     "../../packages/api-models/src",
 ]
