@@ -34,6 +34,8 @@ from core_errors import (
     record_invocation_event,
 )
 
+from ._skill_efficacy import TrajectoryRunner, compare_proposal_trajectories
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -308,6 +310,8 @@ async def build_skill_version_proposal(
     user_profiles_dir: Path,
     notifications_dir: Path,
     audit_log: AuditLog,
+    efficacy_dir: Path | None = None,
+    trajectory_runner: TrajectoryRunner | None = None,
 ) -> str:
     """Build an agentskills.io-shaped SkillVersionRecord from forge output.
 
@@ -326,6 +330,7 @@ async def build_skill_version_proposal(
     now = _now()
     tracer = get_tracer()
     proposal_id = ""
+    proposal_record: dict[str, Any] | None = None
 
     with tracer.start_as_current_span(
         "skill_forge.build_proposal",
@@ -366,7 +371,7 @@ async def build_skill_version_proposal(
                 derived_from_session_ids=derived_from_session_ids,
             )
 
-            proposal_record: dict[str, Any] = {
+            proposal_record = {
                 "id": proposal_id,
                 "skill_id": skill_id,
                 "instructions": instructions,
@@ -465,6 +470,20 @@ async def build_skill_version_proposal(
                 )
             )
             raise err2
+
+        # Proposal stored successfully; compute A/B efficacy metric on its test
+        # cases.  SkillEfficacyError propagates to the caller with its own audit
+        # entry already written by compare_proposal_trajectories.
+        assert proposal_record is not None  # guaranteed: we raised on any failure above
+        _eff_dir = (
+            efficacy_dir if efficacy_dir is not None else proposals_dir.parent / "efficacy"
+        )
+        await compare_proposal_trajectories(
+            proposal=proposal_record,
+            efficacy_dir=_eff_dir,
+            audit_log=audit_log,
+            runner=trajectory_runner,
+        )
 
     return proposal_id
 
