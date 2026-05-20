@@ -33,13 +33,19 @@ Tests cover:
   - validate_config: raises ConfigValidateError on unknown provider kind.
   - validate_config: raises ConfigValidateError on malformed secret_ref auth.
   - validate_config: accepts plaintext auth and valid secret_ref auth.
+  - validate_config: plaintext auth writes audit log entry with event "config.plaintext_secret" per provider.
+  - validate_config: plaintext auth audit entry level is "warn".
+  - validate_config: plaintext auth audit entry detail includes provider name.
+  - validate_config: multiple plaintext providers each write one config.plaintext_secret entry.
+  - validate_config: secret_ref auth does not write config.plaintext_secret entry.
+  - validate_config: None auth does not write config.plaintext_secret entry.
   - validate_config: raises ConfigValidateError on invalid daemon log_level.
   - validate_config: raises ConfigValidateError on out-of-range daemon bind port.
   - validate_config: succeeds with no vaults, no providers, and no daemon section.
   - validate_config: failure sets span status to ERROR.
   - validate_config: failure writes audit log entry with event "config.validate.failed".
   - validate_config: failure audit detail contains errors list.
-  - validate_config: success does not write to audit log.
+  - validate_config: success with no providers does not write to audit log.
   - resolve_config_location: emits OTel span "config.resolve_location" on every invocation.
   - resolve_config_location: invocation event has code "config_resolve_location".
   - resolve_config_location: returns $MERIDIAN_CONFIG path when env var is set and file exists.
@@ -908,6 +914,79 @@ class TestValidateConfigProviders:
         )
         with pytest.raises(ConfigValidateError, match=r"providers\[0\]"):
             validate_config(config)
+
+
+# ---------------------------------------------------------------------------
+# TestValidateConfigPlaintextSecretWarning
+# ---------------------------------------------------------------------------
+
+
+class TestValidateConfigPlaintextSecretWarning:
+    def test_plaintext_auth_writes_warn_audit_entry(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[ProviderConfig(name="p", kind="anthropic", auth="sk-ant-123")],
+        )
+        audit = _CapturingAuditLog()
+        validate_config(config, audit_log=audit)
+        assert any(e.event == "config.plaintext_secret" for e in audit.entries)
+
+    def test_plaintext_auth_audit_level_is_warn(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[ProviderConfig(name="p", kind="anthropic", auth="sk-ant-123")],
+        )
+        audit = _CapturingAuditLog()
+        validate_config(config, audit_log=audit)
+        entry = next(e for e in audit.entries if e.event == "config.plaintext_secret")
+        assert entry.level == "warn"
+
+    def test_plaintext_auth_audit_detail_has_provider_name(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[ProviderConfig(name="myp", kind="anthropic", auth="sk-ant-123")],
+        )
+        audit = _CapturingAuditLog()
+        validate_config(config, audit_log=audit)
+        entry = next(e for e in audit.entries if e.event == "config.plaintext_secret")
+        assert entry.detail["provider"] == "myp"
+
+    def test_multiple_plaintext_providers_each_write_warn_entry(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[
+                ProviderConfig(name="p1", kind="anthropic", auth="sk-ant-a"),
+                ProviderConfig(name="p2", kind="openai", auth="sk-openai-b"),
+            ],
+        )
+        audit = _CapturingAuditLog()
+        validate_config(config, audit_log=audit)
+        warn_entries = [e for e in audit.entries if e.event == "config.plaintext_secret"]
+        assert len(warn_entries) == 2
+
+    def test_secret_ref_auth_does_not_write_plaintext_warn(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[
+                ProviderConfig(
+                    name="p",
+                    kind="anthropic",
+                    auth="secret_ref://vault/my-vault/api-key",
+                )
+            ],
+        )
+        audit = _CapturingAuditLog()
+        validate_config(config, audit_log=audit)
+        assert not any(e.event == "config.plaintext_secret" for e in audit.entries)
+
+    def test_none_auth_does_not_write_plaintext_warn(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[ProviderConfig(name="p", kind="anthropic")],
+        )
+        audit = _CapturingAuditLog()
+        validate_config(config, audit_log=audit)
+        assert not any(e.event == "config.plaintext_secret" for e in audit.entries)
 
 
 # ---------------------------------------------------------------------------

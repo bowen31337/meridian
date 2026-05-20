@@ -13,7 +13,7 @@ from core_errors import AuditLogEntry, StructuredEvent, record_invocation_event
 from storage_repository import RepositoryFailure, SqliteRepositoryDriver
 
 from ._app import create_app
-from ._config import load_config, resolve_config_location
+from ._config import load_config, resolve_config_location, validate_config
 from ._services import init_services
 from ._telemetry import get_tracer, record_daemon_failure, record_daemon_start_event
 
@@ -64,6 +64,12 @@ def main(argv: list[str] | None = None) -> int:
         services = init_services(config)
     except Exception as exc:
         print(f"meridiand: service init error: {exc}", file=sys.stderr)
+        return 1
+
+    try:
+        validate_config(config, audit_log=services.audit_log)
+    except Exception as exc:
+        print(f"meridiand: config error: {exc}", file=sys.stderr)
         return 1
 
     logging.basicConfig(

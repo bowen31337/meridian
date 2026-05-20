@@ -430,6 +430,19 @@ def validate_config(config: MeridianConfig, audit_log: AuditLog | None = None) -
                             f"expected secret_ref://vault/{{vault_id}}/{{key}}"
                         )
 
+        # Emit config.plaintext_secret warning for each provider with plaintext auth
+        for provider in config.providers:
+            if provider.auth is not None and not provider.auth.startswith("secret_ref://"):
+                _audit.write(
+                    AuditLogEntry(
+                        level="warn",
+                        event="config.plaintext_secret",
+                        code="config_plaintext_secret",
+                        timestamp=_now(),
+                        detail={"provider": provider.name},
+                    )
+                )
+
         # Validate daemon section
         if config.daemon is not None:
             if config.daemon.log_level.lower() not in _VALID_LOG_LEVELS:
