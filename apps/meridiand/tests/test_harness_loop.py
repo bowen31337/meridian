@@ -91,6 +91,26 @@ Tests cover:
   - Without event_log: still loops when continue_allowed=True.
   - Event log failure on message.truncated raises HarnessLoopError.
   - Event log failure on message.truncated writes harness.run_loop.failed to audit log.
+  On stop_reason tool_use:
+  - tool_call.requested event written to event_log per tool block.
+  - tool_call.requested data contains tool_id, tool_name, and parsed args.
+  - No tool_call.requested event emitted when event_log is None.
+  - session.phase_change event written with after="waiting_for_tool" and reason="tool_use".
+  - session.phase_change event not emitted when event_log is None.
+  - pre_tool_call hook dispatched per tool block (before tool_call.requested).
+  - pre_tool_call not dispatched in waiting_for_tool branch (already fired on tool_use).
+  - Schema-validates args per tool when tool_schemas provided.
+  - Schema validation failure raises HarnessLoopError surfaced to caller.
+  - Schema validation failure writes harness.run_loop.failed to audit log.
+  - Invalid JSON args raises HarnessLoopError surfaced to caller.
+  - Invalid JSON args writes harness.run_loop.failed to audit log.
+  - Schemas from model_call_opts.tools used when tool_schemas not set.
+  - tool_schemas takes precedence over model_call_opts.tools for same tool name.
+  - Capability intersection check: all required caps present passes through.
+  - Capability intersection check: missing cap raises HarnessLoopError surfaced to caller.
+  - Capability intersection check: missing cap writes harness.run_loop.failed to audit log.
+  - No capability check when tool_capabilities is None.
+  - No capability check when granted_capabilities is None.
 """
 
 from __future__ import annotations
@@ -331,7 +351,7 @@ class TestHarnessLoopActivePhases:
             [_tool_use_call(), _end_turn_call()],
             [{"content": "result"}],
         )
-        reader = _FakePhaseReader(["created", "created"])
+        reader = _FakePhaseReader(["created", "waiting_for_tool", "created"])
         audit = FileAuditLog(tmp_path)
         model_calls, tool_calls, _ = asyncio.run(
             run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
@@ -346,7 +366,7 @@ class TestHarnessLoopActivePhases:
             [_tool_use_call(), _end_turn_call()],
             [{"content": "result"}],
         )
-        reader = _FakePhaseReader(["created", "created"])
+        reader = _FakePhaseReader(["created", "waiting_for_tool", "created"])
         audit = FileAuditLog(tmp_path)
         _, _, final_phase = asyncio.run(
             run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
@@ -367,8 +387,9 @@ class TestHarnessLoopMidRunInterruption:
             [_tool_use_call(), _end_turn_call()],
             [{"content": "result"}],
         )
-        # First read: "running" (proceed), second read: "paused" (stop)
-        reader = _FakePhaseReader(["running", "paused"])
+        # "running": model call returns tool_use → validate/events/phase_change(waiting_for_tool)
+        # "waiting_for_tool": dispatch tool, then "paused" stops the loop
+        reader = _FakePhaseReader(["running", "waiting_for_tool", "paused"])
         audit = FileAuditLog(tmp_path)
         model_calls, tool_calls, final_phase = asyncio.run(
             run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
@@ -384,7 +405,7 @@ class TestHarnessLoopMidRunInterruption:
             [_tool_use_call(), _end_turn_call()],
             [{"content": "result"}],
         )
-        reader = _FakePhaseReader(["running", "terminated"])
+        reader = _FakePhaseReader(["running", "waiting_for_tool", "terminated"])
         audit = FileAuditLog(tmp_path)
         model_calls, tool_calls, final_phase = asyncio.run(
             run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
@@ -400,7 +421,7 @@ class TestHarnessLoopMidRunInterruption:
             [_tool_use_call(), _end_turn_call()],
             [{"content": "result"}],
         )
-        reader = _FakePhaseReader(["running", "idle"])
+        reader = _FakePhaseReader(["running", "waiting_for_tool", "idle"])
         audit = FileAuditLog(tmp_path)
         model_calls, tool_calls, final_phase = asyncio.run(
             run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
@@ -440,7 +461,7 @@ class TestHarnessLoopUsageDelta:
             [_tool_use_call(), _end_turn_call()],
             [{"content": "result"}],
         )
-        reader = _FakePhaseReader(["created", "created"])
+        reader = _FakePhaseReader(["created", "waiting_for_tool", "created"])
         audit = FileAuditLog(tmp_path)
         deltas: list[UsageDelta] = []
         asyncio.run(
@@ -1059,7 +1080,7 @@ class TestHarnessLoopIterationBudget:
             [_tool_use_call(), _end_turn_call()],
             [{"content": "result"}],
         )
-        reader = _FakePhaseReader(["running", "running"])
+        reader = _FakePhaseReader(["running", "waiting_for_tool", "running"])
         audit = FileAuditLog(tmp_path)
         event_log = _FakeEventLogWriter()
         model_calls, _, final_phase = asyncio.run(
@@ -1075,7 +1096,8 @@ class TestHarnessLoopIterationBudget:
         )
         assert final_phase == "idle"
         assert model_calls == 2
-        assert event_log.events == []
+        # no budget.warning emitted — threshold not reached
+        assert not any(et == "budget.warning" for _, et, _ in event_log.events)
 
     # --- Hard takes precedence over soft ---
 
@@ -1307,7 +1329,7 @@ class TestHarnessLoopWaitingForModel:
             [_tool_use_call(), _end_turn_call()],
             [{"content": "result"}],
         )
-        reader = _FakePhaseReader(["waiting_for_model", "waiting_for_model"])
+        reader = _FakePhaseReader(["waiting_for_model", "waiting_for_tool", "waiting_for_model"])
         audit = FileAuditLog(tmp_path)
         model_calls, tool_calls, final_phase = asyncio.run(
             run_harness_loop(
@@ -1628,7 +1650,11 @@ class TestHarnessLoopWaitingForTool:
         )
         assert final_phase == "idle"
 
-    def test_pre_tool_call_hook_dispatched(self, tmp_path: Path, monkeypatch) -> None:
+    def test_pre_tool_call_hook_not_dispatched_when_starting_from_waiting_for_tool(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        # pre_tool_call is dispatched in the stop_reason=tool_use handling, not in the
+        # waiting_for_tool dispatch branch; recovery from waiting_for_tool does not re-fire it.
         dispatched: list[str] = []
 
         async def _fake_dispatch(event, data, ctx, *, hooks_dir, audit_log):
@@ -1653,7 +1679,7 @@ class TestHarnessLoopWaitingForTool:
                 hooks_dir=tmp_path / "hooks",
             )
         )
-        assert "pre_tool_call" in dispatched
+        assert "pre_tool_call" not in dispatched
 
     def test_post_tool_call_hook_dispatched(self, tmp_path: Path, monkeypatch) -> None:
         dispatched: list[str] = []
@@ -2713,4 +2739,547 @@ class TestHarnessLoopMaxTokens:
             )
         )
         assert model_calls == 2
+        assert final_phase == "idle"
+
+
+# ---------------------------------------------------------------------------
+# Helpers: tool_use fixtures for stop_reason=tool_use tests
+# ---------------------------------------------------------------------------
+
+
+def _tool_use_bad_json_call(tool_id: str = "tu_1", tool_name: str = "bash") -> list[dict[str, Any]]:
+    return [
+        {"type": "message_start", "model": "fake", "provider": "fake"},
+        {"type": "tool_use_start", "id": tool_id, "name": tool_name},
+        {"type": "tool_input_delta", "id": tool_id, "partial_json": "not-valid-json{"},
+        {"type": "message_stop", "stop_reason": "tool_use"},
+    ]
+
+
+_BASH_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"cmd": {"type": "string"}},
+    "required": ["cmd"],
+}
+
+_BASH_SCHEMA_STRICT: dict[str, Any] = {
+    "type": "object",
+    "properties": {"cmd": {"type": "integer"}},  # "ls" will fail: not an integer
+    "required": ["cmd"],
+}
+
+
+# ---------------------------------------------------------------------------
+# Tests: stop_reason tool_use — schema validate, capability check, hooks, events
+# ---------------------------------------------------------------------------
+
+
+class TestHarnessLoopStopReasonToolUse:
+    # --- tool_call.requested events ---
+
+    def test_tool_call_requested_event_written_per_tool_block(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call("tu_1", "bash"), _end_turn_call()],
+            [{"content": "ok"}],
+        )
+        reader = _FakePhaseReader(["running", "waiting_for_tool", "running"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        requested = [d for _, et, d in event_log.events if et == "tool_call.requested"]
+        assert len(requested) == 1
+
+    def test_tool_call_requested_data_contains_tool_id(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call("tu_abc", "bash"), _end_turn_call()],
+            [{"content": "ok"}],
+        )
+        reader = _FakePhaseReader(["running", "waiting_for_tool", "running"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        requested = [d for _, et, d in event_log.events if et == "tool_call.requested"]
+        assert requested[0]["tool_id"] == "tu_abc"
+
+    def test_tool_call_requested_data_contains_tool_name(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call("tu_1", "bash"), _end_turn_call()],
+            [{"content": "ok"}],
+        )
+        reader = _FakePhaseReader(["running", "waiting_for_tool", "running"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        requested = [d for _, et, d in event_log.events if et == "tool_call.requested"]
+        assert requested[0]["tool_name"] == "bash"
+
+    def test_tool_call_requested_data_contains_parsed_args(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call("tu_1", "bash"), _end_turn_call()],
+            [{"content": "ok"}],
+        )
+        reader = _FakePhaseReader(["running", "waiting_for_tool", "running"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        requested = [d for _, et, d in event_log.events if et == "tool_call.requested"]
+        assert requested[0]["args"] == {"cmd": "ls"}
+
+    def test_no_tool_call_requested_event_without_event_log(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call(), _end_turn_call()],
+            [{"content": "ok"}],
+        )
+        reader = _FakePhaseReader(["running", "waiting_for_tool", "running"])
+        audit = FileAuditLog(tmp_path)
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=None,
+            )
+        )  # no exception; no events to assert
+
+    # --- session.phase_change to waiting_for_tool ---
+
+    def test_phase_change_event_written_with_after_waiting_for_tool(
+        self, tmp_path: Path
+    ) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call(), _end_turn_call()],
+            [{"content": "ok"}],
+        )
+        reader = _FakePhaseReader(["running", "waiting_for_tool", "running"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        phase_changes = [d for _, et, d in event_log.events if et == "session.phase_change"]
+        assert any(d["after"] == "waiting_for_tool" for d in phase_changes)
+
+    def test_phase_change_reason_is_tool_use(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call(), _end_turn_call()],
+            [{"content": "ok"}],
+        )
+        reader = _FakePhaseReader(["running", "waiting_for_tool", "running"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        phase_changes = [d for _, et, d in event_log.events if et == "session.phase_change"]
+        tool_use_changes = [d for d in phase_changes if d.get("after") == "waiting_for_tool"]
+        assert tool_use_changes[0]["reason"] == "tool_use"
+
+    def test_no_phase_change_event_without_event_log(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call(), _end_turn_call()],
+            [{"content": "ok"}],
+        )
+        reader = _FakePhaseReader(["running", "waiting_for_tool", "running"])
+        audit = FileAuditLog(tmp_path)
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=None,
+            )
+        )  # no exception
+
+    # --- pre_tool_call hook in tool_use handling ---
+
+    def test_pre_tool_call_hook_dispatched_on_tool_use(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        dispatched: list[str] = []
+
+        async def _fake_dispatch(event, data, ctx, *, hooks_dir, audit_log):
+            dispatched.append(event)
+
+        monkeypatch.setattr("meridiand._replay.dispatch_hooks", _fake_dispatch)
+
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call("tu_1", "bash"), _end_turn_call()],
+            [{"content": "ok"}],
+        )
+        reader = _FakePhaseReader(["running", "waiting_for_tool", "running"])
+        audit = FileAuditLog(tmp_path)
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                hooks_dir=tmp_path / "hooks",
+            )
+        )
+        assert "pre_tool_call" in dispatched
+
+    def test_pre_tool_call_hook_payload_has_tool_id_and_name(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        captured: list[dict] = []
+
+        async def _fake_dispatch(event, data, ctx, *, hooks_dir, audit_log):
+            if event == "pre_tool_call":
+                captured.append(data)
+
+        monkeypatch.setattr("meridiand._replay.dispatch_hooks", _fake_dispatch)
+
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call("tu_xyz", "bash"), _end_turn_call()],
+            [{"content": "ok"}],
+        )
+        reader = _FakePhaseReader(["running", "waiting_for_tool", "running"])
+        audit = FileAuditLog(tmp_path)
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                hooks_dir=tmp_path / "hooks",
+            )
+        )
+        assert len(captured) == 1
+        assert captured[0]["tool_id"] == "tu_xyz"
+        assert captured[0]["tool_name"] == "bash"
+
+    # --- Schema validation ---
+
+    def test_valid_args_with_schema_passes(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call("tu_1", "bash"), _end_turn_call()],
+            [{"content": "ok"}],
+        )
+        reader = _FakePhaseReader(["running", "waiting_for_tool", "running"])
+        audit = FileAuditLog(tmp_path)
+        model_calls, tool_calls, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                tool_schemas={"bash": _BASH_SCHEMA},
+            )
+        )
+        assert final_phase == "idle"
+        assert model_calls == 2
+        assert tool_calls == 1
+
+    def test_schema_mismatch_raises_harness_loop_error(self, tmp_path: Path) -> None:
+        # _tool_use_call sends {"cmd": "ls"}; _BASH_SCHEMA_STRICT expects cmd as integer
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call("tu_1", "bash")],
+            [],
+        )
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                    tool_schemas={"bash": _BASH_SCHEMA_STRICT},
+                )
+            )
+
+    def test_schema_mismatch_writes_audit_log(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call("tu_1", "bash")],
+            [],
+        )
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                    tool_schemas={"bash": _BASH_SCHEMA_STRICT},
+                )
+            )
+        records = _read_audit(tmp_path)
+        assert any(r.get("event") == "harness.run_loop.failed" for r in records)
+
+    def test_invalid_json_args_raises_harness_loop_error(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_bad_json_call("tu_1", "bash")],
+            [],
+        )
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                )
+            )
+
+    def test_invalid_json_args_writes_audit_log(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_bad_json_call("tu_1", "bash")],
+            [],
+        )
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                )
+            )
+        records = _read_audit(tmp_path)
+        assert any(r.get("event") == "harness.run_loop.failed" for r in records)
+
+    def test_schemas_from_model_call_opts_used_for_validation(self, tmp_path: Path) -> None:
+        from meridian_sdk_provider import ToolDefinition
+
+        # _tool_use_call sends {"cmd": "ls"}; BASH_SCHEMA_STRICT expects integer → fail
+        opts = ModelCallOpts(
+            model="fake:model",
+            messages=[Message(role="user", content="hi")],
+            tools=[ToolDefinition(name="bash", description="run", input_schema=_BASH_SCHEMA_STRICT)],
+        )
+        model, sandbox = _adapters(tmp_path / "fix", [_tool_use_call("tu_1", "bash")], [])
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                    model_call_opts=opts,
+                )
+            )
+
+    def test_tool_schemas_param_overrides_model_call_opts(self, tmp_path: Path) -> None:
+        from meridian_sdk_provider import ToolDefinition
+
+        # model_call_opts has strict schema (would fail), tool_schemas has permissive (should pass)
+        opts = ModelCallOpts(
+            model="fake:model",
+            messages=[Message(role="user", content="hi")],
+            tools=[ToolDefinition(name="bash", description="run", input_schema=_BASH_SCHEMA_STRICT)],
+        )
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call("tu_1", "bash"), _end_turn_call()],
+            [{"content": "ok"}],
+        )
+        reader = _FakePhaseReader(["running", "waiting_for_tool", "running"])
+        audit = FileAuditLog(tmp_path)
+        _, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                model_call_opts=opts,
+                tool_schemas={"bash": _BASH_SCHEMA},  # override: permissive schema
+            )
+        )
+        assert final_phase == "idle"  # passed validation, no error
+
+    # --- Capability intersection check ---
+
+    def test_all_required_caps_granted_passes(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call("tu_1", "bash"), _end_turn_call()],
+            [{"content": "ok"}],
+        )
+        reader = _FakePhaseReader(["running", "waiting_for_tool", "running"])
+        audit = FileAuditLog(tmp_path)
+        _, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                tool_capabilities={"bash": frozenset({"exec.bash"})},
+                granted_capabilities=frozenset({"exec.bash", "fs.read"}),
+            )
+        )
+        assert final_phase == "idle"
+
+    def test_missing_capability_raises_harness_loop_error(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call("tu_1", "bash")],
+            [],
+        )
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                    tool_capabilities={"bash": frozenset({"exec.bash"})},
+                    granted_capabilities=frozenset(),  # exec.bash not granted
+                )
+            )
+
+    def test_missing_capability_writes_audit_log(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call("tu_1", "bash")],
+            [],
+        )
+        reader = _FakePhaseReader(["running"])
+        audit = FileAuditLog(tmp_path)
+        with pytest.raises(HarnessLoopError):
+            asyncio.run(
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=reader,
+                    audit_log=audit,
+                    tool_capabilities={"bash": frozenset({"exec.bash"})},
+                    granted_capabilities=frozenset(),
+                )
+            )
+        records = _read_audit(tmp_path)
+        assert any(r.get("event") == "harness.run_loop.failed" for r in records)
+
+    def test_no_capability_check_when_tool_capabilities_none(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call("tu_1", "bash"), _end_turn_call()],
+            [{"content": "ok"}],
+        )
+        reader = _FakePhaseReader(["running", "waiting_for_tool", "running"])
+        audit = FileAuditLog(tmp_path)
+        _, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                tool_capabilities=None,
+                granted_capabilities=frozenset(),  # empty, but no check performed
+            )
+        )
+        assert final_phase == "idle"
+
+    def test_no_capability_check_when_granted_capabilities_none(self, tmp_path: Path) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_tool_use_call("tu_1", "bash"), _end_turn_call()],
+            [{"content": "ok"}],
+        )
+        reader = _FakePhaseReader(["running", "waiting_for_tool", "running"])
+        audit = FileAuditLog(tmp_path)
+        _, _, final_phase = asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                tool_capabilities={"bash": frozenset({"exec.bash"})},
+                granted_capabilities=None,  # check skipped
+            )
+        )
         assert final_phase == "idle"

@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
+import jsonschema
+
 from core_errors import (
     AuditLog,
     AuditLogEntry,
@@ -80,6 +82,19 @@ _STOP_PHASES: frozenset[str] = frozenset({"idle", "paused", "terminated"})
 @runtime_checkable
 class _PhaseReader(Protocol):
     def current_phase(self, session_id: str) -> str: ...
+
+
+def _validate_tool_args(schema: dict[str, Any], data: Any) -> list[str]:
+    """Return schema validation error strings for *data* against *schema*, or [] if valid."""
+    validator = jsonschema.Draft7Validator(schema)
+    errors = []
+    for err in validator.iter_errors(data):
+        path = "".join(
+            f"[{p!r}]" if isinstance(p, str) else f"[{p}]"
+            for p in err.absolute_path
+        )
+        errors.append(f"${path}: {err.message}" if path else err.message)
+    return errors
 
 
 __all__ = [
@@ -394,6 +409,9 @@ async def run_harness_loop(
     model_router: ModelRouter | None = None,
     model_call_opts: ModelCallOpts | None = None,
     max_tokens_policy: MaxTokensPolicy | None = None,
+    tool_schemas: dict[str, dict[str, Any]] | None = None,
+    tool_capabilities: dict[str, frozenset[str]] | None = None,
+    granted_capabilities: frozenset[str] | None = None,
 ) -> tuple[int, int, str]:
     """Run harness while phase is not in {idle, paused, terminated}.
 
@@ -435,6 +453,23 @@ async def run_harness_loop(
         "waiting_for_user", and stops the loop. event_log must be provided to persist these
         events; without it the loop still stops or loops correctly but no events are written.
 
+    When stop_reason is "tool_use":
+      For each tool use block in order:
+        1. Schema-validates the tool's JSON args against tool_schemas[name] (if provided) or
+           model_call_opts.tools[name].input_schema (if model_call_opts is set).  tool_schemas
+           takes precedence; schemas from model_call_opts are used as fallback.  On validation
+           failure raises HarnessLoopError which is surfaced to the caller and written to the
+           audit log.
+        2. Runs a capability intersection check: if tool_capabilities[name] and
+           granted_capabilities are both provided, verifies every required capability is
+           present in the granted set.  Missing capabilities raise HarnessLoopError.
+        3. Dispatches "pre_tool_call" hooks (if hooks_dir is set).
+        4. Emits a "tool_call.requested" event to event_log (if provided) with tool_id,
+           tool_name, and the parsed args dict.
+      Then emits a "session.phase_change" event with after="waiting_for_tool" and
+      reason="tool_use" and continues the loop; the waiting_for_tool branch handles the
+      actual sandbox dispatch on the next iteration.
+
     Returns (model_calls, tool_calls, final_phase).
     """
     now = _now()
@@ -469,18 +504,6 @@ async def run_harness_loop(
                     result = sandbox_adapter.next_result()
                     tool_id = result.get("tool_id", "")
                     tool_name = result.get("tool_name", "")
-                    if hooks_dir is not None:
-                        await dispatch_hooks(
-                            "pre_tool_call",
-                            {
-                                "session_id": session_id,
-                                "tool_id": tool_id,
-                                "tool_name": tool_name,
-                            },
-                            _ctx,
-                            hooks_dir=hooks_dir,
-                            audit_log=audit_log,
-                        )
                     if event_log is not None:
                         await event_log.append(
                             session_id,
@@ -747,34 +770,86 @@ async def run_harness_loop(
                         final_phase = "waiting_for_user"
                         break
 
+                # Build schema map: model_call_opts.tools as base, tool_schemas overrides.
+                _schema_map: dict[str, dict[str, Any]] = {}
+                if model_call_opts is not None:
+                    for _td in model_call_opts.tools:
+                        _schema_map[_td.name] = _td.input_schema
+                if tool_schemas is not None:
+                    _schema_map.update(tool_schemas)
+
                 for block in tool_use_blocks:
-                    tool_calls += 1
+                    _tool_name = block["name"]
+                    _tool_id = block["id"]
+                    _input_json = block["input_json"]
+
+                    # 1. Schema-validate args per tool.
+                    try:
+                        _args: Any = json.loads(_input_json) if _input_json else {}
+                    except json.JSONDecodeError as _jex:
+                        raise ValueError(
+                            f"Tool {_tool_name!r} ({_tool_id!r}) args are not valid JSON: {_jex}"
+                        ) from _jex
+                    _schema = _schema_map.get(_tool_name)
+                    if _schema is not None:
+                        _schema_errs = _validate_tool_args(_schema, _args)
+                        if _schema_errs:
+                            raise ValueError(
+                                f"Tool {_tool_name!r} ({_tool_id!r}) args failed schema "
+                                f"validation: {_schema_errs[0]}"
+                            )
+
+                    # 2. Capability intersection check.
+                    if tool_capabilities is not None and granted_capabilities is not None:
+                        _required_caps = tool_capabilities.get(_tool_name, frozenset())
+                        _missing_caps = _required_caps - granted_capabilities
+                        if _missing_caps:
+                            raise ValueError(
+                                f"Capability denied for tool {_tool_name!r} ({_tool_id!r}): "
+                                f"missing {sorted(_missing_caps)}"
+                            )
+
+                    # 3. pre_tool_call hooks.
                     if hooks_dir is not None:
                         await dispatch_hooks(
                             "pre_tool_call",
                             {
                                 "session_id": session_id,
-                                "tool_id": block["id"],
-                                "tool_name": block["name"],
+                                "tool_id": _tool_id,
+                                "tool_name": _tool_name,
                             },
                             _ctx,
                             hooks_dir=hooks_dir,
                             audit_log=audit_log,
                         )
-                    result = sandbox_adapter.next_result()
-                    if hooks_dir is not None:
-                        await dispatch_hooks(
-                            "post_tool_call",
+
+                    # 4. Write tool_call.requested event.
+                    if event_log is not None:
+                        await event_log.append(
+                            session_id,
+                            "tool_call.requested",
                             {
-                                "session_id": session_id,
-                                "tool_id": block["id"],
-                                "tool_name": block["name"],
-                                "tool_result": result.get("content", ""),
+                                "tool_id": _tool_id,
+                                "tool_name": _tool_name,
+                                "args": _args,
                             },
-                            _ctx,
-                            hooks_dir=hooks_dir,
-                            audit_log=audit_log,
                         )
+
+                # 5. Transition to waiting_for_tool; actual dispatch happens on the next
+                # iteration via the waiting_for_tool branch.
+                if event_log is not None:
+                    await event_log.append(
+                        session_id,
+                        "session.phase_change",
+                        {
+                            "before": final_phase,
+                            "after": "waiting_for_tool",
+                            "timestamp": _now(),
+                            "reason": "tool_use",
+                        },
+                    )
+                final_phase = "waiting_for_tool"
+                continue
 
         except HarnessLoopError:
             raise
