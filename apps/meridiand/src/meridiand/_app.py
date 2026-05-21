@@ -75,6 +75,7 @@ from ._replay import make_replay_router
 from ._resume import make_resume_router
 from ._sessions import make_sessions_router
 from ._session_wake import make_session_wake_router
+from ._submit_tool_results import make_submit_tool_results_router
 from ._harness_pool import HarnessPool
 from ._wake import make_wake_router
 from ._auth_middleware import AuthMiddleware
@@ -484,6 +485,15 @@ def create_app(
                             event_log=event_log,
                         )
                     )
+                    if harness_pool is not None:
+                        app.include_router(
+                            make_submit_tool_results_router(
+                                audit_log=audit_log,
+                                storage_root=storage_root,
+                                event_log=event_log,
+                                harness_pool=harness_pool,
+                            )
+                        )
             if acp_targets is not None:
                 app.include_router(
                     make_acp_router(
