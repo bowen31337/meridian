@@ -5,11 +5,13 @@ import dataclasses
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from ._audit import AuditLog, NoopAuditLog
 from ._contract import ToolDispatcher
 from ._schema import InputSchemaError, OutputSchemaError, validate_input, validate_output
+from ._secret_refs import SecretRefResolveError, substitute_secret_refs
 from ._telemetry import (
     get_tracer,
     record_capability_denial,
@@ -37,6 +39,7 @@ class RuntimeOptions:
 
     audit_log: AuditLog = field(default_factory=NoopAuditLog)
     on_error: Callable[[SandboxFailure], None] | None = None
+    storage_root: Path | None = None  # enables secret_ref://vault/{id}/{name} substitution
 
 
 def _now() -> str:
@@ -300,6 +303,40 @@ class Sandbox:
                     error_code="env_mismatch",
                     error_message=env_message,
                 )
+
+            # Secret-ref substitution.  Scan tool args for
+            # secret_ref://vault/{id}/{name} strings and replace with plaintext
+            # values fetched from disk.  Only enabled when storage_root is set.
+            # The original ref strings (not values) are logged; plaintext never
+            # enters any log.  On failure return is_error=True to surface the
+            # error to the model as a tool_result.
+            if opts.storage_root is not None:
+                try:
+                    input, _refs = substitute_secret_refs(
+                        input,
+                        storage_root=opts.storage_root,
+                        audit_log=opts.audit_log,
+                        tool_name=name,
+                        session_id=context.session_id,
+                    )
+                except SecretRefResolveError as exc:
+                    ref_error_message = exc.message
+                    if opts.on_error is not None:
+                        opts.on_error(
+                            SandboxFailure(
+                                code=exc.code,
+                                message=ref_error_message,
+                                tool_name=name,
+                                session_id=context.session_id,
+                                timestamp=now,
+                            )
+                        )
+                    return SandboxResult(
+                        content=ref_error_message,
+                        is_error=True,
+                        error_code=exc.code,
+                        error_message=ref_error_message,
+                    )
 
             # Pre-dispatch input schema validation.  Always validates — even
             # when input_schema is a bare {"type": "object"} — so callers

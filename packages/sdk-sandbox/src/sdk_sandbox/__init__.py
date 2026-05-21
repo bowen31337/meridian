@@ -2,6 +2,14 @@
 # Audit log
 from ._audit import AuditLog, NoopAuditLog
 
+# Secret-ref substitution
+from ._secret_refs import (
+    SecretRefNotFoundError,
+    SecretRefResolveError,
+    SecretRefVaultNotFoundError,
+    substitute_secret_refs,
+)
+
 # Dispatchers
 from ._dispatchers import (
     ContainerDispatcher,
@@ -81,6 +89,11 @@ __all__ = [
     # Audit
     "AuditLog",
     "NoopAuditLog",
+    # Secret-ref substitution
+    "SecretRefNotFoundError",
+    "SecretRefResolveError",
+    "SecretRefVaultNotFoundError",
+    "substitute_secret_refs",
     # MCP client
     "McpToolSpec",
     "discover_mcp_tools",
