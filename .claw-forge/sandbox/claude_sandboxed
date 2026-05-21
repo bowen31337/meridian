@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/observability-api-get-readyz-returns-200-when-storage-p/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/observability-system-mean-time-to-root-cause-for-a-fail/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

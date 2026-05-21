@@ -58,6 +58,7 @@ from ._skills import make_skills_router
 from ._user_profiles import make_user_profiles_router
 from ._hooks import make_hooks_router
 from ._webhooks import make_webhooks_router
+from ._diagnosis import make_diagnosis_router
 from ._events import make_events_router
 from ._files import make_files_router
 from ._handoff import make_handoff_router
@@ -286,6 +287,9 @@ def create_app(
                         storage_root=storage_root,
                         subscriber_bus=subscriber_bus,
                     )
+                )
+                app.include_router(
+                    make_diagnosis_router(audit_log=audit_log, storage_root=storage_root)
                 )
                 app.include_router(
                     make_replay_router(audit_log=audit_log, storage_root=storage_root)
