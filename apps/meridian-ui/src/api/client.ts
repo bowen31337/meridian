@@ -14,6 +14,29 @@ export type ErrorBody = components["schemas"]["ErrorResponse"];
 export type ListSessionsParams = operations["listSessions"]["parameters"]["query"];
 export type ListSessionEventsParams = operations["listSessionEvents"]["parameters"]["query"];
 
+export interface Vault {
+  id: string;
+  name: string;
+  backend: "os_keychain" | "encrypted_file";
+  created_at: string;
+}
+
+export interface VaultList {
+  items: Vault[];
+}
+
+export interface SecretMeta {
+  vault_id: string;
+  key: string;
+  created_at: string;
+  last_accessed_at: string | null;
+  requester_counts: Record<string, number>;
+}
+
+export interface SecretMetaList {
+  items: SecretMeta[];
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly body: ErrorBody | undefined;
@@ -60,6 +83,9 @@ export interface ApiClient {
   closeSession(sessionId: string): Promise<void>;
   listProviders(): Promise<ProviderList>;
   listSessionEvents(sessionId: string, params?: ListSessionEventsParams): Promise<SessionEventList>;
+  listVaults(): Promise<VaultList>;
+  listVaultSecrets(vaultId: string): Promise<SecretMetaList>;
+  deleteVaultSecret(vaultId: string, name: string): Promise<void>;
 }
 
 export function createApiClient(baseUrl: string): ApiClient {
@@ -79,6 +105,15 @@ export function createApiClient(baseUrl: string): ApiClient {
       request<SessionEventList>(
         baseUrl,
         `/sessions/${sessionId}/events${toQuery(params as Record<string, number | undefined>)}`,
+      ),
+    listVaults: () => request<VaultList>(baseUrl, "/v1/vaults"),
+    listVaultSecrets: (vaultId) =>
+      request<SecretMetaList>(baseUrl, `/v1/vaults/${encodeURIComponent(vaultId)}/secrets`),
+    deleteVaultSecret: (vaultId, name) =>
+      request<void>(
+        baseUrl,
+        `/v1/vaults/${encodeURIComponent(vaultId)}/secrets/${encodeURIComponent(name)}?confirm=true`,
+        { method: "DELETE" },
       ),
   };
 }

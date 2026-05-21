@@ -209,3 +209,15 @@ class EncryptedFileVaultBackend:
         data = self._read_secrets(vault_id)
         data[name] = record
         self._write_secrets(vault_id, data)
+
+    def list_secrets(self, vault_id: str) -> list[dict[str, Any]]:
+        data = self._read_secrets(vault_id)
+        return [{k: v for k, v in rec.items() if k != "value"} for rec in data.values()]
+
+    def delete_secret(self, vault_id: str, name: str) -> bool:
+        data = self._read_secrets(vault_id)
+        if name not in data:
+            return False
+        del data[name]
+        self._write_secrets(vault_id, data)
+        return True

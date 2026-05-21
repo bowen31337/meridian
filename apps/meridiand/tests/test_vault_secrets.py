@@ -23,6 +23,22 @@ Tests cover:
   - On GET failure, audit log entry written with event "vault.secret.meta.failed".
   - OTel span "vault.secret.meta" emitted on success and failure.
   - Routes present with storage_root, absent without.
+  - GET /v1/vaults/{id}/secrets returns 200 with items list.
+  - List items have vault_id, key, created_at, last_accessed_at, requester_counts.
+  - List items NEVER contain value.
+  - Empty list returned when vault has no secrets.
+  - Multiple stored secrets all appear in list.
+  - Unknown vault_id on list returns 404 with code "vault_not_found".
+  - OTel span "vault.secret.list" emitted on list success and failure.
+  - Failure writes audit log entry with event "vault.secret.list.failed".
+  - DELETE /v1/vaults/{id}/secrets/{name} without confirm=true returns 400.
+  - DELETE without confirm has code "vault_secret_delete_confirmation_required".
+  - DELETE /v1/vaults/{id}/secrets/{name}?confirm=true returns 204.
+  - Deleted secret absent from subsequent list.
+  - Second DELETE on same name returns 404 with code "vault_secret_not_found".
+  - DELETE on unknown vault returns 404 with code "vault_not_found".
+  - DELETE failures write audit log entry with event "vault.secret.delete.failed".
+  - OTel span "vault.secret.delete" emitted on delete success and failure.
 """
 
 from __future__ import annotations
@@ -841,4 +857,550 @@ class TestVaultSecretMetaRouteWiring:
         app = create_app(FileAuditLog(storage_root))
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.get("/v1/vaults/vault_any/secrets/key/meta")
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# GET list secrets success
+# ---------------------------------------------------------------------------
+
+
+class TestVaultSecretListSuccess:
+    def test_returns_200(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        resp = client.get(f"/v1/vaults/{vault_id}/secrets")
+        assert resp.status_code == 200
+
+    def test_empty_items_when_no_secrets(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        body = client.get(f"/v1/vaults/{vault_id}/secrets").json()
+        assert body["items"] == []
+
+    def test_returns_all_stored_secrets(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="key_a")
+        _store_secret(client, vault_id, key="key_b")
+        body = client.get(f"/v1/vaults/{vault_id}/secrets").json()
+        assert len(body["items"]) == 2
+
+    def test_single_secret_in_list(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="solo_key")
+        body = client.get(f"/v1/vaults/{vault_id}/secrets").json()
+        assert len(body["items"]) == 1
+        assert body["items"][0]["key"] == "solo_key"
+
+    def test_item_has_vault_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="vk")
+        item = client.get(f"/v1/vaults/{vault_id}/secrets").json()["items"][0]
+        assert item["vault_id"] == vault_id
+
+    def test_item_has_key(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="named_key")
+        item = client.get(f"/v1/vaults/{vault_id}/secrets").json()["items"][0]
+        assert item["key"] == "named_key"
+
+    def test_item_has_created_at(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="ts_k")
+        item = client.get(f"/v1/vaults/{vault_id}/secrets").json()["items"][0]
+        assert "created_at" in item
+        assert isinstance(item["created_at"], str)
+        assert len(item["created_at"]) > 0
+
+    def test_item_has_last_accessed_at(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="la_k")
+        item = client.get(f"/v1/vaults/{vault_id}/secrets").json()["items"][0]
+        assert "last_accessed_at" in item
+
+    def test_item_has_requester_counts(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="rc_k")
+        item = client.get(f"/v1/vaults/{vault_id}/secrets").json()["items"][0]
+        assert "requester_counts" in item
+        assert isinstance(item["requester_counts"], dict)
+
+    def test_item_does_not_contain_value(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="nv_k", value="secret_needle")
+        body = client.get(f"/v1/vaults/{vault_id}/secrets").json()
+        assert "value" not in body["items"][0]
+        assert "secret_needle" not in json.dumps(body)
+
+
+# ---------------------------------------------------------------------------
+# GET list secrets not found
+# ---------------------------------------------------------------------------
+
+
+class TestVaultSecretListNotFound:
+    def test_unknown_vault_returns_404(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.get("/v1/vaults/vault_ghost/secrets")
+        assert resp.status_code == 404
+
+    def test_not_found_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.get("/v1/vaults/vault_ghost/secrets").json()
+        assert body["error"]["code"] == "vault_not_found"
+
+    def test_not_found_error_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.get("/v1/vaults/vault_ghost/secrets").json()
+        assert len(body["error"]["message"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# GET list secrets audit log
+# ---------------------------------------------------------------------------
+
+
+class TestVaultSecretListAuditLog:
+    def test_vault_not_found_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/vaults/vault_ghost/secrets")
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "vault.secret.list.failed" for r in records)
+
+    def test_failure_audit_level_is_error(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/vaults/vault_ghost/secrets")
+        record = next(
+            r
+            for r in _audit_records(storage_root)
+            if r.get("event") == "vault.secret.list.failed"
+        )
+        assert record["level"] == "error"
+
+    def test_not_found_audit_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/vaults/vault_ghost/secrets")
+        record = next(
+            r
+            for r in _audit_records(storage_root)
+            if r.get("event") == "vault.secret.list.failed"
+        )
+        assert record["code"] == "vault_not_found"
+
+    def test_audit_detail_has_vault_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/vaults/vault_ghost/secrets")
+        record = next(
+            r
+            for r in _audit_records(storage_root)
+            if r.get("event") == "vault.secret.list.failed"
+        )
+        assert record["detail"]["vault_id"] == "vault_ghost"
+
+    def test_audit_detail_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.get("/v1/vaults/vault_ghost/secrets")
+        record = next(
+            r
+            for r in _audit_records(storage_root)
+            if r.get("event") == "vault.secret.list.failed"
+        )
+        assert len(record["detail"]["message"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# GET list secrets OTel spans
+# ---------------------------------------------------------------------------
+
+
+class TestVaultSecretListOtel:
+    def setup_method(self) -> None:
+        _otel_exporter.clear()
+
+    def _client(self, storage_root: Path) -> TestClient:
+        os_keychain = OsKeychainVaultBackend(_keyring=_MemoryKeyring())
+        app = create_app(
+            FileAuditLog(storage_root),
+            storage_root=storage_root,
+            os_keychain_backend=os_keychain,
+        )
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_success_emits_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _otel_exporter.clear()
+        client.get(f"/v1/vaults/{vault_id}/secrets")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "vault.secret.list" in span_names
+
+    def test_failure_emits_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        client.get("/v1/vaults/vault_ghost/secrets")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "vault.secret.list" in span_names
+
+    def test_failure_span_has_error_status(self, storage_root: Path) -> None:
+        from opentelemetry.trace import StatusCode
+
+        client = self._client(storage_root)
+        client.get("/v1/vaults/vault_ghost/secrets")
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("vault.secret.list")
+        assert span is not None
+        assert span.status.status_code == StatusCode.ERROR
+
+    def test_success_span_has_vault_id_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _otel_exporter.clear()
+        client.get(f"/v1/vaults/{vault_id}/secrets")
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("vault.secret.list")
+        assert span is not None
+        assert span.attributes["vault.id"] == vault_id
+
+
+# ---------------------------------------------------------------------------
+# GET list secrets route wiring
+# ---------------------------------------------------------------------------
+
+
+class TestVaultSecretListRouteWiring:
+    def test_route_present_with_storage_root(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        resp = client.get(f"/v1/vaults/{vault_id}/secrets")
+        assert resp.status_code != 404
+
+    def test_route_absent_without_storage_root(self, storage_root: Path) -> None:
+        app = create_app(FileAuditLog(storage_root))
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.get("/v1/vaults/vault_any/secrets")
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# DELETE secret success
+# ---------------------------------------------------------------------------
+
+
+class TestVaultSecretDeleteSuccess:
+    def test_delete_returns_204(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="del_key")
+        resp = client.delete(
+            f"/v1/vaults/{vault_id}/secrets/del_key?confirm=true"
+        )
+        assert resp.status_code == 204
+
+    def test_delete_response_has_no_body(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="nb_key")
+        resp = client.delete(
+            f"/v1/vaults/{vault_id}/secrets/nb_key?confirm=true"
+        )
+        assert resp.content == b""
+
+    def test_deleted_secret_absent_from_list(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="gone_key")
+        client.delete(f"/v1/vaults/{vault_id}/secrets/gone_key?confirm=true")
+        items = client.get(f"/v1/vaults/{vault_id}/secrets").json()["items"]
+        assert all(item["key"] != "gone_key" for item in items)
+
+    def test_other_secrets_remain_after_delete(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="keep_key")
+        _store_secret(client, vault_id, key="del_key2")
+        client.delete(f"/v1/vaults/{vault_id}/secrets/del_key2?confirm=true")
+        items = client.get(f"/v1/vaults/{vault_id}/secrets").json()["items"]
+        assert len(items) == 1
+        assert items[0]["key"] == "keep_key"
+
+    def test_second_delete_returns_404(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="once_key")
+        client.delete(f"/v1/vaults/{vault_id}/secrets/once_key?confirm=true")
+        resp = client.delete(
+            f"/v1/vaults/{vault_id}/secrets/once_key?confirm=true"
+        )
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# DELETE secret confirmation
+# ---------------------------------------------------------------------------
+
+
+class TestVaultSecretDeleteConfirmation:
+    def test_missing_confirm_returns_400(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="conf_key")
+        resp = client.delete(f"/v1/vaults/{vault_id}/secrets/conf_key")
+        assert resp.status_code == 400
+
+    def test_missing_confirm_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="cc_key")
+        body = client.delete(f"/v1/vaults/{vault_id}/secrets/cc_key").json()
+        assert body["error"]["code"] == "vault_secret_delete_confirmation_required"
+
+    def test_missing_confirm_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="cm_key")
+        body = client.delete(f"/v1/vaults/{vault_id}/secrets/cm_key").json()
+        assert len(body["error"]["message"]) > 0
+
+    def test_false_confirm_returns_400(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="fc_key")
+        resp = client.delete(
+            f"/v1/vaults/{vault_id}/secrets/fc_key?confirm=false"
+        )
+        assert resp.status_code == 400
+
+    def test_secret_not_deleted_without_confirm(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="nd_key")
+        client.delete(f"/v1/vaults/{vault_id}/secrets/nd_key")
+        items = client.get(f"/v1/vaults/{vault_id}/secrets").json()["items"]
+        assert any(item["key"] == "nd_key" for item in items)
+
+
+# ---------------------------------------------------------------------------
+# DELETE secret not found
+# ---------------------------------------------------------------------------
+
+
+class TestVaultSecretDeleteNotFound:
+    def test_unknown_key_returns_404(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        resp = client.delete(
+            f"/v1/vaults/{vault_id}/secrets/no_such_key?confirm=true"
+        )
+        assert resp.status_code == 404
+
+    def test_unknown_key_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        body = client.delete(
+            f"/v1/vaults/{vault_id}/secrets/no_such_key?confirm=true"
+        ).json()
+        assert body["error"]["code"] == "vault_secret_not_found"
+
+    def test_unknown_key_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        body = client.delete(
+            f"/v1/vaults/{vault_id}/secrets/no_such_key?confirm=true"
+        ).json()
+        assert len(body["error"]["message"]) > 0
+
+    def test_unknown_vault_returns_404(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.delete(
+            "/v1/vaults/vault_ghost/secrets/any_key?confirm=true"
+        )
+        assert resp.status_code == 404
+
+    def test_unknown_vault_error_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.delete(
+            "/v1/vaults/vault_ghost/secrets/any_key?confirm=true"
+        ).json()
+        assert body["error"]["code"] == "vault_not_found"
+
+
+# ---------------------------------------------------------------------------
+# DELETE secret audit log
+# ---------------------------------------------------------------------------
+
+
+class TestVaultSecretDeleteAuditLog:
+    def test_no_confirm_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="aud_key")
+        client.delete(f"/v1/vaults/{vault_id}/secrets/aud_key")
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "vault.secret.delete.failed" for r in records)
+
+    def test_not_found_writes_audit(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        client.delete(f"/v1/vaults/{vault_id}/secrets/missing?confirm=true")
+        records = _audit_records(storage_root)
+        assert any(r.get("event") == "vault.secret.delete.failed" for r in records)
+
+    def test_failure_audit_level_is_error(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.delete("/v1/vaults/vault_ghost/secrets/k?confirm=true")
+        record = next(
+            r
+            for r in _audit_records(storage_root)
+            if r.get("event") == "vault.secret.delete.failed"
+        )
+        assert record["level"] == "error"
+
+    def test_no_confirm_audit_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="ca_key2")
+        client.delete(f"/v1/vaults/{vault_id}/secrets/ca_key2")
+        record = next(
+            r
+            for r in _audit_records(storage_root)
+            if r.get("event") == "vault.secret.delete.failed"
+        )
+        assert record["code"] == "vault_secret_delete_confirmation_required"
+
+    def test_not_found_audit_code(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        client.delete(f"/v1/vaults/{vault_id}/secrets/missing?confirm=true")
+        record = next(
+            r
+            for r in _audit_records(storage_root)
+            if r.get("event") == "vault.secret.delete.failed"
+        )
+        assert record["code"] == "vault_secret_not_found"
+
+    def test_audit_detail_has_vault_id(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.delete("/v1/vaults/vault_ghost/secrets/k?confirm=true")
+        record = next(
+            r
+            for r in _audit_records(storage_root)
+            if r.get("event") == "vault.secret.delete.failed"
+        )
+        assert record["detail"]["vault_id"] == "vault_ghost"
+
+    def test_audit_detail_has_name(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.delete("/v1/vaults/vault_ghost/secrets/target_key?confirm=true")
+        record = next(
+            r
+            for r in _audit_records(storage_root)
+            if r.get("event") == "vault.secret.delete.failed"
+        )
+        assert record["detail"]["name"] == "target_key"
+
+    def test_audit_detail_has_message(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.delete("/v1/vaults/vault_ghost/secrets/k?confirm=true")
+        record = next(
+            r
+            for r in _audit_records(storage_root)
+            if r.get("event") == "vault.secret.delete.failed"
+        )
+        assert len(record["detail"]["message"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# DELETE secret OTel spans
+# ---------------------------------------------------------------------------
+
+
+class TestVaultSecretDeleteOtel:
+    def setup_method(self) -> None:
+        _otel_exporter.clear()
+
+    def _client(self, storage_root: Path) -> TestClient:
+        os_keychain = OsKeychainVaultBackend(_keyring=_MemoryKeyring())
+        app = create_app(
+            FileAuditLog(storage_root),
+            storage_root=storage_root,
+            os_keychain_backend=os_keychain,
+        )
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_success_emits_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="otel_del")
+        _otel_exporter.clear()
+        client.delete(f"/v1/vaults/{vault_id}/secrets/otel_del?confirm=true")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "vault.secret.delete" in span_names
+
+    def test_failure_emits_span(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        client.delete("/v1/vaults/vault_ghost/secrets/k?confirm=true")
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "vault.secret.delete" in span_names
+
+    def test_failure_span_has_error_status(self, storage_root: Path) -> None:
+        from opentelemetry.trace import StatusCode
+
+        client = self._client(storage_root)
+        client.delete("/v1/vaults/vault_ghost/secrets/k?confirm=true")
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("vault.secret.delete")
+        assert span is not None
+        assert span.status.status_code == StatusCode.ERROR
+
+    def test_success_span_has_vault_id_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="attr_del")
+        _otel_exporter.clear()
+        client.delete(f"/v1/vaults/{vault_id}/secrets/attr_del?confirm=true")
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("vault.secret.delete")
+        assert span is not None
+        assert span.attributes["vault.id"] == vault_id
+
+    def test_success_span_has_secret_key_attribute(self, storage_root: Path) -> None:
+        client = self._client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="named_del")
+        _otel_exporter.clear()
+        client.delete(
+            f"/v1/vaults/{vault_id}/secrets/named_del?confirm=true"
+        )
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("vault.secret.delete")
+        assert span is not None
+        assert span.attributes["secret.key"] == "named_del"
+
+
+# ---------------------------------------------------------------------------
+# DELETE secret route wiring
+# ---------------------------------------------------------------------------
+
+
+class TestVaultSecretDeleteRouteWiring:
+    def test_route_present_with_storage_root(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        vault_id = _create_vault(client)["id"]
+        _store_secret(client, vault_id, key="wiring_del")
+        resp = client.delete(
+            f"/v1/vaults/{vault_id}/secrets/wiring_del?confirm=true"
+        )
+        assert resp.status_code != 404
+
+    def test_route_absent_without_storage_root(self, storage_root: Path) -> None:
+        app = create_app(FileAuditLog(storage_root))
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.delete("/v1/vaults/vault_any/secrets/key?confirm=true")
         assert resp.status_code == 404

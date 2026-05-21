@@ -12,4 +12,9 @@ export const queryKeys = {
     all: () => ["providers"] as const,
     list: () => ["providers", "list"] as const,
   },
+  vaults: {
+    all: () => ["vaults"] as const,
+    list: () => ["vaults", "list"] as const,
+    secrets: (vaultId: string) => ["vaults", vaultId, "secrets"] as const,
+  },
 } as const;

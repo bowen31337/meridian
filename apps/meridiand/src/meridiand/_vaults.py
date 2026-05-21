@@ -197,6 +197,56 @@ class VaultSecretMetaError(MeridianError):
         return 500
 
 
+class VaultSecretListError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="vault_secret_list_failed",
+            message=message,
+            timestamp=timestamp,
+            cause=cause,
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
+class VaultSecretDeleteError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="vault_secret_delete_failed",
+            message=message,
+            timestamp=timestamp,
+            cause=cause,
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
+class VaultSecretDeleteConfirmationError(MeridianError):
+    def __init__(self, *, name: str, vault_id: str, timestamp: str) -> None:
+        super().__init__(
+            code="vault_secret_delete_confirmation_required",
+            message=f"Deleting secret '{name}' from vault '{vault_id}' requires confirm=true",
+            timestamp=timestamp,
+        )
+
+    def http_status(self) -> int:
+        return 400
+
+
 # ---------------------------------------------------------------------------
 # Request model
 # ---------------------------------------------------------------------------
@@ -232,6 +282,26 @@ def _validate_secret_request(
             timestamp=_now(),
         )
     return None
+
+
+def _keychain_index_path(vault_id: str, storage_root: Path) -> Path:
+    return storage_root / "vaults" / vault_id / "keychain_keys.json"
+
+
+def _read_keychain_index(vault_id: str, storage_root: Path) -> list[str]:
+    p = _keychain_index_path(vault_id, storage_root)
+    if not p.exists():
+        return []
+    try:
+        return json.loads(p.read_text())
+    except Exception:
+        return []
+
+
+def _write_keychain_index(vault_id: str, storage_root: Path, keys: list[str]) -> None:
+    p = _keychain_index_path(vault_id, storage_root)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(keys))
 
 
 def _vault_is_referenced(vault_id: str, storage_root: Path) -> bool:
@@ -530,6 +600,10 @@ def make_vaults_router(
                     secret_record = os_keychain_backend.store_secret(
                         vault_id, body.key, body.value, now
                     )
+                    index = _read_keychain_index(vault_id, storage_root)
+                    if body.key not in index:
+                        index.append(body.key)
+                    _write_keychain_index(vault_id, storage_root, index)
 
             except (
                 VaultNotFoundError,
@@ -698,5 +772,187 @@ def make_vaults_router(
                 raise err2
 
         return JSONResponse(content=meta, status_code=200)
+
+    @router.get("/v1/vaults/{vault_id}/secrets", status_code=200)
+    async def list_vault_secrets(vault_id: str) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "vault.secret.list",
+            attributes={"vault.id": vault_id},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="vault.secret.list.invocation",
+                    code="vault_secret_list",
+                    timestamp=now,
+                ),
+            )
+
+            items: list[dict[str, Any]] = []
+            try:
+                vault_file = vaults_dir / f"{vault_id}.json"
+                if not vault_file.exists():
+                    raise VaultNotFoundError(vault_id=vault_id, timestamp=now)
+
+                vault_meta = json.loads(vault_file.read_text())
+                if vault_meta.get("backend") == "encrypted_file":
+                    if vault_backend is None:
+                        raise VaultSecretListError(
+                            message="encrypted_file backend is not configured; "
+                            "start the daemon with a passphrase or key file",
+                            timestamp=now,
+                        )
+                    items = vault_backend.list_secrets(vault_id)
+                else:
+                    if os_keychain_backend is None:
+                        raise VaultSecretListError(
+                            message="os_keychain backend is not configured; "
+                            "pass an OsKeychainVaultBackend to the application factory",
+                            timestamp=now,
+                        )
+                    index = _read_keychain_index(vault_id, storage_root)
+                    items = os_keychain_backend.list_secrets(vault_id, index)
+
+            except VaultNotFoundError as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="vault.secret.list.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={"vault_id": vault_id, "message": err.message},
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = VaultSecretListError(
+                    message=f"Failed to list secrets: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="vault.secret.list.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={"vault_id": vault_id, "message": err2.message},
+                    )
+                )
+                raise err2
+
+        return JSONResponse(content={"items": items}, status_code=200)
+
+    @router.delete("/v1/vaults/{vault_id}/secrets/{name}", status_code=204)
+    async def delete_vault_secret(
+        vault_id: str, name: str, confirm: bool = False
+    ) -> Response:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "vault.secret.delete",
+            attributes={"vault.id": vault_id, "secret.key": name},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="vault.secret.delete.invocation",
+                    code="vault_secret_delete",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                if not confirm:
+                    raise VaultSecretDeleteConfirmationError(
+                        name=name, vault_id=vault_id, timestamp=now
+                    )
+
+                vault_file = vaults_dir / f"{vault_id}.json"
+                if not vault_file.exists():
+                    raise VaultNotFoundError(vault_id=vault_id, timestamp=now)
+
+                vault_meta = json.loads(vault_file.read_text())
+                found: bool
+                if vault_meta.get("backend") == "encrypted_file":
+                    if vault_backend is None:
+                        raise VaultSecretDeleteError(
+                            message="encrypted_file backend is not configured; "
+                            "start the daemon with a passphrase or key file",
+                            timestamp=now,
+                        )
+                    found = vault_backend.delete_secret(vault_id, name)
+                else:
+                    if os_keychain_backend is None:
+                        raise VaultSecretDeleteError(
+                            message="os_keychain backend is not configured; "
+                            "pass an OsKeychainVaultBackend to the application factory",
+                            timestamp=now,
+                        )
+                    found = os_keychain_backend.delete_secret(vault_id, name)
+                    if found:
+                        index = _read_keychain_index(vault_id, storage_root)
+                        _write_keychain_index(
+                            vault_id,
+                            storage_root,
+                            [k for k in index if k != name],
+                        )
+
+                if not found:
+                    raise VaultSecretNotFoundError(
+                        vault_id=vault_id, name=name, timestamp=now
+                    )
+
+            except (
+                VaultSecretDeleteConfirmationError,
+                VaultNotFoundError,
+                VaultSecretNotFoundError,
+            ) as err:
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="vault.secret.delete.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "vault_id": vault_id,
+                            "name": name,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = VaultSecretDeleteError(
+                    message=f"Failed to delete secret: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="vault.secret.delete.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={
+                            "vault_id": vault_id,
+                            "name": name,
+                            "message": err2.message,
+                        },
+                    )
+                )
+                raise err2 from exc
+
+        return Response(status_code=204)
 
     return router

@@ -67,3 +67,17 @@ class OsKeychainVaultBackend:
         self._kr.set_password(
             _SERVICE, self._account(vault_id, name), json.dumps(record)
         )
+
+    def list_secrets(self, vault_id: str, keys: list[str]) -> list[dict[str, Any]]:
+        items = []
+        for key in keys:
+            rec = self.get_secret(vault_id, key)
+            if rec is not None:
+                items.append({k: v for k, v in rec.items() if k != "value"})
+        return items
+
+    def delete_secret(self, vault_id: str, name: str) -> bool:
+        if not self.secret_exists(vault_id, name):
+            return False
+        self._kr.delete_password(_SERVICE, self._account(vault_id, name))
+        return True
