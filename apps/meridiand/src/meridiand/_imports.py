@@ -104,6 +104,59 @@ class OpenClawImportRequest(BaseModel):
     records: list[OpenClawRecord]
 
 
+class OpenClawSessionRecord(BaseModel):
+    """A single session exported from OpenClaw."""
+
+    id: str
+    title: str | None = None
+    agent_id: str | None = None
+    created_at: str
+    events: list[dict[str, Any]] | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class OpenClawMemoryRecord(BaseModel):
+    """A single memory entry exported from an OpenClaw MEMORY.md."""
+
+    key: str
+    content: str
+    metadata: dict[str, Any] | None = None
+
+
+_CONSERVATIVE_TOOL_CAPS: dict[str, Any] = {
+    "allow_exec": False,
+    "allow_network": False,
+    "allow_file_write": False,
+    "allow_file_read": True,
+    "sandboxed": True,
+}
+
+_KNOWN_HANDLER_KINDS = frozenset(
+    {"http", "subprocess", "mcp", "container", "in_process"}
+)
+
+
+class OpenClawToolRecord(BaseModel):
+    """A single tool definition exported from OpenClaw."""
+
+    id: str
+    name: str
+    description: str | None = None
+    input_schema: dict[str, Any] | None = None
+    handler_kind: str | None = None
+    capabilities: dict[str, Any] | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class OpenClawInstallImportRequest(BaseModel):
+    """Full OpenClaw installation import — all subsystems are optional."""
+
+    channels: list[OpenClawRecord] = Field(default_factory=list)
+    sessions: list[OpenClawSessionRecord] = Field(default_factory=list)
+    memory: list[OpenClawMemoryRecord] = Field(default_factory=list)
+    tools: list[OpenClawToolRecord] = Field(default_factory=list)
+
+
 class HermesRecord(BaseModel):
     """A single skill record exported from Hermes."""
 
@@ -416,6 +469,193 @@ def _openclaw_checklist(
         f"Imported {total} channel(s) from OpenClaw; "
         f"{lossy_count} had lossy field mappings requiring review"
     )
+    return items
+
+
+def _translate_openclaw_session(
+    rec: OpenClawSessionRecord, *, now: str
+) -> tuple[dict[str, Any], list[str]]:
+    """Translate one OpenClaw session record to a Meridian session record."""
+    lossy: list[str] = []
+    if not rec.created_at.strip():
+        raise ValueError("created_at must not be empty")
+
+    session_id = f"sess_{uuid.uuid4().hex}"
+    thread_id = f"thread_{uuid.uuid4().hex}"
+
+    meta: dict[str, Any] = {"openclaw_id": rec.id}
+    if rec.title:
+        meta["openclaw_title"] = rec.title
+    if rec.metadata:
+        for k, v in rec.metadata.items():
+            meta[f"openclaw_meta_{k}"] = v
+        lossy.append("metadata")
+
+    events: list[dict[str, Any]] = []
+    if rec.events:
+        for seq, ev in enumerate(rec.events):
+            normalized = dict(ev)
+            normalized.setdefault("session_id", session_id)
+            normalized.setdefault("thread_id", thread_id)
+            normalized.setdefault("seq", seq)
+            events.append(normalized)
+    else:
+        lossy.append("events_empty")
+
+    session_record: dict[str, Any] = {
+        "session_id": session_id,
+        "thread_id": thread_id,
+        "manifest": {
+            "session_id": session_id,
+            "agent_id": rec.agent_id,
+            "agent_version_id": None,
+            "thread_id": thread_id,
+            "status": "archived",
+            "created_at": rec.created_at,
+            "imported_at": now,
+            "metadata": meta,
+        },
+        "thread_record": {
+            "thread_id": thread_id,
+            "session_id": session_id,
+            "created_at": rec.created_at,
+        },
+        "events": events,
+        "event_count": len(events),
+    }
+    return session_record, lossy
+
+
+def _translate_openclaw_memory_store(
+    records: list[OpenClawMemoryRecord], *, now: str
+) -> tuple[dict[str, Any], list[str]]:
+    """Translate a list of OpenClaw memory records into one Meridian memory_store record."""
+    lossy: list[str] = []
+    store_id = f"memstore_{uuid.uuid4().hex}"
+
+    if not records:
+        lossy.append("memory_empty")
+
+    store_record: dict[str, Any] = {
+        "id": store_id,
+        "name": "openclaw-memory",
+        "backend": "sqlite-vec",
+        "scope": "agent",
+        "created_at": now,
+        "metadata": {
+            "from": "openclaw",
+            "openclaw_source": "MEMORY.md",
+            "entry_count": len(records),
+        },
+    }
+    return store_record, lossy
+
+
+def _translate_openclaw_tool(
+    rec: OpenClawToolRecord, *, now: str
+) -> tuple[dict[str, Any], list[str]]:
+    """Translate one OpenClaw tool definition to a Meridian tool registry record.
+
+    Capabilities not supplied by the source are filled with conservative defaults:
+    allow_exec=False, allow_network=False, allow_file_write=False, allow_file_read=True,
+    sandboxed=True.
+    """
+    lossy: list[str] = []
+
+    if not rec.name.strip():
+        raise ValueError("name must not be empty")
+
+    handler_kind = rec.handler_kind
+    if handler_kind is not None and handler_kind not in _KNOWN_HANDLER_KINDS:
+        lossy.append("handler_kind_unknown")
+    if handler_kind is None:
+        lossy.append("handler_kind_missing")  # needs assignment post-import
+
+    # Merge conservative defaults with any supplied caps; source wins where supplied.
+    caps: dict[str, Any] = dict(_CONSERVATIVE_TOOL_CAPS)
+    if rec.capabilities:
+        caps.update(rec.capabilities)
+        supplied = set(rec.capabilities.keys())
+        overridden = supplied & set(_CONSERVATIVE_TOOL_CAPS.keys())
+        if overridden - {"allow_file_read"}:
+            # Any cap that relaxes beyond read-only is lossy — needs human review.
+            lossy.append("capabilities_relaxed")
+    else:
+        lossy.append("capabilities_defaulted")  # all caps were conservative-defaulted
+
+    tool_id = f"tool_{uuid.uuid4().hex}"
+    meta: dict[str, Any] = {"openclaw_id": rec.id}
+    if rec.metadata:
+        for k, v in rec.metadata.items():
+            meta[f"openclaw_meta_{k}"] = v
+        lossy.append("metadata")
+
+    tool_record: dict[str, Any] = {
+        "id": tool_id,
+        "name": rec.name,
+        "description": rec.description,
+        "input_schema": rec.input_schema or {"type": "object", "properties": {}},
+        "handler_kind": handler_kind,
+        "capabilities": caps,
+        "created_at": now,
+        "source": "imported",
+        "source_type": "openclaw",
+        "metadata": meta,
+    }
+    return tool_record, lossy
+
+
+def _openclaw_install_checklist(
+    body: OpenClawInstallImportRequest,
+    results: dict[str, Any],
+) -> list[str]:
+    items: list[str] = []
+
+    if results["channels"]["imported"]:
+        needs_vault = results["channels"].get("needs_vault_ref_count", 0)
+        if needs_vault:
+            items.append(
+                f"Assign config.token_vault_ref to {needs_vault} imported channel(s) "
+                "before activating them"
+            )
+
+    if results["sessions"]["imported"]:
+        items.append(
+            f"Imported {results['sessions']['imported']} session(s) with status=archived; "
+            "agent_id references may not resolve if agents were not also migrated"
+        )
+
+    if results["memory_stores"]["imported"]:
+        items.append(
+            f"Memory store created from MEMORY.md (scope=agent, tagged from:openclaw); "
+            "write content via POST /v1/memory_stores/{store_id}/write to index entries"
+        )
+
+    tool_cap_notes: list[str] = []
+    for rec in body.tools:
+        if rec.capabilities and any(
+            rec.capabilities.get(k) for k in ("allow_exec", "allow_network", "allow_file_write")
+        ):
+            tool_cap_notes.append(rec.name)
+    if tool_cap_notes:
+        items.append(
+            f"Tool(s) {tool_cap_notes} had non-conservative capabilities in source — "
+            "review capabilities field before activating"
+        )
+
+    missing_handler = [rec.name for rec in body.tools if rec.handler_kind is None]
+    if missing_handler:
+        items.append(
+            f"Tool(s) {missing_handler} had no handler_kind — assign a handler before use"
+        )
+
+    totals = [
+        f"channels={results['channels']['imported']}",
+        f"sessions={results['sessions']['imported']}",
+        f"memory_stores={results['memory_stores']['imported']}",
+        f"tools={results['tools']['imported']}",
+    ]
+    items.append(f"OpenClaw installation import complete: {', '.join(totals)}")
     return items
 
 
@@ -787,6 +1027,8 @@ def make_imports_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter
     profiles_dir = storage_root / "user_profiles"
     cron_dir = storage_root / "cron"
     sessions_dir = storage_root / "sessions"
+    memory_stores_dir = storage_root / "memory_stores"
+    tools_dir = storage_root / "tools"
 
     @router.post("/v1/x/imports/openclaw", status_code=201)
     async def import_openclaw(body: OpenClawImportRequest) -> JSONResponse:
@@ -912,6 +1154,286 @@ def make_imports_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter
                 "lossy_count": lossy_count,
                 "audit_path": import_audit.path.name,
                 "channel_ids": [ch["id"] for ch in channel_records],
+            },
+            status_code=201,
+        )
+
+    @router.post("/v1/x/imports/openclaw/install", status_code=201)
+    async def import_openclaw_install(body: OpenClawInstallImportRequest) -> JSONResponse:  # noqa: C901
+        now = _now()
+        tracer = get_tracer()
+        total_records = (
+            len(body.channels)
+            + len(body.sessions)
+            + len(body.memory)
+            + len(body.tools)
+        )
+        import_audit = ImportAuditLog(storage_root, source="openclaw_install", timestamp=now)
+
+        with tracer.start_as_current_span(
+            "import.openclaw_install",
+            attributes={
+                "import.source": "openclaw_install",
+                "import.record_count": total_records,
+            },
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="import.openclaw_install.invocation",
+                    code="import_openclaw_install",
+                    timestamp=now,
+                ),
+            )
+            import_audit.write_started(record_count=total_records, ts=now)
+
+            results: dict[str, Any] = {
+                "channels": {"imported": 0, "lossy_count": 0, "ids": [], "needs_vault_ref_count": 0},
+                "sessions": {"imported": 0, "lossy_count": 0, "ids": []},
+                "memory_stores": {"imported": 0, "lossy_count": 0, "ids": []},
+                "tools": {"imported": 0, "lossy_count": 0, "ids": []},
+            }
+            all_written: list[Path] = []
+
+            def _fail(err: MeridianError, *, event: str) -> None:
+                record_error(span, err)
+                import_audit.write_failed(code=err.code, message=err.message)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event=event,
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={"message": err.message, "audit_path": import_audit.path.name},
+                    )
+                )
+
+            # ----------------------------------------------------------------
+            # Phase 1: Translate all records in memory
+            # ----------------------------------------------------------------
+
+            # --- channels ---
+            channel_records: list[dict[str, Any]] = []
+            channel_lossy: list[list[str]] = []
+            try:
+                for seq, rec in enumerate(body.channels):
+                    if not rec.id.strip():
+                        raise ImportRecordInvalidError(
+                            message=f"channels[{seq}] has empty 'id'", timestamp=now, seq=seq
+                        )
+                    try:
+                        cr, lossy = _translate_openclaw(rec, now=now)
+                    except Exception as exc:
+                        raise ImportRecordInvalidError(
+                            message=f"Failed to translate channel '{rec.id}': {exc}",
+                            timestamp=now,
+                            seq=seq,
+                        ) from exc
+                    import_audit.write_record_translated(
+                        seq=seq, source_id=rec.id, target_id=cr["id"], kind="channel", lossy_fields=lossy
+                    )
+                    channel_records.append(cr)
+                    channel_lossy.append(lossy)
+            except ImportRecordInvalidError as err:
+                _fail(err, event="import.openclaw_install.failed")
+                raise
+
+            # --- sessions ---
+            session_records: list[dict[str, Any]] = []
+            session_lossy: list[list[str]] = []
+            seq_offset = len(body.channels)
+            try:
+                for seq, rec in enumerate(body.sessions):
+                    if not rec.id.strip():
+                        raise ImportRecordInvalidError(
+                            message=f"sessions[{seq}] has empty 'id'",
+                            timestamp=now,
+                            seq=seq_offset + seq,
+                        )
+                    try:
+                        sr, lossy = _translate_openclaw_session(rec, now=now)
+                    except Exception as exc:
+                        raise ImportRecordInvalidError(
+                            message=f"Failed to translate session '{rec.id}': {exc}",
+                            timestamp=now,
+                            seq=seq_offset + seq,
+                        ) from exc
+                    import_audit.write_record_translated(
+                        seq=seq_offset + seq,
+                        source_id=rec.id,
+                        target_id=sr["session_id"],
+                        kind="session",
+                        lossy_fields=lossy,
+                    )
+                    session_records.append(sr)
+                    session_lossy.append(lossy)
+            except ImportRecordInvalidError as err:
+                _fail(err, event="import.openclaw_install.failed")
+                raise
+
+            # --- memory ---
+            memory_store_record: dict[str, Any] | None = None
+            memory_lossy: list[str] = []
+            seq_offset += len(body.sessions)
+            if body.memory:
+                try:
+                    memory_store_record, memory_lossy = _translate_openclaw_memory_store(
+                        body.memory, now=now
+                    )
+                except Exception as exc:
+                    err_mem = ImportRecordInvalidError(
+                        message=f"Failed to translate memory records: {exc}",
+                        timestamp=now,
+                        seq=seq_offset,
+                    )
+                    _fail(err_mem, event="import.openclaw_install.failed")
+                    raise err_mem from exc
+                import_audit.write_record_translated(
+                    seq=seq_offset,
+                    source_id="MEMORY.md",
+                    target_id=memory_store_record["id"],
+                    kind="memory_store",
+                    lossy_fields=memory_lossy,
+                )
+
+            # --- tools ---
+            tool_records: list[dict[str, Any]] = []
+            tool_lossy: list[list[str]] = []
+            seq_offset += (1 if body.memory else 0)
+            try:
+                for seq, rec in enumerate(body.tools):
+                    if not rec.id.strip():
+                        raise ImportRecordInvalidError(
+                            message=f"tools[{seq}] has empty 'id'",
+                            timestamp=now,
+                            seq=seq_offset + seq,
+                        )
+                    try:
+                        tr, lossy = _translate_openclaw_tool(rec, now=now)
+                    except Exception as exc:
+                        raise ImportRecordInvalidError(
+                            message=f"Failed to translate tool '{rec.id}': {exc}",
+                            timestamp=now,
+                            seq=seq_offset + seq,
+                        ) from exc
+                    import_audit.write_record_translated(
+                        seq=seq_offset + seq,
+                        source_id=rec.id,
+                        target_id=tr["id"],
+                        kind="tool",
+                        lossy_fields=lossy,
+                    )
+                    tool_records.append(tr)
+                    tool_lossy.append(lossy)
+            except ImportRecordInvalidError as err:
+                _fail(err, event="import.openclaw_install.failed")
+                raise
+
+            # ----------------------------------------------------------------
+            # Phase 2: Write all records transactionally
+            # ----------------------------------------------------------------
+            try:
+                # channels
+                if channel_records:
+                    channels_dir.mkdir(parents=True, exist_ok=True)
+                    for ch in channel_records:
+                        path = channels_dir / f"{ch['id']}.json"
+                        path.write_text(json.dumps(ch))
+                        all_written.append(path)
+
+                # sessions + event-log replay
+                if session_records:
+                    sessions_dir.mkdir(parents=True, exist_ok=True)
+                    for sr in session_records:
+                        sess_dir = sessions_dir / sr["session_id"]
+                        sess_dir.mkdir(parents=True, exist_ok=True)
+                        mpath = sess_dir / "manifest.json"
+                        mpath.write_text(json.dumps(sr["manifest"]))
+                        all_written.append(mpath)
+                        threads_dir = sess_dir / "threads"
+                        threads_dir.mkdir(parents=True, exist_ok=True)
+                        tpath = threads_dir / f"{sr['thread_id']}.json"
+                        tpath.write_text(json.dumps(sr["thread_record"]))
+                        all_written.append(tpath)
+                        if sr["events"]:
+                            elog_path = sess_dir / "events.ndjson"
+                            lines = (
+                                "\n".join(
+                                    json.dumps(ev, separators=(",", ":")) for ev in sr["events"]
+                                )
+                                + "\n"
+                            )
+                            elog_path.write_text(lines)
+                            all_written.append(elog_path)
+
+                # memory store — record + raw content files
+                if memory_store_record is not None:
+                    memory_stores_dir.mkdir(parents=True, exist_ok=True)
+                    store_path = memory_stores_dir / f"{memory_store_record['id']}.json"
+                    store_path.write_text(json.dumps(memory_store_record))
+                    all_written.append(store_path)
+                    raw_dir = memory_stores_dir / memory_store_record["id"] / "raw"
+                    raw_dir.mkdir(parents=True, exist_ok=True)
+                    for mem_rec in body.memory:
+                        raw_path = raw_dir / f"{mem_rec.key.replace('/', '_')}.md"
+                        raw_path.write_text(mem_rec.content)
+                        all_written.append(raw_path)
+
+                # tools
+                if tool_records:
+                    tools_dir.mkdir(parents=True, exist_ok=True)
+                    for tr in tool_records:
+                        tpath = tools_dir / f"{tr['id']}.json"
+                        tpath.write_text(json.dumps(tr))
+                        all_written.append(tpath)
+
+            except Exception as exc:
+                for p in all_written:
+                    with contextlib.suppress(OSError):
+                        p.unlink()
+                err2 = ImportWriteError(
+                    message=f"Failed to write OpenClaw install records: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                _fail(err2, event="import.openclaw_install.failed")
+                raise err2
+
+            # ----------------------------------------------------------------
+            # Phase 3: Populate results and finalize audit log
+            # ----------------------------------------------------------------
+            needs_vault = sum(
+                1 for l in channel_lossy if "token_vault_ref_missing" in l
+            )
+            results["channels"]["imported"] = len(channel_records)
+            results["channels"]["lossy_count"] = sum(1 for l in channel_lossy if l)
+            results["channels"]["ids"] = [ch["id"] for ch in channel_records]
+            results["channels"]["needs_vault_ref_count"] = needs_vault
+
+            results["sessions"]["imported"] = len(session_records)
+            results["sessions"]["lossy_count"] = sum(1 for l in session_lossy if l)
+            results["sessions"]["ids"] = [s["session_id"] for s in session_records]
+
+            if memory_store_record is not None:
+                results["memory_stores"]["imported"] = 1
+                results["memory_stores"]["lossy_count"] = 1 if memory_lossy else 0
+                results["memory_stores"]["ids"] = [memory_store_record["id"]]
+
+            results["tools"]["imported"] = len(tool_records)
+            results["tools"]["lossy_count"] = sum(1 for l in tool_lossy if l)
+            results["tools"]["ids"] = [t["id"] for t in tool_records]
+
+            checklist = _openclaw_install_checklist(body, results)
+            import_audit.write_checklist(checklist)
+            import_audit.write_completed(
+                total=total_records,
+                lossy_count=sum(r["lossy_count"] for r in results.values()),
+            )
+
+        return JSONResponse(
+            content={
+                "audit_path": import_audit.path.name,
+                **results,
             },
             status_code=201,
         )

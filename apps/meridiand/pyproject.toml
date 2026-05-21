@@ -84,4 +84,5 @@ pythonpath = [
     "../../packages/provider-claude-code-oauth/src",
     "../../packages/sdk-sandbox/src",
     "../../packages/api-models/src",
+    "../../packages/sdk-budget/src",
 ]

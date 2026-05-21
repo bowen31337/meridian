@@ -12,6 +12,13 @@ from ._audit import write_audit
 from ._client import DaemonClient, DaemonError
 from ._telemetry import get_tracer, record_failure, record_invocation_event
 
+# Subsystem files present in an OpenClaw installation directory.
+_OPENCLAW_SUBSYSTEM_FILES: dict[str, str] = {
+    "channels": "channels.json",
+    "sessions": "sessions.json",
+    "tools": "tools.json",
+}
+
 # Subsystem files present in a Hermes installation directory.
 _HERMES_SUBSYSTEM_FILES: dict[str, str] = {
     "skills": "skills.json",
@@ -52,12 +59,31 @@ def imports() -> None:
 
 
 @imports.command("openclaw")
-@click.argument("file", type=click.Path(exists=True, path_type=Path))
+@click.argument("path", type=click.Path(exists=True, path_type=Path))
 @click.pass_context
-def import_openclaw(ctx: click.Context, file: Path) -> None:
-    """Import channels from an OpenClaw export FILE (JSON with a 'records' array)."""
+def import_openclaw(ctx: click.Context, path: Path) -> None:
+    """Import from OpenClaw.
+
+    PATH may be:
+      - A JSON file with a 'records' array — imports channels only (legacy).
+      - A directory (OpenClaw installation) — imports all subsystems: channels,
+        sessions, memory (MEMORY.md), and tools.
+        channels.json, sessions.json, and tools.json are read if present.
+        MEMORY.md is read if present and converted to memory store records.
+    """
     tracer = get_tracer()
-    with tracer.start_as_current_span(
+    if path.is_file():
+        _import_openclaw_file(ctx, path, tracer)
+    elif path.is_dir():
+        _import_openclaw_dir(ctx, path, tracer)
+    else:
+        click.echo(f"error: [import_path_invalid] {path} is not a file or directory", err=True)
+        sys.exit(1)
+
+
+def _import_openclaw_file(ctx: click.Context, file: Path, tracer: object) -> None:
+    """Backward-compatible: import channels from an OpenClaw JSON export file."""
+    with tracer.start_as_current_span(  # type: ignore[union-attr]
         "import.openclaw",
         attributes={"import.source": "openclaw", "import.file": str(file)},
     ) as span:
@@ -78,6 +104,89 @@ def import_openclaw(ctx: click.Context, file: Path) -> None:
             sys.exit(1)
 
         span.add_event("import.openclaw.completed")
+        if result is not None:
+            click.echo(json.dumps(result, indent=2))
+
+
+def _import_openclaw_dir(ctx: click.Context, install_path: Path, tracer: object) -> None:
+    """Import a full OpenClaw installation from a directory."""
+    with tracer.start_as_current_span(  # type: ignore[union-attr]
+        "import.openclaw_install",
+        attributes={"import.source": "openclaw_install", "import.path": str(install_path)},
+    ) as span:
+        record_invocation_event(
+            span,
+            {
+                "event.name": "import.openclaw_install.invocation",
+                "import.source": "openclaw_install",
+                "import.path": str(install_path),
+            },
+        )
+        write_audit("info", "import.openclaw_install.invoked", {"path": str(install_path)})
+
+        body: dict[str, object] = {}
+        found: list[str] = []
+
+        # JSON subsystem files
+        for subsystem, filename in _OPENCLAW_SUBSYSTEM_FILES.items():
+            fpath = install_path / filename
+            if not fpath.exists():
+                body[subsystem] = []
+                continue
+            data = _read_json_file(fpath, span, "import.openclaw_install")
+            if not isinstance(data, dict) or "records" not in data:
+                click.echo(
+                    f"error: [import_invalid_json] {fpath}: expected object with 'records' array",
+                    err=True,
+                )
+                write_audit(
+                    "error",
+                    "import.openclaw_install.failed",
+                    {"code": "import_invalid_json", "message": f"{fpath}: missing 'records' key"},
+                )
+                sys.exit(1)
+            body[subsystem] = data["records"]
+            found.append(subsystem)
+
+        # MEMORY.md — convert to memory record list
+        memory_path = install_path / "MEMORY.md"
+        if memory_path.exists():
+            try:
+                content = memory_path.read_text()
+            except OSError as exc:
+                record_failure(span, "import_read_failed", str(exc))  # type: ignore[arg-type]
+                write_audit(
+                    "error",
+                    "import.openclaw_install.failed",
+                    {"code": "import_read_failed", "message": str(exc)},
+                )
+                click.echo(f"error: [import_read_failed] {exc}", err=True)
+                sys.exit(1)
+            body["memory"] = [{"key": "MEMORY.md", "content": content}]
+            found.append("memory")
+        else:
+            body["memory"] = []
+
+        if not found:
+            click.echo(
+                f"warning: no OpenClaw subsystem files found in {install_path}; "
+                "expected one or more of: channels.json, sessions.json, MEMORY.md, tools.json",
+                err=True,
+            )
+
+        try:
+            result = _client(ctx).request("POST", "/v1/x/imports/openclaw/install", json_body=body)
+        except DaemonError as exc:
+            record_failure(span, exc.code, exc.message)
+            write_audit(
+                "error",
+                "import.openclaw_install.failed",
+                {"code": exc.code, "message": exc.message},
+            )
+            click.echo(f"error: [{exc.code}] {exc.message}", err=True)
+            sys.exit(1)
+
+        span.add_event("import.openclaw_install.completed")
         if result is not None:
             click.echo(json.dumps(result, indent=2))
 

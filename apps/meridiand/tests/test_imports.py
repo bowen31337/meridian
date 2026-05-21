@@ -61,6 +61,50 @@ Tests cover:
   - POST /v1/x/imports/hermes empty name returns 422.
   - POST /v1/x/imports/hermes empty instructions returns 422.
   - POST /v1/x/imports/hermes empty tools returns 422.
+  - POST /v1/x/imports/openclaw/install returns 201 on success.
+  - POST /v1/x/imports/openclaw/install response has audit_path and per-subsystem keys.
+  - POST /v1/x/imports/openclaw/install channels/sessions/memory_stores/tools imported counts correct.
+  - POST /v1/x/imports/openclaw/install empty subsystems returns zeros.
+  - POST /v1/x/imports/openclaw/install creates meridian-import-*.audit.ndjson.
+  - POST /v1/x/imports/openclaw/install audit has import_started as first entry.
+  - POST /v1/x/imports/openclaw/install audit has record_translated for each record across all subsystems.
+  - POST /v1/x/imports/openclaw/install record_translated kinds cover all subsystem types.
+  - POST /v1/x/imports/openclaw/install audit ends with import_completed.
+  - POST /v1/x/imports/openclaw/install audit has checklist entry.
+  - POST /v1/x/imports/openclaw/install channels written to storage_root/channels/{id}.json.
+  - POST /v1/x/imports/openclaw/install channel id has "ch_" prefix.
+  - POST /v1/x/imports/openclaw/install sessions written to sessions/{id}/manifest.json.
+  - POST /v1/x/imports/openclaw/install session id has "sess_" prefix.
+  - POST /v1/x/imports/openclaw/install session status is "archived".
+  - POST /v1/x/imports/openclaw/install session openclaw_id stored in metadata.
+  - POST /v1/x/imports/openclaw/install session events written as events.ndjson.
+  - POST /v1/x/imports/openclaw/install session thread written to threads/{id}.json.
+  - POST /v1/x/imports/openclaw/install no events.ndjson when events list is empty.
+  - POST /v1/x/imports/openclaw/install empty session created_at returns 422.
+  - POST /v1/x/imports/openclaw/install memory store written to memory_stores/{id}.json.
+  - POST /v1/x/imports/openclaw/install memory store id has "memstore_" prefix.
+  - POST /v1/x/imports/openclaw/install memory store scope is "agent".
+  - POST /v1/x/imports/openclaw/install memory store metadata has from=openclaw.
+  - POST /v1/x/imports/openclaw/install memory store raw content written to memory_stores/{id}/raw/.
+  - POST /v1/x/imports/openclaw/install no memory_store written when memory list is empty.
+  - POST /v1/x/imports/openclaw/install tools written to tools/{id}.json.
+  - POST /v1/x/imports/openclaw/install tool id has "tool_" prefix.
+  - POST /v1/x/imports/openclaw/install tool conservative caps applied when capabilities absent.
+  - POST /v1/x/imports/openclaw/install tool allow_exec defaults to False.
+  - POST /v1/x/imports/openclaw/install tool allow_network defaults to False.
+  - POST /v1/x/imports/openclaw/install tool allow_file_write defaults to False.
+  - POST /v1/x/imports/openclaw/install tool allow_file_read defaults to True.
+  - POST /v1/x/imports/openclaw/install tool sandboxed defaults to True.
+  - POST /v1/x/imports/openclaw/install tool source is "imported", source_type is "openclaw".
+  - POST /v1/x/imports/openclaw/install tool openclaw_id stored in metadata.
+  - POST /v1/x/imports/openclaw/install tool empty name returns 422.
+  - POST /v1/x/imports/openclaw/install tool empty id returns 422.
+  - POST /v1/x/imports/openclaw/install is transactional: no files written on validation failure.
+  - POST /v1/x/imports/openclaw/install validation failure returns 422 with import_record_invalid.
+  - POST /v1/x/imports/openclaw/install failure writes import_failed to import audit log.
+  - POST /v1/x/imports/openclaw/install failure writes to main audit.ndjson.
+  - POST /v1/x/imports/openclaw/install OTel span "import.openclaw_install" emitted on success.
+  - create_app wires /v1/x/imports/openclaw/install route when storage_root is supplied.
   - create_app wires imports router when storage_root is supplied.
   - create_app omits imports routes when storage_root is None.
   - OTel span "import.openclaw" emitted on success.
@@ -1365,3 +1409,403 @@ class TestHermesInstallFailure:
         app = create_app(FileAuditLog(storage_root), storage_root=storage_root)
         paths = [r.path for r in app.routes]  # type: ignore[attr-defined]
         assert "/v1/x/imports/hermes/install" in paths
+
+
+# ---------------------------------------------------------------------------
+# OpenClaw install — helpers
+# ---------------------------------------------------------------------------
+
+
+def _openclaw_install_body(**overrides: Any) -> dict:
+    base: dict = {
+        "channels": [
+            {
+                "id": "oc_ch_001",
+                "kind": "telegram",
+                "name": "Main Channel",
+                "config": {"token_vault_ref": "vlt_abc"},
+            }
+        ],
+        "sessions": [
+            {
+                "id": "oc_sess_001",
+                "title": "Session One",
+                "created_at": "2026-01-01T00:00:00+00:00",
+                "events": [{"type": "message", "role": "user", "content": "hello"}],
+            }
+        ],
+        "memory": [
+            {"key": "MEMORY.md", "content": "# Agent Memory\n\nUser prefers dark mode."}
+        ],
+        "tools": [
+            {
+                "id": "oc_tool_001",
+                "name": "search_web",
+                "description": "Search the web",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"query": {"type": "string"}},
+                },
+                "handler_kind": "http",
+            }
+        ],
+    }
+    base.update(overrides)
+    return base
+
+
+# ---------------------------------------------------------------------------
+# OpenClaw install — success
+# ---------------------------------------------------------------------------
+
+
+class TestOpenClawInstallSuccess:
+    def test_returns_201(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        assert resp.status_code == 201
+
+    def test_response_has_audit_path_and_subsystem_keys(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body()).json()
+        assert "audit_path" in body
+        assert "channels" in body
+        assert "sessions" in body
+        assert "memory_stores" in body
+        assert "tools" in body
+
+    def test_counts_correct(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body()).json()
+        assert body["channels"]["imported"] == 1
+        assert body["sessions"]["imported"] == 1
+        assert body["memory_stores"]["imported"] == 1
+        assert body["tools"]["imported"] == 1
+
+    def test_empty_subsystems_returns_zeros(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post(
+            "/v1/x/imports/openclaw/install",
+            json={"channels": [], "sessions": [], "memory": [], "tools": []},
+        ).json()
+        assert body["channels"]["imported"] == 0
+        assert body["sessions"]["imported"] == 0
+        assert body["memory_stores"]["imported"] == 0
+        assert body["tools"]["imported"] == 0
+
+    def test_creates_import_audit_file(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        assert _import_audit_path(storage_root) is not None
+
+    def test_audit_starts_with_import_started(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        entries = _import_audit_records(storage_root)
+        assert entries[0]["type"] == "import_started"
+
+    def test_audit_has_record_translated_for_each_record(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        entries = _import_audit_records(storage_root)
+        translated = [e for e in entries if e["type"] == "record_translated"]
+        # 1 channel + 1 session + 1 memory_store + 1 tool = 4
+        assert len(translated) == 4
+
+    def test_audit_record_translated_kinds(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        entries = _import_audit_records(storage_root)
+        kinds = {e["kind"] for e in entries if e["type"] == "record_translated"}
+        assert kinds == {"channel", "session", "memory_store", "tool"}
+
+    def test_audit_ends_with_import_completed(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        entries = _import_audit_records(storage_root)
+        assert entries[-1]["type"] == "import_completed"
+
+    def test_audit_has_checklist_entry(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        entries = _import_audit_records(storage_root)
+        assert any(e["type"] == "checklist" for e in entries)
+
+
+# ---------------------------------------------------------------------------
+# OpenClaw install — channels
+# ---------------------------------------------------------------------------
+
+
+class TestOpenClawInstallChannels:
+    def test_channel_written_to_channels_dir(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        ch_id = resp.json()["channels"]["ids"][0]
+        assert (storage_root / "channels" / f"{ch_id}.json").exists()
+
+    def test_channel_id_has_ch_prefix(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        assert resp.json()["channels"]["ids"][0].startswith("ch_")
+
+
+# ---------------------------------------------------------------------------
+# OpenClaw install — sessions
+# ---------------------------------------------------------------------------
+
+
+class TestOpenClawInstallSessions:
+    def test_session_manifest_written(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        sess_id = resp.json()["sessions"]["ids"][0]
+        assert (storage_root / "sessions" / sess_id / "manifest.json").exists()
+
+    def test_session_id_has_sess_prefix(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        assert resp.json()["sessions"]["ids"][0].startswith("sess_")
+
+    def test_session_status_is_archived(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        sess_id = resp.json()["sessions"]["ids"][0]
+        manifest = json.loads(
+            (storage_root / "sessions" / sess_id / "manifest.json").read_text()
+        )
+        assert manifest["status"] == "archived"
+
+    def test_session_openclaw_id_in_metadata(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        sess_id = resp.json()["sessions"]["ids"][0]
+        manifest = json.loads(
+            (storage_root / "sessions" / sess_id / "manifest.json").read_text()
+        )
+        assert manifest["metadata"]["openclaw_id"] == "oc_sess_001"
+
+    def test_session_events_written_as_ndjson(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        sess_id = resp.json()["sessions"]["ids"][0]
+        elog = storage_root / "sessions" / sess_id / "events.ndjson"
+        assert elog.exists()
+        lines = [json.loads(l) for l in elog.read_text().splitlines() if l.strip()]
+        assert lines[0]["type"] == "message"
+
+    def test_session_thread_written(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        sess_id = resp.json()["sessions"]["ids"][0]
+        threads = list((storage_root / "sessions" / sess_id / "threads").glob("*.json"))
+        assert len(threads) == 1
+
+    def test_no_events_ndjson_when_events_empty(self, storage_root: Path) -> None:
+        body = _openclaw_install_body()
+        body["sessions"] = [{"id": "s1", "created_at": "2026-01-01T00:00:00+00:00"}]
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=body)
+        sess_id = resp.json()["sessions"]["ids"][0]
+        assert not (storage_root / "sessions" / sess_id / "events.ndjson").exists()
+
+    def test_empty_created_at_returns_422(self, storage_root: Path) -> None:
+        body = _openclaw_install_body()
+        body["sessions"] = [{"id": "s1", "created_at": ""}]
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=body)
+        assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# OpenClaw install — memory stores
+# ---------------------------------------------------------------------------
+
+
+class TestOpenClawInstallMemoryStores:
+    def test_memory_store_written(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        store_id = resp.json()["memory_stores"]["ids"][0]
+        assert (storage_root / "memory_stores" / f"{store_id}.json").exists()
+
+    def test_memory_store_id_has_memstore_prefix(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        assert resp.json()["memory_stores"]["ids"][0].startswith("memstore_")
+
+    def test_memory_store_scope_is_agent(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        store_id = resp.json()["memory_stores"]["ids"][0]
+        record = json.loads(
+            (storage_root / "memory_stores" / f"{store_id}.json").read_text()
+        )
+        assert record["scope"] == "agent"
+
+    def test_memory_store_metadata_tagged_from_openclaw(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        store_id = resp.json()["memory_stores"]["ids"][0]
+        record = json.loads(
+            (storage_root / "memory_stores" / f"{store_id}.json").read_text()
+        )
+        assert record["metadata"]["from"] == "openclaw"
+
+    def test_memory_store_raw_content_written(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        store_id = resp.json()["memory_stores"]["ids"][0]
+        raw_dir = storage_root / "memory_stores" / store_id / "raw"
+        assert raw_dir.exists()
+        raw_files = list(raw_dir.glob("*.md"))
+        assert len(raw_files) == 1
+
+    def test_no_memory_store_when_memory_list_empty(self, storage_root: Path) -> None:
+        body = _openclaw_install_body()
+        body["memory"] = []
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=body)
+        assert resp.json()["memory_stores"]["imported"] == 0
+        assert not (storage_root / "memory_stores").exists() or \
+            list((storage_root / "memory_stores").glob("*.json")) == []
+
+
+# ---------------------------------------------------------------------------
+# OpenClaw install — tools
+# ---------------------------------------------------------------------------
+
+
+class TestOpenClawInstallTools:
+    def _tool_record(self, storage_root: Path) -> dict:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        tool_id = resp.json()["tools"]["ids"][0]
+        return json.loads((storage_root / "tools" / f"{tool_id}.json").read_text())
+
+    def test_tool_written_to_tools_dir(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        tool_id = resp.json()["tools"]["ids"][0]
+        assert (storage_root / "tools" / f"{tool_id}.json").exists()
+
+    def test_tool_id_has_tool_prefix(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        assert resp.json()["tools"]["ids"][0].startswith("tool_")
+
+    def test_tool_conservative_caps_applied_when_absent(self, storage_root: Path) -> None:
+        body = _openclaw_install_body()
+        body["tools"] = [{"id": "t1", "name": "my_tool"}]
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=body)
+        tool_id = resp.json()["tools"]["ids"][0]
+        record = json.loads((storage_root / "tools" / f"{tool_id}.json").read_text())
+        caps = record["capabilities"]
+        assert caps["allow_exec"] is False
+        assert caps["allow_network"] is False
+        assert caps["allow_file_write"] is False
+        assert caps["allow_file_read"] is True
+        assert caps["sandboxed"] is True
+
+    def test_tool_allow_exec_defaults_false(self, storage_root: Path) -> None:
+        tr = self._tool_record(storage_root)
+        assert tr["capabilities"]["allow_exec"] is False
+
+    def test_tool_allow_network_defaults_false(self, storage_root: Path) -> None:
+        tr = self._tool_record(storage_root)
+        assert tr["capabilities"]["allow_network"] is False
+
+    def test_tool_allow_file_write_defaults_false(self, storage_root: Path) -> None:
+        tr = self._tool_record(storage_root)
+        assert tr["capabilities"]["allow_file_write"] is False
+
+    def test_tool_allow_file_read_defaults_true(self, storage_root: Path) -> None:
+        tr = self._tool_record(storage_root)
+        assert tr["capabilities"]["allow_file_read"] is True
+
+    def test_tool_sandboxed_defaults_true(self, storage_root: Path) -> None:
+        tr = self._tool_record(storage_root)
+        assert tr["capabilities"]["sandboxed"] is True
+
+    def test_tool_source_and_source_type(self, storage_root: Path) -> None:
+        tr = self._tool_record(storage_root)
+        assert tr["source"] == "imported"
+        assert tr["source_type"] == "openclaw"
+
+    def test_tool_openclaw_id_in_metadata(self, storage_root: Path) -> None:
+        tr = self._tool_record(storage_root)
+        assert tr["metadata"]["openclaw_id"] == "oc_tool_001"
+
+    def test_tool_empty_name_returns_422(self, storage_root: Path) -> None:
+        body = _openclaw_install_body()
+        body["tools"] = [{"id": "t1", "name": ""}]
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=body)
+        assert resp.status_code == 422
+
+    def test_tool_empty_id_returns_422(self, storage_root: Path) -> None:
+        body = _openclaw_install_body()
+        body["tools"] = [{"id": "", "name": "my_tool"}]
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=body)
+        assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# OpenClaw install — transactional / failure
+# ---------------------------------------------------------------------------
+
+
+class TestOpenClawInstallFailure:
+    def test_validation_failure_returns_422(self, storage_root: Path) -> None:
+        body = {"sessions": [{"id": "", "created_at": "2026-01-01T00:00:00+00:00"}]}
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/openclaw/install", json=body)
+        assert resp.status_code == 422
+
+    def test_validation_failure_error_code(self, storage_root: Path) -> None:
+        body = {"sessions": [{"id": "", "created_at": "2026-01-01T00:00:00+00:00"}]}
+        client = _make_client(storage_root)
+        resp_body = client.post("/v1/x/imports/openclaw/install", json=body).json()
+        assert resp_body["error"]["code"] == "import_record_invalid"
+
+    def test_no_files_written_on_failure(self, storage_root: Path) -> None:
+        body = {"sessions": [{"id": "", "created_at": "2026-01-01T00:00:00+00:00"}]}
+        client = _make_client(storage_root)
+        client.post("/v1/x/imports/openclaw/install", json=body)
+        if (storage_root / "sessions").exists():
+            assert list((storage_root / "sessions").glob("*/manifest.json")) == []
+
+    def test_failure_writes_import_failed_to_audit(self, storage_root: Path) -> None:
+        body = {"tools": [{"id": "", "name": "t"}]}
+        client = _make_client(storage_root)
+        client.post("/v1/x/imports/openclaw/install", json=body)
+        entries = _import_audit_records(storage_root)
+        assert any(e["type"] == "import_failed" for e in entries)
+
+    def test_failure_writes_to_main_audit_log(self, storage_root: Path) -> None:
+        body = {"tools": [{"id": "", "name": "t"}]}
+        client = _make_client(storage_root)
+        client.post("/v1/x/imports/openclaw/install", json=body)
+        records = _main_audit_records(storage_root)
+        assert any(r.get("event") == "import.openclaw_install.failed" for r in records)
+
+    def test_install_route_present_with_storage_root(self, storage_root: Path) -> None:
+        app = create_app(FileAuditLog(storage_root), storage_root=storage_root)
+        paths = [r.path for r in app.routes]  # type: ignore[attr-defined]
+        assert "/v1/x/imports/openclaw/install" in paths
+
+
+# ---------------------------------------------------------------------------
+# OpenClaw install — OTel
+# ---------------------------------------------------------------------------
+
+
+class TestOpenClawInstallOTel:
+    def test_otel_span_emitted_on_success(self, storage_root: Path) -> None:
+        _otel_shared.otel_exporter.clear()
+        client = _make_client(storage_root)
+        client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
+        span_names = [s.name for s in _otel_shared.otel_exporter.get_finished_spans()]
+        assert "import.openclaw_install" in span_names
