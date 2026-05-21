@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import uuid
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
@@ -34,6 +35,7 @@ from storage_event_log import EventLogWriter
 
 from ._event_translator import ModelEventTranslator
 from ._hook_dispatch import HookVetoError, dispatch_hooks
+from ._metrics_registry import model_call_duration_seconds, model_tokens_total
 
 
 def _now() -> str:
@@ -582,6 +584,7 @@ async def run_harness_loop(
 
                 _model_call_exc: Exception | None = None
                 _start_event: MessageStartEvent | None = None
+                _model_call_t0: float | None = None
 
                 if (
                     final_phase == "waiting_for_model"
@@ -598,6 +601,7 @@ async def run_harness_loop(
                         )
                     opts = model_call_opts.model_copy(update={"session_id": session_id})
                     _translator = ModelEventTranslator(model_call_number=model_calls)
+                    _model_call_t0 = time.monotonic()
                     try:
                         async for event in model_router.call(opts):
                             pairs = _translator.translate(event)
@@ -714,6 +718,26 @@ async def run_harness_loop(
                         _delta_data["model"] = _start_event.model
                         _delta_data["provider"] = _start_event.provider
                     await event_log.append(session_id, "usage.delta", _delta_data)
+
+                if _stop_event is not None:
+                    _prov = _start_event.provider if _start_event is not None else "unknown"
+                    _mdl = _start_event.model if _start_event is not None else "unknown"
+                    model_tokens_total.labels(provider=_prov, model=_mdl, kind="input").inc(
+                        _stop_event.input_tokens or 0
+                    )
+                    model_tokens_total.labels(provider=_prov, model=_mdl, kind="output").inc(
+                        _stop_event.output_tokens or 0
+                    )
+                    if _stop_event.cache_creation_input_tokens:
+                        model_tokens_total.labels(
+                            provider=_prov, model=_mdl, kind="cache_creation"
+                        ).inc(_stop_event.cache_creation_input_tokens)
+                    if _stop_event.cache_read_input_tokens:
+                        model_tokens_total.labels(
+                            provider=_prov, model=_mdl, kind="cache_read"
+                        ).inc(_stop_event.cache_read_input_tokens)
+                    if _model_call_t0 is not None:
+                        model_call_duration_seconds.observe(time.monotonic() - _model_call_t0)
 
                 if stop_reason == "max_tokens":
                     if event_log is not None:

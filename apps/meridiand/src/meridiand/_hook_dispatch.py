@@ -49,6 +49,8 @@ from core_errors import (
     record_invocation_event,
 )
 
+from ._metrics_registry import hook_invocations_total
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -444,6 +446,7 @@ async def dispatch_hooks(
                                 },
                             )
                         )
+                        hook_invocations_total.labels(event=event, verdict="veto").inc()
                         exc = HookVetoError(
                             hook_id=hook_id,
                             hook_name=hook_name,
@@ -475,6 +478,8 @@ async def dispatch_hooks(
                     error_code=result.error_code,
                     error_message=result.error_message,
                 )
+
+                hook_invocations_total.labels(event=event, verdict=verdict).inc()
 
                 if result.is_error:
                     err_msg = result.error_message or "Hook dispatch failed"

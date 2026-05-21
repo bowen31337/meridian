@@ -61,3 +61,21 @@ vault_accesses_total = Counter(
     "Total number of vault secret accesses by vault ID",
     ["vault_id"],
 )
+
+model_tokens_total = Counter(
+    "meridian_model_tokens_total",
+    "Total number of model tokens by provider, model, and token kind",
+    ["provider", "model", "kind"],
+)
+
+model_call_duration_seconds = Histogram(
+    "meridian_model_call_duration_seconds",
+    "Model call wall-clock duration in seconds (stream start to MessageStopEvent)",
+    buckets=(0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0),
+)
+
+hook_invocations_total = Counter(
+    "meridian_hook_invocations_total",
+    "Total number of hook invocations by event and verdict",
+    ["event", "verdict"],
+)
