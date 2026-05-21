@@ -18,8 +18,10 @@ src/storage_reposit/_state_machine.py
 src/storage_reposit/_store.py
 src/storage_reposit/_telemetry.py
 src/storage_reposit/_types.py
+src/storage_reposit/_usage_rollup.py
 src/storage_reposit/_version.py
 tests/test_conformance.py
 tests/test_migration.py
 tests/test_phase.py
 tests/test_state_machine.py
+tests/test_usage_rollup.py

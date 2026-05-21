@@ -36,6 +36,7 @@ from ._system_config import make_system_config_router
 from ._cron import make_cron_router
 from ._cron_scheduler import run_cron_scheduler_loop
 from ._environments import make_environments_router
+from ._imports import make_imports_router
 from ._memory_stores import make_memory_stores_router
 from ._vault_backend_encrypted_file import EncryptedFileVaultBackend
 from ._vault_backend_os_keychain import OsKeychainVaultBackend
@@ -413,6 +414,9 @@ def create_app(
                 )
                 app.include_router(
                     make_environments_router(audit_log=audit_log, storage_root=storage_root)
+                )
+                app.include_router(
+                    make_imports_router(audit_log=audit_log, storage_root=storage_root)
                 )
                 if credential_proxy_providers and secret_resolver is not None:
                     app.include_router(

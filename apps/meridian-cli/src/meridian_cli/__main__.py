@@ -12,6 +12,7 @@ from .cron import cron
 from .environments import environments
 from .files import files
 from .hooks import hooks
+from .imports import imports
 from .memory_stores import memory_stores
 from .sessions import sessions
 from .skills import skills
@@ -66,6 +67,7 @@ cli.add_command(user_profiles)
 cli.add_command(webhooks)
 cli.add_command(files)
 cli.add_command(hooks)
+cli.add_command(imports)
 cli.add_command(cron)
 cli.add_command(meridianconfig)
 cli.add_command(meridianrun)
