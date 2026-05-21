@@ -73,6 +73,25 @@ class ThreadListError(MeridianError):
         return 500
 
 
+class MessageListError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="session_messages_list_failed",
+            message=message,
+            timestamp=timestamp,
+            cause=cause,
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
 class ThreadCreateError(MeridianError):
     def __init__(
         self,
@@ -316,6 +335,125 @@ def make_sessions_router(
                     AuditLogEntry(
                         level="error",
                         event="session.threads.list.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={"session_id": session_id, "message": err2.message},
+                    )
+                )
+                raise err2
+
+        response_headers: dict[str, str] = {}
+        if next_cursor is not None:
+            response_headers["X-Next-Cursor"] = next_cursor
+
+        return JSONResponse(
+            content={"items": page, "next_cursor": next_cursor, "limit": limit},
+            status_code=200,
+            headers=response_headers,
+        )
+
+    @router.get("/v1/sessions/{session_id}/messages", status_code=200)
+    async def list_messages(
+        session_id: str,
+        cursor: str | None = Query(default=None),
+        limit: int = Query(default=DEFAULT_PAGE_SIZE),
+        thread_id: str | None = Query(default=None),
+        role: str | None = Query(default=None),
+    ) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "session.messages.list",
+            attributes={"session.id": session_id},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="session.messages.list.invocation",
+                    code="session_messages_list",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                threads_root = storage_root / "threads" / session_id
+                all_messages: list[dict[str, Any]] = []
+
+                if threads_root.exists():
+                    thread_dirs = (
+                        [threads_root / thread_id]
+                        if thread_id is not None
+                        else [p.parent for p in threads_root.glob("*/manifest.json")]
+                    )
+                    for thread_dir in thread_dirs:
+                        messages_path = thread_dir / "messages.ndjson"
+                        if not messages_path.exists():
+                            continue
+                        for raw in messages_path.read_text().splitlines():
+                            line = raw.strip()
+                            if not line:
+                                continue
+                            record: dict[str, Any] = json.loads(line)
+                            if "id" not in record:
+                                record["id"] = record.get("message_id", "")
+                            if role is not None and record.get("role") != role:
+                                continue
+                            all_messages.append(record)
+
+                all_messages.sort(
+                    key=lambda r: (r.get("created_at", ""), r.get("id", "")),
+                    reverse=True,
+                )
+
+                if cursor is not None:
+                    c_created_at, c_id = decode_cursor(cursor, timestamp=now)
+                    all_messages = apply_cursor_filter(all_messages, c_created_at, c_id)
+
+                page, next_cursor = make_cursor_page(all_messages, limit)
+
+                span.set_attribute("session.messages.list.count", len(page))
+                span.set_attribute("session.messages.list.success", True)
+
+                audit_log.write(
+                    AuditLogEntry(
+                        level="info",
+                        event="session.messages.listed",
+                        code="session_messages_listed",
+                        timestamp=_now(),
+                        detail={
+                            "session_id": session_id,
+                            "count": len(page),
+                        },
+                    )
+                )
+
+            except CursorDecodeError as err:
+                span.set_attribute("session.messages.list.success", False)
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="session.messages.list.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={"session_id": session_id, "message": err.message},
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = MessageListError(
+                    message=f"Failed to list messages for session {session_id}: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                span.set_attribute("session.messages.list.success", False)
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="session.messages.list.failed",
                         code=err2.code,
                         timestamp=err2.timestamp,
                         detail={"session_id": session_id, "message": err2.message},
