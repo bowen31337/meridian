@@ -111,6 +111,37 @@ class ThreadCreateError(MeridianError):
         return 500
 
 
+class MessageAppendRejectedError(MeridianError):
+    def __init__(self, *, message: str, timestamp: str) -> None:
+        super().__init__(
+            code="message_append_rejected",
+            message=message,
+            timestamp=timestamp,
+        )
+
+    def http_status(self) -> int:
+        return 422
+
+
+class MessageAppendError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="session_message_append_failed",
+            message=message,
+            timestamp=timestamp,
+            cause=cause,
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
 class SessionNotFoundError(MeridianError):
     def __init__(self, *, message: str, timestamp: str) -> None:
         super().__init__(
@@ -135,6 +166,12 @@ class SessionCreateRequest(BaseModel):
 class ThreadCreateRequest(BaseModel):
     branch_of_event_seq: int
     title: str | None = None
+
+
+class MessageAppendRequest(BaseModel):
+    role: str
+    content: list[Any] | str
+    thread_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -588,6 +625,173 @@ def make_sessions_router(
                 "created_at": now,
                 "branch_of_event_seq": body.branch_of_event_seq,
                 "title": body.title,
+            },
+            status_code=201,
+        )
+
+    @router.post("/v1/sessions/{session_id}/messages", status_code=201)
+    async def append_message(session_id: str, body: MessageAppendRequest) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+        message_id = f"msg_{uuid.uuid4().hex}"
+        effective_thread_id: str = body.thread_id if body.thread_id is not None else ""
+
+        with tracer.start_as_current_span(
+            "session.message.append",
+            attributes={"session.id": session_id},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="session.message.append.invocation",
+                    code="session_message_append",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                if body.role in ("assistant", "tool"):
+                    rejected = MessageAppendRejectedError(
+                        message=f"Role {body.role!r} is reserved for the harness; only 'user' and 'system' are accepted",
+                        timestamp=now,
+                    )
+                    span.set_attribute("session.message.append.success", False)
+                    record_error(span, rejected)
+                    audit_log.write(
+                        AuditLogEntry(
+                            level="error",
+                            event="session.message.append.rejected",
+                            code=rejected.code,
+                            timestamp=rejected.timestamp,
+                            detail={
+                                "session_id": session_id,
+                                "role": body.role,
+                                "message": rejected.message,
+                            },
+                        )
+                    )
+                    raise rejected
+
+                manifest_path = storage_root / "sessions" / session_id / "manifest.json"
+                if not manifest_path.exists():
+                    not_found = SessionNotFoundError(
+                        message=f"Session {session_id!r} not found",
+                        timestamp=_now(),
+                    )
+                    span.set_attribute("session.message.append.success", False)
+                    record_error(span, not_found)
+                    audit_log.write(
+                        AuditLogEntry(
+                            level="error",
+                            event="session.message.append.failed",
+                            code=not_found.code,
+                            timestamp=not_found.timestamp,
+                            detail={
+                                "session_id": session_id,
+                                "message": not_found.message,
+                            },
+                        )
+                    )
+                    raise not_found
+
+                if body.thread_id is None:
+                    manifest: dict[str, Any] = json.loads(manifest_path.read_text())
+                    effective_thread_id = manifest.get("thread_id", "")
+                else:
+                    effective_thread_id = body.thread_id
+
+                thread_dir = storage_root / "threads" / session_id / effective_thread_id
+                thread_dir.mkdir(parents=True, exist_ok=True)
+                thread_manifest_path = thread_dir / "manifest.json"
+                if not thread_manifest_path.exists():
+                    thread_manifest_path.write_text(
+                        json.dumps(
+                            {
+                                "id": effective_thread_id,
+                                "thread_id": effective_thread_id,
+                                "session_id": session_id,
+                                "created_at": now,
+                            }
+                        )
+                    )
+                messages_path = thread_dir / "messages.ndjson"
+
+                message_record: dict[str, Any] = {
+                    "message_id": message_id,
+                    "id": message_id,
+                    "session_id": session_id,
+                    "thread_id": effective_thread_id,
+                    "role": body.role,
+                    "content": body.content,
+                    "created_at": now,
+                }
+                with messages_path.open("a") as f:
+                    f.write(json.dumps(message_record) + "\n")
+
+                await event_log.append(
+                    session_id,
+                    "message.added",
+                    {
+                        "message_id": message_id,
+                        "session_id": session_id,
+                        "thread_id": effective_thread_id,
+                        "role": body.role,
+                        "content": body.content,
+                        "created_at": now,
+                    },
+                    thread_id=effective_thread_id,
+                )
+
+                span.set_attribute("session.message.append.success", True)
+
+                audit_log.write(
+                    AuditLogEntry(
+                        level="info",
+                        event="session.message.appended",
+                        code="session_message_appended",
+                        timestamp=_now(),
+                        detail={
+                            "session_id": session_id,
+                            "thread_id": effective_thread_id,
+                            "message_id": message_id,
+                            "role": body.role,
+                        },
+                    )
+                )
+
+            except (SessionNotFoundError, MessageAppendRejectedError, MessageAppendError):
+                raise
+            except Exception as exc:
+                err = MessageAppendError(
+                    message=f"Failed to append message for session {session_id}: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                span.set_attribute("session.message.append.success", False)
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="session.message.append.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "session_id": session_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise err
+
+        return JSONResponse(
+            content={
+                "message_id": message_id,
+                "id": message_id,
+                "session_id": session_id,
+                "thread_id": effective_thread_id,
+                "role": body.role,
+                "content": body.content,
+                "created_at": now,
             },
             status_code=201,
         )
