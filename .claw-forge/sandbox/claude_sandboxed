@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/web-ui-live-can-system-skill-registry-view-installed-sk/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/web-ui-live-can-system-agent-inspector-shows-current-ve/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

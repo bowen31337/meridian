@@ -25,6 +25,8 @@ export const queryKeys = {
   agents: {
     all: () => ["agents"] as const,
     list: () => ["agents", "list"] as const,
+    detail: (agentId: string) => ["agents", agentId] as const,
+    versions: (agentId: string) => ["agents", agentId, "versions"] as const,
     skillActivations: (agentId: string) => ["agents", agentId, "skill-activations"] as const,
   },
   forgeProposals: {

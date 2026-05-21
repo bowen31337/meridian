@@ -108,6 +108,41 @@ export interface SkillActivationList {
   offset: number;
 }
 
+export interface AgentVersion {
+  id: string;
+  agent_id: string;
+  version_number: number;
+  name: string;
+  kind: string;
+  config: Record<string, unknown>;
+  capabilities: string[];
+  instructions: string;
+  model_routing: Record<string, unknown>;
+  skills: string[];
+  tools: Array<{ name: string; description?: string | null; input_schema?: Record<string, unknown> | null }>;
+  default_environment_id: string | null;
+  hooks: string[];
+  budgets: Record<string, unknown>;
+  memory_store_refs: string[];
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export interface AgentVersionList {
+  items: AgentVersion[];
+  next_cursor: string | null;
+  limit: number;
+}
+
+export interface AgentDetail {
+  id: string;
+  name: string;
+  kind: string;
+  default_environment_id: string | null;
+  created_at: string;
+  version: AgentVersion;
+}
+
 export interface ForgeProposal {
   id: string;
   skill_id: string;
@@ -176,6 +211,8 @@ export interface ApiClient {
   listSkills(): Promise<SkillList>;
   listSkillVersions(skillId: string): Promise<SkillVersionList>;
   listAgents(): Promise<AgentList>;
+  getAgent(agentId: string): Promise<AgentDetail>;
+  listAgentVersions(agentId: string): Promise<AgentVersionList>;
   listAgentSkillActivations(agentId: string): Promise<SkillActivationList>;
   requestSkillActivation(agentId: string, skillId: string): Promise<SkillActivation>;
   approveSkillActivation(agentId: string, skillId: string): Promise<SkillActivation>;
@@ -216,6 +253,10 @@ export function createApiClient(baseUrl: string): ApiClient {
     listSkillVersions: (skillId) =>
       request<SkillVersionList>(baseUrl, `/v1/skills/${encodeURIComponent(skillId)}/versions`),
     listAgents: () => request<AgentList>(baseUrl, "/v1/agents"),
+    getAgent: (agentId) =>
+      request<AgentDetail>(baseUrl, `/v1/agents/${encodeURIComponent(agentId)}`),
+    listAgentVersions: (agentId) =>
+      request<AgentVersionList>(baseUrl, `/v1/agents/${encodeURIComponent(agentId)}/versions`),
     listAgentSkillActivations: (agentId) =>
       request<SkillActivationList>(baseUrl, `/v1/agents/${encodeURIComponent(agentId)}/skills`),
     requestSkillActivation: (agentId, skillId) =>
