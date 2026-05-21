@@ -80,6 +80,7 @@ from ._error_envelope_middleware import ErrorEnvelopeMiddleware
 from ._idempotency_middleware import IdempotencyKeyMiddleware
 from ._system_audit_middleware import SystemAuditMiddleware
 from ._healthz import make_healthz_router
+from ._metrics import make_metrics_router
 from ._readyz import ReadyzState, make_readyz_router
 from ._openapi_export import make_openapi_export_router
 from ._ui import make_ui_router
@@ -270,6 +271,7 @@ def create_app(
 
             app.include_router(make_healthz_router(audit_log=audit_log))
             app.include_router(make_readyz_router(audit_log=audit_log, state=readyz_state))
+            app.include_router(make_metrics_router(audit_log=audit_log))
             app.include_router(make_openapi_export_router(audit_log=audit_log))
             if serve_ui_enabled:
                 assert ui_dist_path is not None

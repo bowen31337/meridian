@@ -20,6 +20,7 @@ from opentelemetry import metrics
 from storage_event_log import EventLogWriter
 from storage_reposit import LocalEventLogReader, PhaseProjection
 
+from ._metrics_registry import session_duration_seconds, sessions_total
 from ._version import MERIDIAND_VERSION
 
 _meter = metrics.get_meter("meridian.meridiand", MERIDIAND_VERSION)
@@ -196,6 +197,16 @@ def make_session_cancel_router(
                         "reason": "cancelled",
                     },
                 )
+                sessions_total.labels(phase="terminated").inc()
+                try:
+                    manifest_content = json.loads(manifest_path.read_text())
+                    created_at = manifest_content.get("created_at", "")
+                    if created_at:
+                        started = datetime.fromisoformat(created_at)
+                        duration = (datetime.now(UTC) - started).total_seconds()
+                        session_duration_seconds.labels(result="cancelled").observe(duration)
+                except Exception:
+                    pass
 
                 # Step 5: Propagate cancellation to child sessions
                 descendants = _walk_descendants(session_id, storage_root)

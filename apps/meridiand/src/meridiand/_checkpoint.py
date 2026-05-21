@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from sdk_sandbox import ExecutionContext
 
 from ._hook_dispatch import dispatch_hooks
+from ._metrics_registry import tool_call_duration_seconds, tool_calls_total
 
 
 def _now() -> str:
@@ -108,9 +109,52 @@ def make_checkpoint_router(*, audit_log: AuditLog, storage_root: Path) -> APIRou
 
             try:
                 checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+                # Detect tool calls completed since the last checkpoint.
+                prev_calls: dict[str, Any] = {}
+                prev_taken_at: str | None = None
+                latest_path = checkpoint_dir / "latest.json"
+                if latest_path.exists():
+                    try:
+                        prev = json.loads(latest_path.read_text())
+                        prev_taken_at = prev.get("taken_at")
+                        for call in prev.get("pending_tool_calls", []):
+                            if isinstance(call, dict) and call.get("id"):
+                                prev_calls[call["id"]] = call
+                    except Exception:
+                        pass
+
                 encoded = json.dumps(body.model_dump(), default=str).encode()
                 _write_atomic(checkpoint_dir / f"{body.seq}.json", encoded)
                 _write_atomic(checkpoint_dir / "latest.json", encoded)
+
+                if prev_calls:
+                    current_ids = {
+                        call["id"]
+                        for call in body.pending_tool_calls
+                        if isinstance(call, dict) and call.get("id")
+                    }
+                    completed = [c for cid, c in prev_calls.items() if cid not in current_ids]
+                    if completed:
+                        per_call_secs: float | None = None
+                        if prev_taken_at:
+                            try:
+                                t0 = datetime.fromisoformat(prev_taken_at)
+                                t1 = datetime.fromisoformat(body.taken_at)
+                                if t0.tzinfo is None:
+                                    t0 = t0.replace(tzinfo=UTC)
+                                if t1.tzinfo is None:
+                                    t1 = t1.replace(tzinfo=UTC)
+                                per_call_secs = (t1 - t0).total_seconds() / len(completed)
+                            except Exception:
+                                pass
+                        for call in completed:
+                            tool_name = call.get("name", "unknown") if isinstance(call, dict) else "unknown"
+                            tool_calls_total.labels(
+                                tool=tool_name, backend="unknown", result="success"
+                            ).inc()
+                            if per_call_secs is not None and per_call_secs >= 0:
+                                tool_call_duration_seconds.observe(per_call_secs)
 
                 await dispatch_hooks(
                     "on_checkpoint",

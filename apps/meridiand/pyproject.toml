@@ -14,6 +14,7 @@ dependencies = [
     "uvicorn[standard]>=0.29",
     "pyyaml>=6.0",
     "opentelemetry-api>=1.24",
+    "prometheus_client>=0.20",
     "meridian-core-errors>=0.1.0",
     "meridian-sdk-sandbox>=0.1.0",
     "meridian-kb-indexer>=0.1.0",

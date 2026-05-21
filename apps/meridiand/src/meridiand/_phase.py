@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -17,6 +18,10 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from storage_event_log import EventLogWriter
 from storage_reposit import LocalEventLogReader, PhaseProjection
+
+from ._metrics_registry import session_duration_seconds, sessions_total
+
+_TERMINAL_PHASES = frozenset({"terminated", "completed"})
 
 
 def _now() -> str:
@@ -103,6 +108,18 @@ def make_phase_router(
                         "reason": body.reason,
                     },
                 )
+                sessions_total.labels(phase=body.to_phase).inc()
+                if body.to_phase in _TERMINAL_PHASES:
+                    manifest_path = storage_root / "sessions" / session_id / "manifest.json"
+                    try:
+                        manifest = json.loads(manifest_path.read_text())
+                        created_at = manifest.get("created_at", "")
+                        if created_at:
+                            started = datetime.fromisoformat(created_at)
+                            duration = (datetime.now(UTC) - started).total_seconds()
+                            session_duration_seconds.labels(result=body.to_phase).observe(duration)
+                    except Exception:
+                        pass
             except PhaseTransitionError:
                 raise
             except Exception as exc:

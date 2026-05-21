@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from storage_event_log import EventLogWriter
 from storage_reposit import LocalEventLogReader, PhaseProjection
 
+from ._metrics_registry import sessions_total
 from ._pagination import (
     DEFAULT_PAGE_SIZE,
     CursorDecodeError,
@@ -294,6 +295,7 @@ def make_sessions_router(
                         },
                         thread_id=thread_id,
                     )
+                    sessions_total.labels(phase="created").inc()
 
                 except SessionCreateError:
                     raise
