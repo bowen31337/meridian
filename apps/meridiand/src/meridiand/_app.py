@@ -44,6 +44,7 @@ from ._vaults import make_vaults_router
 from ._webhook_sender import run_webhook_sender_loop
 from ._skill_forge import run_skill_forge_loop
 from ._agents import make_agents_router
+from ._budget_exceeded import make_budget_exceeded_router
 from ._budgets_reports import make_router as make_budgets_reports_router
 from ._channels import make_channels_router
 from ._system_channel import make_system_channel_router
@@ -410,6 +411,13 @@ def create_app(
                     )
                     app.include_router(
                         make_session_cancel_router(
+                            audit_log=audit_log,
+                            storage_root=storage_root,
+                            event_log=event_log,
+                        )
+                    )
+                    app.include_router(
+                        make_budget_exceeded_router(
                             audit_log=audit_log,
                             storage_root=storage_root,
                             event_log=event_log,

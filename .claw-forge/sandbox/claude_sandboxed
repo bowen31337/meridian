@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/budgets-cost-di-system-cost-breakdown-reports-by-agent/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/budgets-cost-di-system-hard-budget-exceeded-session-pha/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
