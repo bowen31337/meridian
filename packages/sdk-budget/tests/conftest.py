@@ -60,6 +60,7 @@ def mock_tracer(monkeypatch: pytest.MonkeyPatch) -> MockTracer:
     tracer = MockTracer()
     monkeypatch.setattr("sdk_budget._checker.get_tracer", lambda: tracer)
     monkeypatch.setattr("sdk_budget._cost_accumulator.get_tracer", lambda: tracer)
+    monkeypatch.setattr("sdk_budget._overrun_discipline.get_tracer", lambda: tracer)
     return tracer
 
 

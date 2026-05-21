@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/observability-system-prometheus-metrics-endpoint-expose/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/budgets-cost-di-system-budget-overrun-discipline-averag/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
