@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, Literal
 
 import yaml
 from core_errors import (
@@ -15,8 +16,6 @@ from core_errors import (
     record_error,
     record_invocation_event,
 )
-from typing import Any, Literal
-
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 DEFAULT_CONFIG_PATH = Path.home() / ".meridian" / "config.yaml"
@@ -31,6 +30,7 @@ _DEFAULT_CORS_METHODS = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 _DEFAULT_CORS_HEADERS = ["*"]
 _VALID_LOG_LEVELS = {"debug", "info", "warning", "error", "critical"}
 _VALID_VAULT_BACKENDS = {"os_keychain", "encrypted_file"}
+_VALID_FALLBACK_ON_VALUES = {"rate_limit", "timeout", "5xx", "any"}
 _VALID_PROVIDER_KINDS = {"anthropic", "openai", "openrouter", "ollama", "local", "claude_code_oauth"}
 _SECRET_REF_VAULT_PREFIX = "secret_ref://vault/"
 
@@ -210,11 +210,17 @@ class FallbackRuleConfig(BaseModel):
     model: str  # "provider_name:model_id" form
 
 
-class RoutingConfig(BaseModel):
+class RoutingDefaultConfig(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     rules: list[RoutingRuleConfig] = Field(default_factory=list)
     fallbacks: list[FallbackRuleConfig] = Field(default_factory=list)
+
+
+class RoutingConfig(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    default: RoutingDefaultConfig | None = None
 
 
 class ProviderConfig(BaseModel):
@@ -465,7 +471,7 @@ def resolve_config_location(audit_log: AuditLog | None = None) -> Path:
 
 
 def validate_config(config: MeridianConfig, audit_log: AuditLog | None = None) -> None:
-    """Validate vaults, providers, daemon, and storage sections; raise ConfigValidateError on failure."""
+    """Validate vaults, providers, routing, daemon, and storage sections; raise ConfigValidateError on failure."""
     _audit = audit_log if audit_log is not None else NoopAuditLog()
     now = _now()
     tracer = get_tracer()
@@ -531,31 +537,43 @@ def validate_config(config: MeridianConfig, audit_log: AuditLog | None = None) -
                         )
 
         # Validate routing section
-        if config.routing is not None:
-            for i, rule in enumerate(config.routing.rules):
+        if config.routing is not None and config.routing.default is not None:
+            routing_default = config.routing.default
+            for i, rule in enumerate(routing_default.rules):
+                rule_prefix = f"routing.default.rules[{i}]"
                 if ":" not in rule.model:
                     errors.append(
-                        f"routing.rules[{i}].model: {rule.model!r} must be in "
+                        f"{rule_prefix}.model: {rule.model!r} must be in "
                         "'provider_name:model_id' form"
                     )
                 else:
                     pname = rule.model.split(":")[0]
                     if pname not in seen_names:
                         errors.append(
-                            f"routing.rules[{i}].model: provider '{pname}' "
+                            f"{rule_prefix}.model: provider '{pname}' "
                             "is not declared in the providers section"
                         )
-            for i, fb in enumerate(config.routing.fallbacks):
+                if rule.when is not None:
+                    when = rule.when
+                    if when.estimated_input_tokens is not None:
+                        tok = when.estimated_input_tokens
+                        if tok.gt is None and tok.gte is None and tok.lt is None and tok.lte is None:
+                            errors.append(
+                                f"{rule_prefix}.when.estimated_input_tokens: "
+                                "at least one of gt, gte, lt, lte must be specified"
+                            )
+            for i, fb in enumerate(routing_default.fallbacks):
+                fb_prefix = f"routing.default.fallbacks[{i}]"
                 if ":" not in fb.model:
                     errors.append(
-                        f"routing.fallbacks[{i}].model: {fb.model!r} must be in "
+                        f"{fb_prefix}.model: {fb.model!r} must be in "
                         "'provider_name:model_id' form"
                     )
                 else:
                     pname = fb.model.split(":")[0]
                     if pname not in seen_names:
                         errors.append(
-                            f"routing.fallbacks[{i}].model: provider '{pname}' "
+                            f"{fb_prefix}.model: provider '{pname}' "
                             "is not declared in the providers section"
                         )
 

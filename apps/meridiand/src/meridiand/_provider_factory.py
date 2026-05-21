@@ -116,8 +116,11 @@ def _build_provider(cfg: ProviderConfig, resolved_auth: str | None) -> ModelProv
 
 def _convert_routing_policy(cfg: RoutingConfig) -> ModelRoutingPolicy:
     """Map config-level RoutingConfig to the sdk-provider ModelRoutingPolicy."""
+    if cfg.default is None:
+        return ModelRoutingPolicy(rules=[], fallbacks=[])
+
     rules: list[ModelRoutingRule] = []
-    for r in cfg.rules:
+    for r in cfg.default.rules:
         when: RoutingCondition | None = None
         if r.when is not None:
             tr: TokenRange | None = None
@@ -132,7 +135,7 @@ def _convert_routing_policy(cfg: RoutingConfig) -> ModelRoutingPolicy:
             )
         rules.append(ModelRoutingRule(when=when, model=r.model))
 
-    fallbacks = [FallbackRule(on=f.on, model=f.model) for f in cfg.fallbacks]
+    fallbacks = [FallbackRule(on=f.on, model=f.model) for f in cfg.default.fallbacks]
     return ModelRoutingPolicy(rules=rules, fallbacks=fallbacks)
 
 

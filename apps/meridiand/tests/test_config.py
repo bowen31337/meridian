@@ -60,6 +60,23 @@ Tests cover:
   - resolve_config_location: failure sets span status to ERROR.
   - resolve_config_location: accepts optional audit_log; uses NoopAuditLog when None.
   - resolve_config_location: ConfigResolveError has code "config_resolve_failed".
+  - validate_config: routing section None passes.
+  - validate_config: routing.default None passes.
+  - validate_config: routing.default empty rules and fallbacks pass.
+  - validate_config: routing.default.rules[i].model must be in provider_name:model_id form.
+  - validate_config: routing.default.rules[i].model provider must be declared in providers section.
+  - validate_config: routing.default.rules[i].when.skill_id accepted.
+  - validate_config: routing.default.rules[i].when.role accepted.
+  - validate_config: routing.default.rules[i].when.metadata_match accepted.
+  - validate_config: routing.default.rules[i].when.estimated_input_tokens.gt accepted.
+  - validate_config: routing.default.rules[i].when.estimated_input_tokens.lte accepted.
+  - validate_config: routing.default.rules[i].when.estimated_input_tokens with no bounds raises ConfigValidateError.
+  - validate_config: routing.default.rules[i].when full clause accepted.
+  - validate_config: routing.default.fallbacks[i].model must be in provider_name:model_id form.
+  - validate_config: routing.default.fallbacks[i].model provider must be declared in providers section.
+  - validate_config: routing.default.fallbacks[i].on all valid values pass.
+  - validate_config: routing failure writes audit log.
+  - validate_config: routing failure audit detail contains errors list.
 """
 
 from __future__ import annotations
@@ -80,10 +97,16 @@ from meridiand._config import (
     CorsConfig,
     DaemonConfig,
     DEFAULT_SOCKET_PATH,
+    FallbackRuleConfig,
     MERIDIAN_CONFIG_VERSION,
     MeridianConfig,
     ProviderConfig,
+    RoutingConditionConfig,
+    RoutingConfig,
+    RoutingDefaultConfig,
+    RoutingRuleConfig,
     StorageConfig,
+    TokenRangeConfig,
     VaultConfig,
     load_config,
     resolve_config_location,
@@ -1289,3 +1312,338 @@ class TestResolveConfigLocation:
         monkeypatch.setattr("meridiand._config.SYSTEM_CONFIG_PATH", tmp_path / "nonexistent-sys.yml")
         with pytest.raises(ConfigResolveError):
             resolve_config_location(audit_log=NoopAuditLog())
+
+
+# ---------------------------------------------------------------------------
+# TestValidateConfigRoutingDefault
+# ---------------------------------------------------------------------------
+
+
+def _make_provider(name: str = "claude", kind: str = "anthropic") -> ProviderConfig:
+    return ProviderConfig(name=name, kind=kind)
+
+
+def _make_routing_rule(
+    model: str = "claude:claude-3-5-sonnet",
+    when: RoutingConditionConfig | None = None,
+) -> RoutingRuleConfig:
+    return RoutingRuleConfig(model=model, when=when)
+
+
+def _make_fallback(
+    on: str = "rate_limit",
+    model: str = "claude:claude-haiku",
+) -> FallbackRuleConfig:
+    return FallbackRuleConfig(on=on, model=model)  # type: ignore[arg-type]
+
+
+class TestValidateConfigRoutingDefault:
+    def test_routing_none_passes(self, tmp_path: Path) -> None:
+        config = MeridianConfig(storage_root=tmp_path, routing=None)
+        validate_config(config)
+
+    def test_routing_default_none_passes(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            routing=RoutingConfig(default=None),
+        )
+        validate_config(config)
+
+    def test_routing_default_empty_rules_and_fallbacks_passes(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[_make_provider()],
+            routing=RoutingConfig(default=RoutingDefaultConfig(rules=[], fallbacks=[])),
+        )
+        validate_config(config)
+
+    def test_rule_valid_model_passes(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[_make_provider("claude")],
+            routing=RoutingConfig(
+                default=RoutingDefaultConfig(rules=[_make_routing_rule("claude:claude-3-5-sonnet")])
+            ),
+        )
+        validate_config(config)
+
+    def test_rule_model_missing_colon_raises(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[_make_provider("claude")],
+            routing=RoutingConfig(
+                default=RoutingDefaultConfig(rules=[_make_routing_rule("no-colon-here")])
+            ),
+        )
+        with pytest.raises(ConfigValidateError, match="provider_name:model_id"):
+            validate_config(config)
+
+    def test_rule_model_missing_colon_error_mentions_index(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[_make_provider("claude")],
+            routing=RoutingConfig(
+                default=RoutingDefaultConfig(rules=[_make_routing_rule("no-colon")])
+            ),
+        )
+        with pytest.raises(ConfigValidateError, match=r"routing\.default\.rules\[0\]"):
+            validate_config(config)
+
+    def test_rule_model_unknown_provider_raises(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[_make_provider("claude")],
+            routing=RoutingConfig(
+                default=RoutingDefaultConfig(rules=[_make_routing_rule("unknown:claude-3")])
+            ),
+        )
+        with pytest.raises(ConfigValidateError, match="unknown"):
+            validate_config(config)
+
+    def test_rule_when_skill_id_passes(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[_make_provider("claude")],
+            routing=RoutingConfig(
+                default=RoutingDefaultConfig(
+                    rules=[
+                        _make_routing_rule(
+                            "claude:claude-3-5-sonnet",
+                            when=RoutingConditionConfig(skill_id="my-skill"),
+                        )
+                    ]
+                )
+            ),
+        )
+        validate_config(config)
+
+    def test_rule_when_role_passes(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[_make_provider("claude")],
+            routing=RoutingConfig(
+                default=RoutingDefaultConfig(
+                    rules=[
+                        _make_routing_rule(
+                            "claude:claude-3-5-sonnet",
+                            when=RoutingConditionConfig(role="assistant"),
+                        )
+                    ]
+                )
+            ),
+        )
+        validate_config(config)
+
+    def test_rule_when_metadata_match_passes(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[_make_provider("claude")],
+            routing=RoutingConfig(
+                default=RoutingDefaultConfig(
+                    rules=[
+                        _make_routing_rule(
+                            "claude:claude-3-5-sonnet",
+                            when=RoutingConditionConfig(metadata_match={"env": "prod"}),
+                        )
+                    ]
+                )
+            ),
+        )
+        validate_config(config)
+
+    def test_rule_when_estimated_input_tokens_gt_passes(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[_make_provider("claude")],
+            routing=RoutingConfig(
+                default=RoutingDefaultConfig(
+                    rules=[
+                        _make_routing_rule(
+                            "claude:claude-3-5-sonnet",
+                            when=RoutingConditionConfig(
+                                estimated_input_tokens=TokenRangeConfig(gt=1000)
+                            ),
+                        )
+                    ]
+                )
+            ),
+        )
+        validate_config(config)
+
+    def test_rule_when_estimated_input_tokens_lte_passes(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[_make_provider("claude")],
+            routing=RoutingConfig(
+                default=RoutingDefaultConfig(
+                    rules=[
+                        _make_routing_rule(
+                            "claude:claude-3-5-sonnet",
+                            when=RoutingConditionConfig(
+                                estimated_input_tokens=TokenRangeConfig(lte=5000)
+                            ),
+                        )
+                    ]
+                )
+            ),
+        )
+        validate_config(config)
+
+    def test_rule_when_estimated_input_tokens_empty_raises(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[_make_provider("claude")],
+            routing=RoutingConfig(
+                default=RoutingDefaultConfig(
+                    rules=[
+                        _make_routing_rule(
+                            "claude:claude-3-5-sonnet",
+                            when=RoutingConditionConfig(
+                                estimated_input_tokens=TokenRangeConfig()
+                            ),
+                        )
+                    ]
+                )
+            ),
+        )
+        with pytest.raises(ConfigValidateError, match="estimated_input_tokens"):
+            validate_config(config)
+
+    def test_rule_when_full_clause_passes(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[_make_provider("claude")],
+            routing=RoutingConfig(
+                default=RoutingDefaultConfig(
+                    rules=[
+                        _make_routing_rule(
+                            "claude:claude-3-5-sonnet",
+                            when=RoutingConditionConfig(
+                                skill_id="forge",
+                                estimated_input_tokens=TokenRangeConfig(gt=500, lte=10000),
+                                metadata_match={"tier": "pro"},
+                                role="user",
+                            ),
+                        )
+                    ]
+                )
+            ),
+        )
+        validate_config(config)
+
+    def test_fallback_valid_passes(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[_make_provider("claude")],
+            routing=RoutingConfig(
+                default=RoutingDefaultConfig(
+                    fallbacks=[_make_fallback("rate_limit", "claude:claude-haiku")]
+                )
+            ),
+        )
+        validate_config(config)
+
+    def test_fallback_all_valid_on_values_pass(self, tmp_path: Path) -> None:
+        for on_val in ("rate_limit", "timeout", "5xx", "any"):
+            config = MeridianConfig(
+                storage_root=tmp_path,
+                providers=[_make_provider("claude")],
+                routing=RoutingConfig(
+                    default=RoutingDefaultConfig(
+                        fallbacks=[_make_fallback(on_val, "claude:claude-haiku")]
+                    )
+                ),
+            )
+            validate_config(config)
+
+    def test_fallback_model_missing_colon_raises(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[_make_provider("claude")],
+            routing=RoutingConfig(
+                default=RoutingDefaultConfig(
+                    fallbacks=[_make_fallback("rate_limit", "no-colon")]
+                )
+            ),
+        )
+        with pytest.raises(ConfigValidateError, match="provider_name:model_id"):
+            validate_config(config)
+
+    def test_fallback_model_missing_colon_error_mentions_index(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[_make_provider("claude")],
+            routing=RoutingConfig(
+                default=RoutingDefaultConfig(
+                    fallbacks=[_make_fallback("rate_limit", "no-colon")]
+                )
+            ),
+        )
+        with pytest.raises(ConfigValidateError, match=r"routing\.default\.fallbacks\[0\]"):
+            validate_config(config)
+
+    def test_fallback_unknown_provider_raises(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[_make_provider("claude")],
+            routing=RoutingConfig(
+                default=RoutingDefaultConfig(
+                    fallbacks=[_make_fallback("rate_limit", "unknown:claude-haiku")]
+                )
+            ),
+        )
+        with pytest.raises(ConfigValidateError, match="unknown"):
+            validate_config(config)
+
+    def test_multiple_rules_and_fallbacks_pass(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[
+                _make_provider("claude", "anthropic"),
+                _make_provider("gpt", "openai"),
+            ],
+            routing=RoutingConfig(
+                default=RoutingDefaultConfig(
+                    rules=[
+                        _make_routing_rule(
+                            "claude:claude-3-5-sonnet",
+                            when=RoutingConditionConfig(skill_id="coding"),
+                        ),
+                        _make_routing_rule("gpt:gpt-4o"),
+                    ],
+                    fallbacks=[
+                        _make_fallback("rate_limit", "gpt:gpt-4o-mini"),
+                        _make_fallback("timeout", "claude:claude-haiku"),
+                    ],
+                )
+            ),
+        )
+        validate_config(config)
+
+    def test_routing_failure_writes_audit_log(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[_make_provider("claude")],
+            routing=RoutingConfig(
+                default=RoutingDefaultConfig(rules=[_make_routing_rule("no-colon")])
+            ),
+        )
+        audit = _CapturingAuditLog()
+        with pytest.raises(ConfigValidateError):
+            validate_config(config, audit_log=audit)
+        assert any(e.event == "config.validate.failed" for e in audit.entries)
+
+    def test_routing_failure_audit_detail_has_errors(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[_make_provider("claude")],
+            routing=RoutingConfig(
+                default=RoutingDefaultConfig(rules=[_make_routing_rule("no-colon")])
+            ),
+        )
+        audit = _CapturingAuditLog()
+        with pytest.raises(ConfigValidateError):
+            validate_config(config, audit_log=audit)
+        entry = next(e for e in audit.entries if e.event == "config.validate.failed")
+        assert isinstance(entry.detail["errors"], list)
+        assert len(entry.detail["errors"]) > 0
