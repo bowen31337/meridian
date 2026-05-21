@@ -1,7 +1,7 @@
 (version 1)
 (allow default)
 (deny file-write* (subpath "/Users/bowenli/development/meridian"))
-(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/migration-impor-system-import-audit-log-every-meridian"))
+(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/migration-impor-system-command-meridianimport-hermes-pa"))
 (allow file-write* (subpath "/Users/bowenli/development/meridian/.git"))
 (deny file-write* (subpath "/Users/bowenli/.ssh"))
 (deny file-write* (subpath "/Users/bowenli/.aws"))

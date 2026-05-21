@@ -67,6 +67,62 @@ Tests cover:
   - OTel span "import.openclaw" emitted on failure.
   - OTel span "import.hermes" emitted on success.
   - OTel span "import.hermes" emitted on failure.
+  - POST /v1/x/imports/hermes/install returns 201 on success.
+  - POST /v1/x/imports/hermes/install response has audit_path and per-subsystem keys.
+  - POST /v1/x/imports/hermes/install skills/environments/providers/sessions/user_profiles/cron/acp_registry imported counts correct.
+  - POST /v1/x/imports/hermes/install empty subsystems returns zeros.
+  - POST /v1/x/imports/hermes/install creates meridian-import-*.audit.ndjson.
+  - POST /v1/x/imports/hermes/install audit has import_started as first entry.
+  - POST /v1/x/imports/hermes/install audit has record_translated for each record across all subsystems.
+  - POST /v1/x/imports/hermes/install record_translated kinds cover all subsystem types.
+  - POST /v1/x/imports/hermes/install audit ends with import_completed.
+  - POST /v1/x/imports/hermes/install audit has checklist entry.
+  - POST /v1/x/imports/hermes/install environments written to storage_root/environments/{id}.json.
+  - POST /v1/x/imports/hermes/install environment id has "env_" prefix.
+  - POST /v1/x/imports/hermes/install environment backend preserved.
+  - POST /v1/x/imports/hermes/install environment hermes_id stored in metadata.
+  - POST /v1/x/imports/hermes/install unknown backend marks lossy.
+  - POST /v1/x/imports/hermes/install empty env name returns 422.
+  - POST /v1/x/imports/hermes/install providers written to providers-imported.json fragment.
+  - POST /v1/x/imports/hermes/install provider fragment is JSON array.
+  - POST /v1/x/imports/hermes/install provider auth is null.
+  - POST /v1/x/imports/hermes/install provider always lossy due to auth.
+  - POST /v1/x/imports/hermes/install provider hermes_id in metadata.
+  - POST /v1/x/imports/hermes/install empty provider name returns 422.
+  - POST /v1/x/imports/hermes/install session manifest written to sessions/{id}/manifest.json.
+  - POST /v1/x/imports/hermes/install session id has "sess_" prefix.
+  - POST /v1/x/imports/hermes/install session status is "archived".
+  - POST /v1/x/imports/hermes/install session hermes_id in metadata.
+  - POST /v1/x/imports/hermes/install session events written as events.ndjson.
+  - POST /v1/x/imports/hermes/install session thread written to threads/{id}.json.
+  - POST /v1/x/imports/hermes/install no events.ndjson when events list is empty.
+  - POST /v1/x/imports/hermes/install empty session created_at returns 422.
+  - POST /v1/x/imports/hermes/install user_profile written to user_profiles/{id}.json.
+  - POST /v1/x/imports/hermes/install user_profile id has "user_" prefix.
+  - POST /v1/x/imports/hermes/install user_profile is_primary is False.
+  - POST /v1/x/imports/hermes/install user_profile hermes_id in metadata.
+  - POST /v1/x/imports/hermes/install memories stored verbatim and marked lossy.
+  - POST /v1/x/imports/hermes/install empty username returns 422.
+  - POST /v1/x/imports/hermes/install cron written to cron/{id}.json.
+  - POST /v1/x/imports/hermes/install cron id has "cron_" prefix.
+  - POST /v1/x/imports/hermes/install cron status is "active".
+  - POST /v1/x/imports/hermes/install cron hermes_id in metadata.
+  - POST /v1/x/imports/hermes/install invalid trigger_type returns 422.
+  - POST /v1/x/imports/hermes/install empty session_id returns 422.
+  - POST /v1/x/imports/hermes/install timestamp trigger sets next_fire_at.
+  - POST /v1/x/imports/hermes/install acp fragment written to acp-peers-imported.json.
+  - POST /v1/x/imports/hermes/install acp fragment is JSON array.
+  - POST /v1/x/imports/hermes/install acp peer_id preserved.
+  - POST /v1/x/imports/hermes/install acp base_url preserved.
+  - POST /v1/x/imports/hermes/install acp hermes_id in metadata.
+  - POST /v1/x/imports/hermes/install empty peer_id returns 422.
+  - POST /v1/x/imports/hermes/install validation failure returns 422 with import_record_invalid.
+  - POST /v1/x/imports/hermes/install no files written on validation failure.
+  - POST /v1/x/imports/hermes/install failure writes import_failed to import audit log.
+  - POST /v1/x/imports/hermes/install failure writes to main audit.ndjson.
+  - create_app wires /v1/x/imports/hermes/install route when storage_root is supplied.
+  - OTel span "import.hermes_install" emitted on success.
+  - OTel span "import.hermes_install" emitted on failure.
 """
 
 from __future__ import annotations
@@ -787,3 +843,525 @@ class TestOTelSpans:
         client.post("/v1/x/imports/hermes", json={"records": [rec]})
         span_names = [s.name for s in _otel_shared.otel_exporter.get_finished_spans()]
         assert any("import.hermes" in n for n in span_names)
+
+    def test_hermes_install_span_emitted_on_success(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/x/imports/hermes/install", json=_hermes_install_body())
+        span_names = [s.name for s in _otel_shared.otel_exporter.get_finished_spans()]
+        assert any("import.hermes_install" in n for n in span_names)
+
+    def test_hermes_install_span_emitted_on_failure(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/x/imports/hermes/install", json={"skills": [{"id": "", "name": "s", "description": "d", "instructions": "i", "tools": [{"name": "t"}]}]})
+        span_names = [s.name for s in _otel_shared.otel_exporter.get_finished_spans()]
+        assert any("import.hermes_install" in n for n in span_names)
+
+
+# ---------------------------------------------------------------------------
+# Hermes install — helpers
+# ---------------------------------------------------------------------------
+
+
+def _hermes_install_body(**overrides: Any) -> dict:
+    base: dict = {
+        "skills": [
+            {
+                "id": "h_s001",
+                "name": "my-skill",
+                "description": "Does something",
+                "instructions": "Step 1: do it.",
+                "tools": [{"name": "bash", "description": "Run shell"}],
+            }
+        ],
+        "environments": [
+            {"id": "h_e001", "name": "dev-env", "backend": "docker", "image": "ubuntu:24.04"}
+        ],
+        "providers": [
+            {"id": "h_p001", "name": "anthropic-main", "kind": "anthropic"}
+        ],
+        "sessions": [
+            {
+                "id": "h_sess001",
+                "title": "Test session",
+                "created_at": "2024-01-01T00:00:00+00:00",
+                "events": [{"type": "session.created", "ts": "2024-01-01T00:00:00+00:00"}],
+            }
+        ],
+        "user_profiles": [
+            {"id": "h_u001", "username": "alice", "display_name": "Alice"}
+        ],
+        "cron": [
+            {"id": "h_c001", "trigger_type": "interval", "session_id": "sess_abc", "interval": "1h"}
+        ],
+        "acp_registry": [
+            {"id": "h_a001", "peer_id": "peer_xyz", "base_url": "https://peer.example.com"}
+        ],
+    }
+    base.update(overrides)
+    return base
+
+
+# ---------------------------------------------------------------------------
+# Hermes install — success
+# ---------------------------------------------------------------------------
+
+
+class TestHermesInstallSuccess:
+    def test_returns_201(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body())
+        assert resp.status_code == 201
+
+    def test_response_has_audit_path(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        assert "audit_path" in body
+
+    def test_response_has_all_subsystem_keys(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        for key in ("skills", "environments", "providers", "sessions", "user_profiles", "cron", "acp_registry"):
+            assert key in body, f"missing key: {key}"
+
+    def test_skills_imported_count(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        assert body["skills"]["imported"] == 1
+
+    def test_environments_imported_count(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        assert body["environments"]["imported"] == 1
+
+    def test_providers_imported_count(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        assert body["providers"]["imported"] == 1
+
+    def test_sessions_imported_count(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        assert body["sessions"]["imported"] == 1
+
+    def test_user_profiles_imported_count(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        assert body["user_profiles"]["imported"] == 1
+
+    def test_cron_imported_count(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        assert body["cron"]["imported"] == 1
+
+    def test_acp_registry_imported_count(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        assert body["acp_registry"]["imported"] == 1
+
+    def test_empty_subsystems_returns_zeros(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json={}).json()
+        assert body["skills"]["imported"] == 0
+        assert body["environments"]["imported"] == 0
+
+    def test_creates_import_audit_ndjson(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/x/imports/hermes/install", json=_hermes_install_body())
+        assert _import_audit_path(storage_root) is not None
+
+    def test_audit_log_has_import_started(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/x/imports/hermes/install", json=_hermes_install_body())
+        entries = _import_audit_records(storage_root)
+        assert entries[0]["type"] == "import_started"
+
+    def test_audit_log_has_record_translated_for_each_subsystem_record(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/x/imports/hermes/install", json=_hermes_install_body())
+        entries = _import_audit_records(storage_root)
+        translated = [e for e in entries if e["type"] == "record_translated"]
+        # 1 skill + 1 env + 1 provider + 1 session + 1 user_profile + 1 cron + 1 acp = 7
+        assert len(translated) == 7
+
+    def test_audit_log_record_translated_kinds(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/x/imports/hermes/install", json=_hermes_install_body())
+        entries = _import_audit_records(storage_root)
+        kinds = {e["kind"] for e in entries if e["type"] == "record_translated"}
+        assert kinds == {"skill", "environment", "provider", "session", "user_profile", "cron", "acp_peer"}
+
+    def test_audit_log_ends_with_import_completed(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/x/imports/hermes/install", json=_hermes_install_body())
+        entries = _import_audit_records(storage_root)
+        assert entries[-1]["type"] == "import_completed"
+
+    def test_audit_log_has_checklist(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/x/imports/hermes/install", json=_hermes_install_body())
+        entries = _import_audit_records(storage_root)
+        assert any(e["type"] == "checklist" for e in entries)
+
+
+# ---------------------------------------------------------------------------
+# Hermes install — environments
+# ---------------------------------------------------------------------------
+
+
+class TestHermesInstallEnvironments:
+    def test_env_written_to_environments_dir(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        env_ids = body["environments"]["ids"]
+        assert len(env_ids) == 1
+        env_file = storage_root / "environments" / f"{env_ids[0]}.json"
+        assert env_file.exists()
+
+    def test_env_id_has_env_prefix(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        assert body["environments"]["ids"][0].startswith("env_")
+
+    def test_env_record_has_backend(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        env_file = storage_root / "environments" / f"{body['environments']['ids'][0]}.json"
+        rec = json.loads(env_file.read_text())
+        assert rec["backend"] == "docker"
+
+    def test_env_hermes_id_in_metadata(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        env_file = storage_root / "environments" / f"{body['environments']['ids'][0]}.json"
+        rec = json.loads(env_file.read_text())
+        assert rec["metadata"]["hermes_id"] == "h_e001"
+
+    def test_env_unknown_backend_marks_lossy(self, storage_root: Path) -> None:
+        install = _hermes_install_body()
+        install["environments"][0]["backend"] = "obscure_vm"
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=install).json()
+        assert body["environments"]["lossy_count"] == 1
+
+    def test_env_empty_name_returns_422(self, storage_root: Path) -> None:
+        install = _hermes_install_body()
+        install["environments"] = [{"id": "e1", "name": "", "backend": "docker"}]
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/hermes/install", json=install)
+        assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Hermes install — providers
+# ---------------------------------------------------------------------------
+
+
+class TestHermesInstallProviders:
+    def test_providers_written_to_fragment_file(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        fragment = storage_root / body["providers"]["fragment_path"]
+        assert fragment.exists()
+
+    def test_provider_fragment_is_valid_json_array(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        fragment = storage_root / body["providers"]["fragment_path"]
+        data = json.loads(fragment.read_text())
+        assert isinstance(data, list)
+        assert len(data) == 1
+
+    def test_provider_auth_is_null(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        fragment = storage_root / body["providers"]["fragment_path"]
+        prov = json.loads(fragment.read_text())[0]
+        assert prov["auth"] is None
+
+    def test_provider_always_lossy_due_to_auth(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        assert body["providers"]["lossy_count"] == 1
+
+    def test_provider_hermes_id_in_metadata(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        fragment = storage_root / body["providers"]["fragment_path"]
+        prov = json.loads(fragment.read_text())[0]
+        assert prov["metadata"]["hermes_id"] == "h_p001"
+
+    def test_provider_empty_name_returns_422(self, storage_root: Path) -> None:
+        install = _hermes_install_body()
+        install["providers"] = [{"id": "p1", "name": "", "kind": "anthropic"}]
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/hermes/install", json=install)
+        assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Hermes install — sessions
+# ---------------------------------------------------------------------------
+
+
+class TestHermesInstallSessions:
+    def test_session_manifest_written(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        sess_id = body["sessions"]["ids"][0]
+        manifest_path = storage_root / "sessions" / sess_id / "manifest.json"
+        assert manifest_path.exists()
+
+    def test_session_id_has_sess_prefix(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        assert body["sessions"]["ids"][0].startswith("sess_")
+
+    def test_session_status_is_archived(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        sess_id = body["sessions"]["ids"][0]
+        manifest = json.loads((storage_root / "sessions" / sess_id / "manifest.json").read_text())
+        assert manifest["status"] == "archived"
+
+    def test_session_hermes_id_in_metadata(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        sess_id = body["sessions"]["ids"][0]
+        manifest = json.loads((storage_root / "sessions" / sess_id / "manifest.json").read_text())
+        assert manifest["metadata"]["hermes_id"] == "h_sess001"
+
+    def test_session_events_written_as_ndjson(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        sess_id = body["sessions"]["ids"][0]
+        elog = storage_root / "sessions" / sess_id / "events.ndjson"
+        assert elog.exists()
+        lines = [l for l in elog.read_text().splitlines() if l.strip()]
+        assert len(lines) == 1
+
+    def test_session_thread_written(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        sess_id = body["sessions"]["ids"][0]
+        threads_dir = storage_root / "sessions" / sess_id / "threads"
+        assert threads_dir.exists()
+        assert len(list(threads_dir.glob("*.json"))) == 1
+
+    def test_session_no_events_file_when_events_empty(self, storage_root: Path) -> None:
+        install = _hermes_install_body()
+        install["sessions"] = [
+            {"id": "h_sess002", "created_at": "2024-01-02T00:00:00+00:00", "events": []}
+        ]
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=install).json()
+        sess_id = body["sessions"]["ids"][0]
+        elog = storage_root / "sessions" / sess_id / "events.ndjson"
+        assert not elog.exists()
+
+    def test_session_empty_created_at_returns_422(self, storage_root: Path) -> None:
+        install = _hermes_install_body()
+        install["sessions"] = [{"id": "h_sess003", "created_at": ""}]
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/hermes/install", json=install)
+        assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Hermes install — user_profiles
+# ---------------------------------------------------------------------------
+
+
+class TestHermesInstallUserProfiles:
+    def test_profile_written_to_user_profiles_dir(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        uid = body["user_profiles"]["ids"][0]
+        assert (storage_root / "user_profiles" / f"{uid}.json").exists()
+
+    def test_profile_id_has_user_prefix(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        assert body["user_profiles"]["ids"][0].startswith("user_")
+
+    def test_profile_is_not_primary(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        uid = body["user_profiles"]["ids"][0]
+        rec = json.loads((storage_root / "user_profiles" / f"{uid}.json").read_text())
+        assert rec["is_primary"] is False
+
+    def test_profile_hermes_id_in_metadata(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        uid = body["user_profiles"]["ids"][0]
+        rec = json.loads((storage_root / "user_profiles" / f"{uid}.json").read_text())
+        assert rec["metadata"]["hermes_id"] == "h_u001"
+
+    def test_profile_memories_stored_verbatim(self, storage_root: Path) -> None:
+        install = _hermes_install_body()
+        install["user_profiles"] = [
+            {"id": "h_u002", "username": "bob", "memories": ["Remember to call mom"]}
+        ]
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=install).json()
+        uid = body["user_profiles"]["ids"][0]
+        rec = json.loads((storage_root / "user_profiles" / f"{uid}.json").read_text())
+        assert rec["memories"] == ["Remember to call mom"]
+        assert body["user_profiles"]["lossy_count"] == 1
+
+    def test_profile_empty_username_returns_422(self, storage_root: Path) -> None:
+        install = _hermes_install_body()
+        install["user_profiles"] = [{"id": "h_u003", "username": ""}]
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/hermes/install", json=install)
+        assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Hermes install — cron
+# ---------------------------------------------------------------------------
+
+
+class TestHermesInstallCron:
+    def test_cron_written_to_cron_dir(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        cron_id = body["cron"]["ids"][0]
+        assert (storage_root / "cron" / f"{cron_id}.json").exists()
+
+    def test_cron_id_has_cron_prefix(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        assert body["cron"]["ids"][0].startswith("cron_")
+
+    def test_cron_status_is_active(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        cron_id = body["cron"]["ids"][0]
+        rec = json.loads((storage_root / "cron" / f"{cron_id}.json").read_text())
+        assert rec["status"] == "active"
+
+    def test_cron_hermes_id_in_metadata(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        cron_id = body["cron"]["ids"][0]
+        rec = json.loads((storage_root / "cron" / f"{cron_id}.json").read_text())
+        assert rec["metadata"]["hermes_id"] == "h_c001"
+
+    def test_cron_invalid_trigger_type_returns_422(self, storage_root: Path) -> None:
+        install = _hermes_install_body()
+        install["cron"] = [{"id": "h_c002", "trigger_type": "bogus", "session_id": "sess_abc"}]
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/hermes/install", json=install)
+        assert resp.status_code == 422
+
+    def test_cron_empty_session_id_returns_422(self, storage_root: Path) -> None:
+        install = _hermes_install_body()
+        install["cron"] = [{"id": "h_c003", "trigger_type": "interval", "session_id": "", "interval": "5m"}]
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/hermes/install", json=install)
+        assert resp.status_code == 422
+
+    def test_cron_timestamp_trigger_sets_next_fire_at(self, storage_root: Path) -> None:
+        ts = "2025-01-01T12:00:00+00:00"
+        install = _hermes_install_body()
+        install["cron"] = [{"id": "h_c004", "trigger_type": "timestamp", "session_id": "sess_abc", "timestamp": ts}]
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=install).json()
+        cron_id = body["cron"]["ids"][0]
+        rec = json.loads((storage_root / "cron" / f"{cron_id}.json").read_text())
+        assert rec["next_fire_at"] == ts
+
+
+# ---------------------------------------------------------------------------
+# Hermes install — ACP registry
+# ---------------------------------------------------------------------------
+
+
+class TestHermesInstallAcpRegistry:
+    def test_acp_fragment_written(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        fragment = storage_root / body["acp_registry"]["fragment_path"]
+        assert fragment.exists()
+
+    def test_acp_fragment_is_valid_json_array(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        fragment = storage_root / body["acp_registry"]["fragment_path"]
+        data = json.loads(fragment.read_text())
+        assert isinstance(data, list)
+        assert len(data) == 1
+
+    def test_acp_peer_id_preserved(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        fragment = storage_root / body["acp_registry"]["fragment_path"]
+        peer = json.loads(fragment.read_text())[0]
+        assert peer["peer_id"] == "peer_xyz"
+
+    def test_acp_base_url_preserved(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        fragment = storage_root / body["acp_registry"]["fragment_path"]
+        peer = json.loads(fragment.read_text())[0]
+        assert peer["base_url"] == "https://peer.example.com"
+
+    def test_acp_hermes_id_in_metadata(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
+        fragment = storage_root / body["acp_registry"]["fragment_path"]
+        peer = json.loads(fragment.read_text())[0]
+        assert peer["metadata"]["hermes_id"] == "h_a001"
+
+    def test_acp_empty_peer_id_returns_422(self, storage_root: Path) -> None:
+        install = _hermes_install_body()
+        install["acp_registry"] = [{"id": "a1", "peer_id": "", "base_url": "https://x.example.com"}]
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/hermes/install", json=install)
+        assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Hermes install — transactional / failure
+# ---------------------------------------------------------------------------
+
+
+class TestHermesInstallFailure:
+    def test_validation_failure_returns_422(self, storage_root: Path) -> None:
+        install = {"skills": [{"id": "", "name": "s", "description": "d", "instructions": "i", "tools": [{"name": "t"}]}]}
+        client = _make_client(storage_root)
+        resp = client.post("/v1/x/imports/hermes/install", json=install)
+        assert resp.status_code == 422
+
+    def test_validation_failure_error_code(self, storage_root: Path) -> None:
+        install = {"skills": [{"id": "", "name": "s", "description": "d", "instructions": "i", "tools": [{"name": "t"}]}]}
+        client = _make_client(storage_root)
+        body = client.post("/v1/x/imports/hermes/install", json=install).json()
+        assert body["error"]["code"] == "import_record_invalid"
+
+    def test_no_files_written_on_failure(self, storage_root: Path) -> None:
+        install = {"skills": [{"id": "", "name": "s", "description": "d", "instructions": "i", "tools": [{"name": "t"}]}]}
+        client = _make_client(storage_root)
+        client.post("/v1/x/imports/hermes/install", json=install)
+        if (storage_root / "skills").exists():
+            assert list((storage_root / "skills").glob("*.json")) == []
+
+    def test_failure_writes_import_failed_to_audit(self, storage_root: Path) -> None:
+        install = {"environments": [{"id": "", "name": "e", "backend": "docker"}]}
+        client = _make_client(storage_root)
+        client.post("/v1/x/imports/hermes/install", json=install)
+        entries = _import_audit_records(storage_root)
+        assert any(e["type"] == "import_failed" for e in entries)
+
+    def test_failure_writes_to_main_audit_log(self, storage_root: Path) -> None:
+        install = {"environments": [{"id": "", "name": "e", "backend": "docker"}]}
+        client = _make_client(storage_root)
+        client.post("/v1/x/imports/hermes/install", json=install)
+        records = _main_audit_records(storage_root)
+        assert any(r.get("event") == "import.hermes_install.failed" for r in records)
+
+    def test_install_route_present_with_storage_root(self, storage_root: Path) -> None:
+        app = create_app(FileAuditLog(storage_root), storage_root=storage_root)
+        paths = [r.path for r in app.routes]  # type: ignore[attr-defined]
+        assert "/v1/x/imports/hermes/install" in paths

@@ -1,7 +1,10 @@
 """Import endpoints for OpenClaw and Hermes migrations.
 
-POST /v1/x/imports/openclaw  — import channel records exported from OpenClaw
-POST /v1/x/imports/hermes    — import skill records exported from Hermes
+POST /v1/x/imports/openclaw         — import channel records exported from OpenClaw
+POST /v1/x/imports/hermes           — import skill records exported from Hermes
+POST /v1/x/imports/hermes/install   — import a full Hermes installation: skills,
+                                      environments, providers, sessions, user_profiles,
+                                      cron jobs, and ACP registry entries
 
 Every invocation:
   - Writes a per-import audit log: storage_root/meridian-import-<timestamp>.audit.ndjson
@@ -33,7 +36,7 @@ from core_errors import (
 )
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ._import_audit import ImportAuditLog
 
@@ -119,6 +122,104 @@ class HermesRecord(BaseModel):
 
 class HermesImportRequest(BaseModel):
     records: list[HermesRecord]
+
+
+# ---------------------------------------------------------------------------
+# Hermes installation — per-subsystem record models
+# ---------------------------------------------------------------------------
+
+
+class HermesEnvRecord(BaseModel):
+    """A single environment record exported from Hermes."""
+
+    id: str
+    name: str
+    backend: str  # e.g. "docker", "local", "nix", "kubernetes"
+    image: str | None = None
+    template: str | None = None
+    workspace_path: str | None = None
+    env_passthrough: list[str] | None = None
+    network_policy: dict[str, Any] | None = None
+    caps_envelope: dict[str, Any] | None = None
+    default_timeout_ms: int | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class HermesProviderRecord(BaseModel):
+    """A single model provider entry exported from Hermes."""
+
+    id: str
+    name: str
+    kind: str  # anthropic, openai, openrouter, ollama, local
+    base_url: str | None = None
+    # auth is NOT imported (security concern) — always lossy
+    model_ids: list[str] | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class HermesSessionRecord(BaseModel):
+    """A single session with event-log history exported from Hermes."""
+
+    id: str
+    title: str | None = None
+    agent_id: str | None = None
+    user_profile_id: str | None = None
+    created_at: str
+    events: list[dict[str, Any]] | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class HermesUserProfileRecord(BaseModel):
+    """A single Honcho user profile exported from Hermes."""
+
+    id: str
+    username: str
+    display_name: str | None = None
+    email: str | None = None
+    memories: list[str] | None = None
+    capabilities: list[str] | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class HermesCronRecord(BaseModel):
+    """A single cron job exported from Hermes."""
+
+    id: str
+    trigger_type: str
+    session_id: str
+    name: str | None = None
+    interval: str | None = None
+    timestamp: str | None = None
+    channel_id: str | None = None
+    path: str | None = None
+    webhook_id: str | None = None
+    memory_key: str | None = None
+    days_before: int | None = None
+    capabilities: list[str] | None = None
+    missed_fires_policy: str | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class HermesAcpRecord(BaseModel):
+    """A single ACP peer registry entry exported from Hermes."""
+
+    id: str
+    peer_id: str
+    base_url: str
+    allowed_capabilities: list[str] | None = None
+    metadata: dict[str, Any] | None = None
+
+
+class HermesInstallImportRequest(BaseModel):
+    """Full Hermes installation import — all subsystems are optional."""
+
+    skills: list[HermesRecord] = Field(default_factory=list)
+    environments: list[HermesEnvRecord] = Field(default_factory=list)
+    providers: list[HermesProviderRecord] = Field(default_factory=list)
+    sessions: list[HermesSessionRecord] = Field(default_factory=list)
+    user_profiles: list[HermesUserProfileRecord] = Field(default_factory=list)
+    cron: list[HermesCronRecord] = Field(default_factory=list)
+    acp_registry: list[HermesAcpRecord] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +460,320 @@ def _hermes_checklist(
 
 
 # ---------------------------------------------------------------------------
+# Hermes installation subsystem translations
+# ---------------------------------------------------------------------------
+
+_KNOWN_BACKENDS = frozenset(
+    {"docker", "local", "nix", "kubernetes", "podman", "firecracker", "wasm"}
+)
+_VALID_TRIGGER_TYPES = frozenset(
+    {"timestamp", "interval", "channel_event", "file_change", "webhook", "memory_anniversary"}
+)
+
+
+def _translate_hermes_env(
+    rec: HermesEnvRecord, *, now: str
+) -> tuple[dict[str, Any], list[str]]:
+    lossy: list[str] = []
+    env_id = f"env_{uuid.uuid4().hex}"
+
+    if not rec.name.strip():
+        raise ValueError("name must not be empty")
+    if not rec.backend.strip():
+        raise ValueError("backend must not be empty")
+
+    if rec.backend not in _KNOWN_BACKENDS:
+        lossy.append("backend_unknown")  # kept verbatim; may not be functional
+
+    meta: dict[str, Any] = {"hermes_id": rec.id}
+    if rec.metadata:
+        for k, v in rec.metadata.items():
+            meta[f"hermes_meta_{k}"] = v
+        lossy.append("metadata")
+
+    env_record: dict[str, Any] = {
+        "id": env_id,
+        "name": rec.name,
+        "backend": rec.backend,
+        "image": rec.image,
+        "template": rec.template,
+        "workspace_path": rec.workspace_path,
+        "env_passthrough": rec.env_passthrough,
+        "network_policy": rec.network_policy,
+        "caps_envelope": rec.caps_envelope,
+        "default_timeout_ms": rec.default_timeout_ms,
+        "created_at": now,
+        "updated_at": now,
+        "metadata": meta,
+    }
+    return env_record, lossy
+
+
+def _translate_hermes_provider(
+    rec: HermesProviderRecord, *, now: str
+) -> tuple[dict[str, Any], list[str]]:
+    lossy: list[str] = []
+
+    if not rec.name.strip():
+        raise ValueError("name must not be empty")
+    if not rec.kind.strip():
+        raise ValueError("kind must not be empty")
+
+    # auth is never imported — must be set manually after import
+    lossy.append("auth_not_imported")
+    if rec.model_ids is not None:
+        lossy.append("model_ids_advisory")  # stored for reference only
+
+    meta: dict[str, Any] = {"hermes_id": rec.id}
+    if rec.model_ids is not None:
+        meta["hermes_model_ids"] = rec.model_ids
+    if rec.metadata:
+        for k, v in rec.metadata.items():
+            meta[f"hermes_meta_{k}"] = v
+        lossy.append("metadata")
+
+    provider_record: dict[str, Any] = {
+        "name": rec.name,
+        "kind": rec.kind,
+        "base_url": rec.base_url,
+        "auth": None,  # deliberately omitted — must be configured post-import
+        "metadata": meta,
+    }
+    return provider_record, lossy
+
+
+def _translate_hermes_session(
+    rec: HermesSessionRecord, *, now: str
+) -> tuple[dict[str, Any], list[str]]:
+    lossy: list[str] = []
+    session_id = f"sess_{uuid.uuid4().hex}"
+    thread_id = f"thread_{uuid.uuid4().hex}"
+
+    if not rec.created_at.strip():
+        raise ValueError("created_at must not be empty")
+
+    meta: dict[str, Any] = {"hermes_id": rec.id}
+    if rec.title:
+        meta["hermes_title"] = rec.title
+    if rec.user_profile_id:
+        meta["hermes_user_profile_id"] = rec.user_profile_id
+        lossy.append("user_profile_id")  # original profile ID mapping not preserved
+    if rec.metadata:
+        for k, v in rec.metadata.items():
+            meta[f"hermes_meta_{k}"] = v
+        lossy.append("metadata")
+
+    events: list[dict[str, Any]] = []
+    if rec.events:
+        for seq, ev in enumerate(rec.events):
+            normalized = dict(ev)
+            normalized.setdefault("session_id", session_id)
+            normalized.setdefault("thread_id", thread_id)
+            normalized.setdefault("seq", seq)
+            events.append(normalized)
+    else:
+        lossy.append("events_empty")
+
+    session_record: dict[str, Any] = {
+        "session_id": session_id,
+        "thread_id": thread_id,
+        "manifest": {
+            "session_id": session_id,
+            "agent_id": rec.agent_id,
+            "agent_version_id": None,
+            "thread_id": thread_id,
+            "status": "archived",
+            "created_at": rec.created_at,
+            "imported_at": now,
+            "metadata": meta,
+        },
+        "thread_record": {
+            "thread_id": thread_id,
+            "session_id": session_id,
+            "created_at": rec.created_at,
+        },
+        "events": events,
+        "event_count": len(events),
+    }
+    return session_record, lossy
+
+
+def _translate_hermes_user_profile(
+    rec: HermesUserProfileRecord, *, now: str
+) -> tuple[dict[str, Any], list[str]]:
+    lossy: list[str] = []
+    user_id = f"user_{uuid.uuid4().hex}"
+
+    if not rec.username.strip():
+        raise ValueError("username must not be empty")
+
+    meta: dict[str, Any] = {"hermes_id": rec.id}
+    if rec.metadata:
+        for k, v in rec.metadata.items():
+            meta[f"hermes_meta_{k}"] = v
+        lossy.append("metadata")
+
+    memories = list(rec.memories) if rec.memories else []
+    if memories:
+        lossy.append("memories_verbatim")  # stored as-is; not memory-store objects
+
+    profile_record: dict[str, Any] = {
+        "id": user_id,
+        "username": rec.username,
+        "display_name": rec.display_name,
+        "email": rec.email,
+        "capabilities": list(rec.capabilities) if rec.capabilities else [],
+        "memories": memories,
+        "is_primary": False,  # imported profiles are never primary
+        "created_at": now,
+        "updated_at": now,
+        "metadata": meta,
+    }
+    return profile_record, lossy
+
+
+def _translate_hermes_cron(
+    rec: HermesCronRecord, *, now: str
+) -> tuple[dict[str, Any], list[str]]:
+    lossy: list[str] = []
+    cron_id = f"cron_{uuid.uuid4().hex}"
+
+    if not rec.session_id.strip():
+        raise ValueError("session_id must not be empty")
+    if rec.trigger_type not in _VALID_TRIGGER_TYPES:
+        raise ValueError(f"unknown trigger_type: {rec.trigger_type!r}")
+
+    meta: dict[str, Any] = {"hermes_id": rec.id}
+    if rec.metadata:
+        for k, v in rec.metadata.items():
+            meta[f"hermes_meta_{k}"] = v
+        lossy.append("metadata")
+
+    missed_fires_policy = rec.missed_fires_policy or "skip"
+    if missed_fires_policy not in {"catch_up", "skip"}:
+        missed_fires_policy = "skip"
+        lossy.append("missed_fires_policy_reset")
+
+    next_fire_at: str | None = None
+    if rec.trigger_type == "timestamp":
+        next_fire_at = rec.timestamp
+    # interval triggers: next_fire_at left None; scheduler computes on first check
+
+    cron_record: dict[str, Any] = {
+        "id": cron_id,
+        "trigger_type": rec.trigger_type,
+        "session_id": rec.session_id,
+        "name": rec.name,
+        "status": "active",
+        "created_at": now,
+        "next_fire_at": next_fire_at,
+        "missed_fires_policy": missed_fires_policy,
+        "capabilities": list(rec.capabilities) if rec.capabilities else [],
+        "timestamp": rec.timestamp,
+        "interval": rec.interval,
+        "channel_id": rec.channel_id,
+        "path": rec.path,
+        "webhook_id": rec.webhook_id,
+        "memory_key": rec.memory_key,
+        "days_before": rec.days_before,
+        "metadata": meta,
+    }
+    return cron_record, lossy
+
+
+def _translate_hermes_acp(
+    rec: HermesAcpRecord, *, now: str
+) -> tuple[dict[str, Any], list[str]]:
+    lossy: list[str] = []
+
+    if not rec.peer_id.strip():
+        raise ValueError("peer_id must not be empty")
+    if not rec.base_url.strip():
+        raise ValueError("base_url must not be empty")
+
+    meta: dict[str, Any] = {"hermes_id": rec.id}
+    if rec.metadata:
+        for k, v in rec.metadata.items():
+            meta[f"hermes_meta_{k}"] = v
+        lossy.append("metadata")
+
+    acp_record: dict[str, Any] = {
+        "peer_id": rec.peer_id,
+        "base_url": rec.base_url,
+        "allowed_capabilities": list(rec.allowed_capabilities) if rec.allowed_capabilities else [],
+        "imported_at": now,
+        "metadata": meta,
+    }
+    return acp_record, lossy
+
+
+# ---------------------------------------------------------------------------
+# Checklist generation for install import
+# ---------------------------------------------------------------------------
+
+
+def _install_checklist(
+    body: HermesInstallImportRequest,
+    results: dict[str, Any],
+) -> list[str]:
+    items: list[str] = []
+
+    if results["providers"]["imported"]:
+        items.append(
+            f"Merge {results['providers']['imported']} provider(s) from "
+            "providers-imported.json into your config.yml providers section; "
+            "set auth for each (auth was not imported)"
+        )
+    if results["acp_registry"]["imported"]:
+        items.append(
+            f"Merge {results['acp_registry']['imported']} ACP peer(s) from "
+            "acp-peers-imported.json into your ACP adapter config"
+        )
+
+    env_unknown_backends = [
+        rec.backend
+        for rec in body.environments
+        if rec.backend not in _KNOWN_BACKENDS
+    ]
+    if env_unknown_backends:
+        unique = sorted(set(env_unknown_backends))
+        items.append(
+            f"Environment(s) with unrecognized backend(s) {unique} were imported verbatim; "
+            "verify the backend driver is installed"
+        )
+
+    if results["sessions"]["imported"]:
+        items.append(
+            f"Imported {results['sessions']['imported']} session(s) with status=archived; "
+            "agent_id references may not resolve if agents were not also migrated"
+        )
+
+    if results["user_profiles"]["imported"]:
+        items.append(
+            f"Imported {results['user_profiles']['imported']} user profile(s) as non-primary; "
+            "promote one to primary via the API if needed"
+        )
+
+    if results["cron"]["imported"]:
+        items.append(
+            f"Imported {results['cron']['imported']} cron job(s); "
+            "session_id references must resolve to imported or existing sessions"
+        )
+
+    totals = [
+        f"skills={results['skills']['imported']}",
+        f"environments={results['environments']['imported']}",
+        f"providers={results['providers']['imported']}",
+        f"sessions={results['sessions']['imported']}",
+        f"user_profiles={results['user_profiles']['imported']}",
+        f"cron={results['cron']['imported']}",
+        f"acp_registry={results['acp_registry']['imported']}",
+    ]
+    items.append(f"Hermes installation import complete: {', '.join(totals)}")
+    return items
+
+
+# ---------------------------------------------------------------------------
 # Router factory
 # ---------------------------------------------------------------------------
 
@@ -368,6 +783,10 @@ def make_imports_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter
     channels_dir = storage_root / "channels"
     skills_dir = storage_root / "skills"
     versions_dir = storage_root / "skill_versions"
+    envs_dir = storage_root / "environments"
+    profiles_dir = storage_root / "user_profiles"
+    cron_dir = storage_root / "cron"
+    sessions_dir = storage_root / "sessions"
 
     @router.post("/v1/x/imports/openclaw", status_code=201)
     async def import_openclaw(body: OpenClawImportRequest) -> JSONResponse:
@@ -629,6 +1048,423 @@ def make_imports_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter
                 "lossy_count": lossy_count,
                 "audit_path": import_audit.path.name,
                 "skill_ids": [s["id"] for s in skill_records],
+            },
+            status_code=201,
+        )
+
+    @router.post("/v1/x/imports/hermes/install", status_code=201)
+    async def import_hermes_install(body: HermesInstallImportRequest) -> JSONResponse:  # noqa: C901
+        now = _now()
+        tracer = get_tracer()
+        total_records = (
+            len(body.skills)
+            + len(body.environments)
+            + len(body.providers)
+            + len(body.sessions)
+            + len(body.user_profiles)
+            + len(body.cron)
+            + len(body.acp_registry)
+        )
+        import_audit = ImportAuditLog(storage_root, source="hermes_install", timestamp=now)
+
+        with tracer.start_as_current_span(
+            "import.hermes_install",
+            attributes={
+                "import.source": "hermes_install",
+                "import.record_count": total_records,
+            },
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="import.hermes_install.invocation",
+                    code="import_hermes_install",
+                    timestamp=now,
+                ),
+            )
+            import_audit.write_started(record_count=total_records, ts=now)
+
+            # Accumulated results per subsystem (populated below)
+            results: dict[str, Any] = {
+                "skills": {"imported": 0, "lossy_count": 0, "ids": []},
+                "environments": {"imported": 0, "lossy_count": 0, "ids": []},
+                "providers": {"imported": 0, "lossy_count": 0, "fragment_path": "providers-imported.json"},
+                "sessions": {"imported": 0, "lossy_count": 0, "ids": []},
+                "user_profiles": {"imported": 0, "lossy_count": 0, "ids": []},
+                "cron": {"imported": 0, "lossy_count": 0, "ids": []},
+                "acp_registry": {"imported": 0, "lossy_count": 0, "fragment_path": "acp-peers-imported.json"},
+            }
+            all_written: list[Path] = []
+
+            def _fail(err: MeridianError, *, event: str) -> None:
+                record_error(span, err)
+                import_audit.write_failed(code=err.code, message=err.message)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event=event,
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={"message": err.message, "audit_path": import_audit.path.name},
+                    )
+                )
+
+            # ----------------------------------------------------------------
+            # Phase 1: Translate all records in memory
+            # ----------------------------------------------------------------
+
+            # --- skills ---
+            skill_records: list[dict[str, Any]] = []
+            version_records: list[dict[str, Any]] = []
+            skill_lossy: list[list[str]] = []
+            try:
+                for seq, rec in enumerate(body.skills):
+                    if not rec.id.strip():
+                        raise ImportRecordInvalidError(
+                            message=f"skills[{seq}] has empty 'id'", timestamp=now, seq=seq
+                        )
+                    try:
+                        sr, vr, lossy = _translate_hermes(rec, now=now)
+                    except ImportRecordInvalidError:
+                        raise
+                    except Exception as exc:
+                        raise ImportRecordInvalidError(
+                            message=f"Failed to translate skill '{rec.id}': {exc}",
+                            timestamp=now,
+                            seq=seq,
+                        ) from exc
+                    import_audit.write_record_translated(
+                        seq=seq, source_id=rec.id, target_id=sr["id"], kind="skill", lossy_fields=lossy
+                    )
+                    skill_records.append(sr)
+                    version_records.append(vr)
+                    skill_lossy.append(lossy)
+            except ImportRecordInvalidError as err:
+                _fail(err, event="import.hermes_install.failed")
+                raise
+
+            # --- environments ---
+            env_records: list[dict[str, Any]] = []
+            env_lossy: list[list[str]] = []
+            seq_offset = len(body.skills)
+            try:
+                for seq, rec in enumerate(body.environments):
+                    if not rec.id.strip():
+                        raise ImportRecordInvalidError(
+                            message=f"environments[{seq}] has empty 'id'",
+                            timestamp=now,
+                            seq=seq_offset + seq,
+                        )
+                    try:
+                        er, lossy = _translate_hermes_env(rec, now=now)
+                    except Exception as exc:
+                        raise ImportRecordInvalidError(
+                            message=f"Failed to translate environment '{rec.id}': {exc}",
+                            timestamp=now,
+                            seq=seq_offset + seq,
+                        ) from exc
+                    import_audit.write_record_translated(
+                        seq=seq_offset + seq,
+                        source_id=rec.id,
+                        target_id=er["id"],
+                        kind="environment",
+                        lossy_fields=lossy,
+                    )
+                    env_records.append(er)
+                    env_lossy.append(lossy)
+            except ImportRecordInvalidError as err:
+                _fail(err, event="import.hermes_install.failed")
+                raise
+
+            # --- providers ---
+            provider_records: list[dict[str, Any]] = []
+            provider_lossy: list[list[str]] = []
+            seq_offset += len(body.environments)
+            try:
+                for seq, rec in enumerate(body.providers):
+                    if not rec.id.strip():
+                        raise ImportRecordInvalidError(
+                            message=f"providers[{seq}] has empty 'id'",
+                            timestamp=now,
+                            seq=seq_offset + seq,
+                        )
+                    try:
+                        pr, lossy = _translate_hermes_provider(rec, now=now)
+                    except Exception as exc:
+                        raise ImportRecordInvalidError(
+                            message=f"Failed to translate provider '{rec.id}': {exc}",
+                            timestamp=now,
+                            seq=seq_offset + seq,
+                        ) from exc
+                    import_audit.write_record_translated(
+                        seq=seq_offset + seq,
+                        source_id=rec.id,
+                        target_id=pr["name"],
+                        kind="provider",
+                        lossy_fields=lossy,
+                    )
+                    provider_records.append(pr)
+                    provider_lossy.append(lossy)
+            except ImportRecordInvalidError as err:
+                _fail(err, event="import.hermes_install.failed")
+                raise
+
+            # --- sessions ---
+            session_records: list[dict[str, Any]] = []
+            session_lossy: list[list[str]] = []
+            seq_offset += len(body.providers)
+            try:
+                for seq, rec in enumerate(body.sessions):
+                    if not rec.id.strip():
+                        raise ImportRecordInvalidError(
+                            message=f"sessions[{seq}] has empty 'id'",
+                            timestamp=now,
+                            seq=seq_offset + seq,
+                        )
+                    try:
+                        sr, lossy = _translate_hermes_session(rec, now=now)
+                    except Exception as exc:
+                        raise ImportRecordInvalidError(
+                            message=f"Failed to translate session '{rec.id}': {exc}",
+                            timestamp=now,
+                            seq=seq_offset + seq,
+                        ) from exc
+                    import_audit.write_record_translated(
+                        seq=seq_offset + seq,
+                        source_id=rec.id,
+                        target_id=sr["session_id"],
+                        kind="session",
+                        lossy_fields=lossy,
+                    )
+                    session_records.append(sr)
+                    session_lossy.append(lossy)
+            except ImportRecordInvalidError as err:
+                _fail(err, event="import.hermes_install.failed")
+                raise
+
+            # --- user_profiles ---
+            profile_records: list[dict[str, Any]] = []
+            profile_lossy: list[list[str]] = []
+            seq_offset += len(body.sessions)
+            try:
+                for seq, rec in enumerate(body.user_profiles):
+                    if not rec.id.strip():
+                        raise ImportRecordInvalidError(
+                            message=f"user_profiles[{seq}] has empty 'id'",
+                            timestamp=now,
+                            seq=seq_offset + seq,
+                        )
+                    try:
+                        pr, lossy = _translate_hermes_user_profile(rec, now=now)
+                    except Exception as exc:
+                        raise ImportRecordInvalidError(
+                            message=f"Failed to translate user_profile '{rec.id}': {exc}",
+                            timestamp=now,
+                            seq=seq_offset + seq,
+                        ) from exc
+                    import_audit.write_record_translated(
+                        seq=seq_offset + seq,
+                        source_id=rec.id,
+                        target_id=pr["id"],
+                        kind="user_profile",
+                        lossy_fields=lossy,
+                    )
+                    profile_records.append(pr)
+                    profile_lossy.append(lossy)
+            except ImportRecordInvalidError as err:
+                _fail(err, event="import.hermes_install.failed")
+                raise
+
+            # --- cron ---
+            cron_records: list[dict[str, Any]] = []
+            cron_lossy: list[list[str]] = []
+            seq_offset += len(body.user_profiles)
+            try:
+                for seq, rec in enumerate(body.cron):
+                    if not rec.id.strip():
+                        raise ImportRecordInvalidError(
+                            message=f"cron[{seq}] has empty 'id'",
+                            timestamp=now,
+                            seq=seq_offset + seq,
+                        )
+                    try:
+                        cr, lossy = _translate_hermes_cron(rec, now=now)
+                    except Exception as exc:
+                        raise ImportRecordInvalidError(
+                            message=f"Failed to translate cron '{rec.id}': {exc}",
+                            timestamp=now,
+                            seq=seq_offset + seq,
+                        ) from exc
+                    import_audit.write_record_translated(
+                        seq=seq_offset + seq,
+                        source_id=rec.id,
+                        target_id=cr["id"],
+                        kind="cron",
+                        lossy_fields=lossy,
+                    )
+                    cron_records.append(cr)
+                    cron_lossy.append(lossy)
+            except ImportRecordInvalidError as err:
+                _fail(err, event="import.hermes_install.failed")
+                raise
+
+            # --- acp_registry ---
+            acp_records: list[dict[str, Any]] = []
+            acp_lossy: list[list[str]] = []
+            seq_offset += len(body.cron)
+            try:
+                for seq, rec in enumerate(body.acp_registry):
+                    if not rec.id.strip():
+                        raise ImportRecordInvalidError(
+                            message=f"acp_registry[{seq}] has empty 'id'",
+                            timestamp=now,
+                            seq=seq_offset + seq,
+                        )
+                    try:
+                        ar, lossy = _translate_hermes_acp(rec, now=now)
+                    except Exception as exc:
+                        raise ImportRecordInvalidError(
+                            message=f"Failed to translate acp_registry entry '{rec.id}': {exc}",
+                            timestamp=now,
+                            seq=seq_offset + seq,
+                        ) from exc
+                    import_audit.write_record_translated(
+                        seq=seq_offset + seq,
+                        source_id=rec.id,
+                        target_id=ar["peer_id"],
+                        kind="acp_peer",
+                        lossy_fields=lossy,
+                    )
+                    acp_records.append(ar)
+                    acp_lossy.append(lossy)
+            except ImportRecordInvalidError as err:
+                _fail(err, event="import.hermes_install.failed")
+                raise
+
+            # ----------------------------------------------------------------
+            # Phase 2: Write all records transactionally
+            # ----------------------------------------------------------------
+            try:
+                # skills
+                if skill_records:
+                    skills_dir.mkdir(parents=True, exist_ok=True)
+                    versions_dir.mkdir(parents=True, exist_ok=True)
+                    for sr, vr in zip(skill_records, version_records):
+                        vpath = versions_dir / f"{vr['id']}.json"
+                        vpath.write_text(json.dumps(vr))
+                        all_written.append(vpath)
+                        spath = skills_dir / f"{sr['id']}.json"
+                        spath.write_text(json.dumps(sr))
+                        all_written.append(spath)
+
+                # environments
+                if env_records:
+                    envs_dir.mkdir(parents=True, exist_ok=True)
+                    for er in env_records:
+                        epath = envs_dir / f"{er['id']}.json"
+                        epath.write_text(json.dumps(er))
+                        all_written.append(epath)
+
+                # providers — config fragment
+                if provider_records:
+                    pfrag = storage_root / "providers-imported.json"
+                    pfrag.write_text(json.dumps(provider_records, indent=2))
+                    all_written.append(pfrag)
+
+                # sessions + event log replay
+                if session_records:
+                    sessions_dir.mkdir(parents=True, exist_ok=True)
+                    for sr in session_records:
+                        sess_dir = sessions_dir / sr["session_id"]
+                        sess_dir.mkdir(parents=True, exist_ok=True)
+                        mpath = sess_dir / "manifest.json"
+                        mpath.write_text(json.dumps(sr["manifest"]))
+                        all_written.append(mpath)
+                        threads_dir = sess_dir / "threads"
+                        threads_dir.mkdir(parents=True, exist_ok=True)
+                        tpath = threads_dir / f"{sr['thread_id']}.json"
+                        tpath.write_text(json.dumps(sr["thread_record"]))
+                        all_written.append(tpath)
+                        if sr["events"]:
+                            elog_path = sess_dir / "events.ndjson"
+                            lines = "\n".join(json.dumps(ev, separators=(",", ":")) for ev in sr["events"]) + "\n"
+                            elog_path.write_text(lines)
+                            all_written.append(elog_path)
+
+                # user_profiles
+                if profile_records:
+                    profiles_dir.mkdir(parents=True, exist_ok=True)
+                    for pr in profile_records:
+                        ppath = profiles_dir / f"{pr['id']}.json"
+                        ppath.write_text(json.dumps(pr))
+                        all_written.append(ppath)
+
+                # cron
+                if cron_records:
+                    cron_dir.mkdir(parents=True, exist_ok=True)
+                    for cr in cron_records:
+                        cpath = cron_dir / f"{cr['id']}.json"
+                        cpath.write_text(json.dumps(cr))
+                        all_written.append(cpath)
+
+                # acp_registry — config fragment
+                if acp_records:
+                    afrag = storage_root / "acp-peers-imported.json"
+                    afrag.write_text(json.dumps(acp_records, indent=2))
+                    all_written.append(afrag)
+
+            except Exception as exc:
+                for p in all_written:
+                    with contextlib.suppress(OSError):
+                        p.unlink()
+                err2 = ImportWriteError(
+                    message=f"Failed to write Hermes install records: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                _fail(err2, event="import.hermes_install.failed")
+                raise err2
+
+            # ----------------------------------------------------------------
+            # Phase 3: Populate results and finalize audit log
+            # ----------------------------------------------------------------
+            results["skills"]["imported"] = len(skill_records)
+            results["skills"]["lossy_count"] = sum(1 for l in skill_lossy if l)
+            results["skills"]["ids"] = [s["id"] for s in skill_records]
+
+            results["environments"]["imported"] = len(env_records)
+            results["environments"]["lossy_count"] = sum(1 for l in env_lossy if l)
+            results["environments"]["ids"] = [e["id"] for e in env_records]
+
+            results["providers"]["imported"] = len(provider_records)
+            results["providers"]["lossy_count"] = sum(1 for l in provider_lossy if l)
+
+            results["sessions"]["imported"] = len(session_records)
+            results["sessions"]["lossy_count"] = sum(1 for l in session_lossy if l)
+            results["sessions"]["ids"] = [s["session_id"] for s in session_records]
+
+            results["user_profiles"]["imported"] = len(profile_records)
+            results["user_profiles"]["lossy_count"] = sum(1 for l in profile_lossy if l)
+            results["user_profiles"]["ids"] = [p["id"] for p in profile_records]
+
+            results["cron"]["imported"] = len(cron_records)
+            results["cron"]["lossy_count"] = sum(1 for l in cron_lossy if l)
+            results["cron"]["ids"] = [c["id"] for c in cron_records]
+
+            results["acp_registry"]["imported"] = len(acp_records)
+            results["acp_registry"]["lossy_count"] = sum(1 for l in acp_lossy if l)
+
+            checklist = _install_checklist(body, results)
+            import_audit.write_checklist(checklist)
+            import_audit.write_completed(
+                total=total_records,
+                lossy_count=sum(r["lossy_count"] for r in results.values()),
+            )
+
+        return JSONResponse(
+            content={
+                "audit_path": import_audit.path.name,
+                **results,
             },
             status_code=201,
         )
