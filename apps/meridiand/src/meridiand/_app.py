@@ -44,6 +44,7 @@ from ._vaults import make_vaults_router
 from ._webhook_sender import run_webhook_sender_loop
 from ._skill_forge import run_skill_forge_loop
 from ._agents import make_agents_router
+from ._budgets_reports import make_router as make_budgets_reports_router
 from ._channels import make_channels_router
 from ._system_channel import make_system_channel_router
 from ._webhook_channel_driver import SecretResolver
@@ -339,6 +340,9 @@ def create_app(
                 )
                 app.include_router(
                     make_agents_router(audit_log=audit_log, storage_root=storage_root)
+                )
+                app.include_router(
+                    make_budgets_reports_router(audit_log=audit_log, storage_root=storage_root)
                 )
                 app.include_router(
                     make_channels_router(audit_log=audit_log, storage_root=storage_root)
