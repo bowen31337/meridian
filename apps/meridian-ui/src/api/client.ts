@@ -37,6 +37,93 @@ export interface SecretMetaList {
   items: SecretMeta[];
 }
 
+export interface SkillTool {
+  name: string;
+  description: string | null;
+  input_schema: Record<string, unknown> | null;
+}
+
+export interface SkillVersion {
+  id: string;
+  skill_id: string;
+  version_number: number;
+  instructions: string;
+  tools: SkillTool[];
+  created_at: string;
+  source_type: string;
+  source_url: string | null;
+  source: string;
+  derived_from_session_ids: string[] | null;
+}
+
+export interface Skill {
+  id: string;
+  name: string;
+  description: string;
+  created_at: string;
+  metadata: Record<string, unknown> | null;
+  version: SkillVersion;
+}
+
+export interface SkillList {
+  items: Skill[];
+  next_cursor: string | null;
+  limit: number;
+}
+
+export interface SkillVersionList {
+  items: SkillVersion[];
+  next_cursor: string | null;
+  limit: number;
+}
+
+export interface Agent {
+  id: string;
+  name: string;
+  kind: string;
+  created_at: string;
+}
+
+export interface AgentList {
+  items: Agent[];
+  next_cursor: string | null;
+  limit: number;
+}
+
+export interface SkillActivation {
+  id: string;
+  agent_id: string;
+  skill_id: string;
+  skill_version_id: string | null;
+  status: "pending" | "active" | "revoked";
+  requested_at: string;
+  approved_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface SkillActivationList {
+  items: SkillActivation[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface ForgeProposal {
+  id: string;
+  skill_id: string;
+  instructions: string;
+  tools: SkillTool[];
+  derived_from_session_ids: string[] | null;
+  status: "PROPOSAL" | "PROMOTED" | "REJECTED";
+  created_at: string;
+}
+
+export interface ForgeProposalList {
+  items: ForgeProposal[];
+  next_cursor: string | null;
+  limit: number;
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly body: ErrorBody | undefined;
@@ -86,6 +173,16 @@ export interface ApiClient {
   listVaults(): Promise<VaultList>;
   listVaultSecrets(vaultId: string): Promise<SecretMetaList>;
   deleteVaultSecret(vaultId: string, name: string): Promise<void>;
+  listSkills(): Promise<SkillList>;
+  listSkillVersions(skillId: string): Promise<SkillVersionList>;
+  listAgents(): Promise<AgentList>;
+  listAgentSkillActivations(agentId: string): Promise<SkillActivationList>;
+  requestSkillActivation(agentId: string, skillId: string): Promise<SkillActivation>;
+  approveSkillActivation(agentId: string, skillId: string): Promise<SkillActivation>;
+  revokeSkillActivation(agentId: string, skillId: string): Promise<SkillActivation>;
+  listForgeProposals(): Promise<ForgeProposalList>;
+  approveForgeProposal(proposalId: string): Promise<SkillVersion>;
+  rejectForgeProposal(proposalId: string, reason: string): Promise<ForgeProposal>;
 }
 
 export function createApiClient(baseUrl: string): ApiClient {
@@ -114,6 +211,43 @@ export function createApiClient(baseUrl: string): ApiClient {
         baseUrl,
         `/v1/vaults/${encodeURIComponent(vaultId)}/secrets/${encodeURIComponent(name)}?confirm=true`,
         { method: "DELETE" },
+      ),
+    listSkills: () => request<SkillList>(baseUrl, "/v1/skills"),
+    listSkillVersions: (skillId) =>
+      request<SkillVersionList>(baseUrl, `/v1/skills/${encodeURIComponent(skillId)}/versions`),
+    listAgents: () => request<AgentList>(baseUrl, "/v1/agents"),
+    listAgentSkillActivations: (agentId) =>
+      request<SkillActivationList>(baseUrl, `/v1/agents/${encodeURIComponent(agentId)}/skills`),
+    requestSkillActivation: (agentId, skillId) =>
+      request<SkillActivation>(baseUrl, `/v1/agents/${encodeURIComponent(agentId)}/skills`, {
+        method: "POST",
+        body: JSON.stringify({ skill_id: skillId }),
+      }),
+    approveSkillActivation: (agentId, skillId) =>
+      request<SkillActivation>(
+        baseUrl,
+        `/v1/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skillId)}/approve`,
+        { method: "POST" },
+      ),
+    revokeSkillActivation: (agentId, skillId) =>
+      request<SkillActivation>(
+        baseUrl,
+        `/v1/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skillId)}`,
+        { method: "DELETE" },
+      ),
+    listForgeProposals: () =>
+      request<ForgeProposalList>(baseUrl, "/v1/x/skill_forge/proposals"),
+    approveForgeProposal: (proposalId) =>
+      request<SkillVersion>(
+        baseUrl,
+        `/v1/x/skill_forge/proposals/${encodeURIComponent(proposalId)}/approve`,
+        { method: "POST" },
+      ),
+    rejectForgeProposal: (proposalId, reason) =>
+      request<ForgeProposal>(
+        baseUrl,
+        `/v1/x/skill_forge/proposals/${encodeURIComponent(proposalId)}/reject`,
+        { method: "POST", body: JSON.stringify({ reason }) },
       ),
   };
 }
