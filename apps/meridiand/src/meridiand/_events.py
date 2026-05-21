@@ -20,6 +20,34 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from storage_event_log import SUBSCRIBER_CHANNEL_SIZE, SessionEvent, SubscriberBus
 from storage_reposit import LocalEventLogReader
 
+# ---------------------------------------------------------------------------
+# SDK event kind mapping
+# ---------------------------------------------------------------------------
+
+# Maps internal event log types to the SDK-facing SessionEventKind discriminant.
+# Only events listed here are surfaced on the SDK endpoint; all others are omitted.
+_SDK_KIND_MAP: dict[str, str] = {
+    "message.added": "message",
+    "tool_call.requested": "tool_call",
+    "tool_call.result": "tool_result",
+    "canvas_op": "canvas_op",
+    "error": "error",
+}
+
+
+def _to_sdk_event(event: SessionEvent, session_id: str) -> dict[str, Any] | None:
+    """Convert an internal SessionEvent to SDK-facing format, or None to skip it."""
+    kind = _SDK_KIND_MAP.get(event.type)
+    if kind is None:
+        return None
+    return {
+        "id": f"{session_id}:{event.seq}",
+        "session_id": session_id,
+        "kind": kind,
+        "payload": event.data,
+        "timestamp": event.ts,
+    }
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -298,5 +326,79 @@ def make_events_router(
             return StreamingResponse(_ndjson(), media_type="application/x-ndjson")  # type: ignore[return-value]
 
         return JSONResponse(content=[_event_to_dict(e) for e in events])
+
+    # ------------------------------------------------------------------
+    # SDK-facing events endpoint: GET /sessions/{session_id}/events
+    #
+    # Returns events in the SDK SessionEventList schema format with kind
+    # and payload fields.  Only event types that map to a SessionEventKind
+    # are included; internal-only events are omitted.  Supports limit and
+    # offset pagination.  On failure surfaces an error response to the
+    # caller and writes to the audit log.
+    # ------------------------------------------------------------------
+
+    @router.get("/sessions/{session_id}/events")
+    async def list_session_events_sdk(
+        session_id: str,
+        limit: int = Query(default=50, ge=1, le=200),
+        offset: int = Query(default=0, ge=0),
+    ) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "session.events.sdk.read",
+            attributes={
+                "session.id": session_id,
+                "events.limit": limit,
+                "events.offset": offset,
+            },
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="session.events.sdk.read.invocation",
+                    code="session_events_sdk_read",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                reader = LocalEventLogReader(storage_root)
+                raw_events = reader.read_after(session_id, -1)
+                sdk_events = [
+                    ev
+                    for e in raw_events
+                    if (ev := _to_sdk_event(e, session_id)) is not None
+                ]
+                total = len(sdk_events)
+                page = sdk_events[offset : offset + limit]
+
+            except SessionEventsError:
+                raise
+            except Exception as exc:
+                err = SessionEventsError(
+                    message=(
+                        f"Failed to read SDK events for session {session_id!r}: {exc}"
+                    ),
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="session.events.sdk.read.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "session_id": session_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise err
+
+        return JSONResponse(content={"events": page, "total": total})
 
     return router

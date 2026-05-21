@@ -631,3 +631,201 @@ class TestEventsRouterWiring:
         client = TestClient(app, raise_server_exceptions=False)
         resp = client.get("/v1/sessions/any/events")
         assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# SDK-format events endpoint: GET /sessions/{session_id}/events
+#
+# Returns {events: [...], total: N} with SessionEvent objects that have
+# {id, session_id, kind, payload, timestamp} fields.  Only event types that
+# map to a SessionEventKind are included.  Supports limit and offset
+# pagination.  On failure surfaces 500 with error code and writes audit log.
+# ---------------------------------------------------------------------------
+
+
+def _canvas_op_data() -> dict[str, Any]:
+    return {
+        "op": "set",
+        "widget_id": "w1",
+        "widget_kind": "meridian.text",
+        "props": {"text": "hello"},
+        "sequence": 1,
+        "session_id": "sdk-sess",
+        "timestamp": "2026-05-21T00:00:00Z",
+    }
+
+
+class TestSdkEventsEndpoint:
+    def test_returns_200_on_success(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.get("/sessions/sdk-200/events")
+        assert resp.status_code == 200
+
+    def test_empty_response_for_unknown_session(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.get("/sessions/no-such-sdk-sess/events").json()
+        assert body == {"events": [], "total": 0}
+
+    def test_response_is_object_with_events_and_total(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        body = client.get("/sessions/sdk-struct/events").json()
+        assert "events" in body
+        assert "total" in body
+        assert isinstance(body["events"], list)
+        assert isinstance(body["total"], int)
+
+    def test_canvas_op_event_returned_with_correct_kind(self, storage_root: Path) -> None:
+        _seed(storage_root, "sdk-canvas", "canvas_op", _canvas_op_data())
+        client = _make_client(storage_root)
+        body = client.get("/sessions/sdk-canvas/events").json()
+        assert body["total"] == 1
+        assert body["events"][0]["kind"] == "canvas_op"
+
+    def test_canvas_op_event_payload_matches_data(self, storage_root: Path) -> None:
+        data = _canvas_op_data()
+        _seed(storage_root, "sdk-payload", "canvas_op", data)
+        client = _make_client(storage_root)
+        body = client.get("/sessions/sdk-payload/events").json()
+        assert body["events"][0]["payload"] == data
+
+    def test_canvas_op_event_has_session_id(self, storage_root: Path) -> None:
+        _seed(storage_root, "sdk-sid", "canvas_op", _canvas_op_data())
+        client = _make_client(storage_root)
+        body = client.get("/sessions/sdk-sid/events").json()
+        assert body["events"][0]["session_id"] == "sdk-sid"
+
+    def test_canvas_op_event_has_timestamp(self, storage_root: Path) -> None:
+        _seed(storage_root, "sdk-ts", "canvas_op", _canvas_op_data())
+        client = _make_client(storage_root)
+        body = client.get("/sessions/sdk-ts/events").json()
+        assert "timestamp" in body["events"][0]
+        assert body["events"][0]["timestamp"]  # non-empty
+
+    def test_canvas_op_event_has_id(self, storage_root: Path) -> None:
+        _seed(storage_root, "sdk-id", "canvas_op", _canvas_op_data())
+        client = _make_client(storage_root)
+        body = client.get("/sessions/sdk-id/events").json()
+        assert "id" in body["events"][0]
+        assert "sdk-id" in body["events"][0]["id"]
+
+    def test_internal_events_not_included(self, storage_root: Path) -> None:
+        _seed_many(storage_root, "sdk-filter", [
+            ("session.created", {"x": 1}),
+            ("session.phase_change", {"before": "a", "after": "b"}),
+            ("canvas_op", _canvas_op_data()),
+        ])
+        client = _make_client(storage_root)
+        body = client.get("/sessions/sdk-filter/events").json()
+        kinds = {e["kind"] for e in body["events"]}
+        assert "canvas_op" in kinds
+        assert "session.created" not in kinds
+        assert "session.phase_change" not in kinds
+
+    def test_message_added_mapped_to_message_kind(self, storage_root: Path) -> None:
+        _seed(storage_root, "sdk-msg", "message.added", {"role": "user", "content": "hi"})
+        client = _make_client(storage_root)
+        body = client.get("/sessions/sdk-msg/events").json()
+        assert any(e["kind"] == "message" for e in body["events"])
+
+    def test_tool_call_requested_mapped_to_tool_call_kind(self, storage_root: Path) -> None:
+        _seed(storage_root, "sdk-tc", "tool_call.requested", {"tool_id": "t1", "tool_name": "bash", "args": {}})
+        client = _make_client(storage_root)
+        body = client.get("/sessions/sdk-tc/events").json()
+        assert any(e["kind"] == "tool_call" for e in body["events"])
+
+    def test_tool_call_result_mapped_to_tool_result_kind(self, storage_root: Path) -> None:
+        _seed(storage_root, "sdk-tr", "tool_call.result", {"tool_id": "t1", "content": "done"})
+        client = _make_client(storage_root)
+        body = client.get("/sessions/sdk-tr/events").json()
+        assert any(e["kind"] == "tool_result" for e in body["events"])
+
+    def test_error_event_mapped_to_error_kind(self, storage_root: Path) -> None:
+        _seed(storage_root, "sdk-err", "error", {"message": "boom"})
+        client = _make_client(storage_root)
+        body = client.get("/sessions/sdk-err/events").json()
+        assert any(e["kind"] == "error" for e in body["events"])
+
+    def test_total_reflects_only_mapped_events(self, storage_root: Path) -> None:
+        _seed_many(storage_root, "sdk-total", [
+            ("session.created", {}),         # excluded
+            ("canvas_op", _canvas_op_data()),  # included
+            ("message.added", {"role": "user", "content": "hi"}),  # included
+        ])
+        client = _make_client(storage_root)
+        body = client.get("/sessions/sdk-total/events").json()
+        assert body["total"] == 2
+
+    def test_limit_paginates_results(self, storage_root: Path) -> None:
+        _seed_many(storage_root, "sdk-limit", [
+            ("canvas_op", {**_canvas_op_data(), "sequence": i}) for i in range(5)
+        ])
+        client = _make_client(storage_root)
+        body = client.get("/sessions/sdk-limit/events?limit=3").json()
+        assert len(body["events"]) == 3
+        assert body["total"] == 5
+
+    def test_offset_skips_events(self, storage_root: Path) -> None:
+        _seed_many(storage_root, "sdk-offset", [
+            ("canvas_op", {**_canvas_op_data(), "sequence": i}) for i in range(4)
+        ])
+        client = _make_client(storage_root)
+        body = client.get("/sessions/sdk-offset/events?offset=2").json()
+        assert len(body["events"]) == 2
+        assert body["total"] == 4
+
+    def test_limit_and_offset_combined(self, storage_root: Path) -> None:
+        _seed_many(storage_root, "sdk-combo", [
+            ("canvas_op", {**_canvas_op_data(), "sequence": i}) for i in range(6)
+        ])
+        client = _make_client(storage_root)
+        body = client.get("/sessions/sdk-combo/events?limit=2&offset=3").json()
+        assert len(body["events"]) == 2
+        assert body["total"] == 6
+
+    def test_read_failure_returns_500(self, storage_root: Path) -> None:
+        bad_file = storage_root / "sdk-bad.ndjson"
+        bad_file.write_text("not-valid-json\n")
+        audit = FileAuditLog(storage_root)
+        client = _make_client(storage_root, audit)
+        resp = client.get("/sessions/sdk-bad/events")
+        assert resp.status_code == 500
+
+    def test_read_failure_response_has_code(self, storage_root: Path) -> None:
+        bad_file = storage_root / "sdk-bad-code.ndjson"
+        bad_file.write_text("not-valid-json\n")
+        audit = FileAuditLog(storage_root)
+        client = _make_client(storage_root, audit)
+        resp = client.get("/sessions/sdk-bad-code/events")
+        assert resp.json()["error"]["code"] == "session_events_failed"
+
+    def test_read_failure_writes_audit_log(self, storage_root: Path) -> None:
+        bad_file = storage_root / "sdk-bad-audit.ndjson"
+        bad_file.write_text("not-valid-json\n")
+        audit = FileAuditLog(storage_root)
+        client = _make_client(storage_root, audit)
+        client.get("/sessions/sdk-bad-audit/events")
+        records = _read_audit(storage_root)
+        assert any(r.get("event") == "session.events.sdk.read.failed" for r in records)
+
+    def test_read_failure_audit_has_session_id(self, storage_root: Path) -> None:
+        bad_file = storage_root / "sdk-bad-detail.ndjson"
+        bad_file.write_text("not-valid-json\n")
+        audit = FileAuditLog(storage_root)
+        client = _make_client(storage_root, audit)
+        client.get("/sessions/sdk-bad-detail/events")
+        records = _read_audit(storage_root)
+        rec = next(r for r in records if r.get("event") == "session.events.sdk.read.failed")
+        assert rec["detail"]["session_id"] == "sdk-bad-detail"
+
+    def test_otel_span_emitted_on_success(self, storage_root: Path) -> None:
+        from tests._otel_shared import otel_exporter as _exp
+        _exp.clear()
+        client = _make_client(storage_root)
+        client.get("/sessions/sdk-otel/events")
+        span_names = [s.name for s in _exp.get_finished_spans()]
+        assert "session.events.sdk.read" in span_names
+
+    def test_sdk_route_exists_alongside_legacy_route(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        assert client.get("/sessions/any/events").status_code == 200
+        assert client.get("/v1/sessions/any/events").status_code == 200

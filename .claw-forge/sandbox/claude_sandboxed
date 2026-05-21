@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/web-ui-live-can-system-canvas-user-interactions-form-su/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/web-ui-live-can-system-canvas-state-lives-as-a-special/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

@@ -1800,6 +1800,207 @@ class TestHarnessLoopWaitingForTool:
             )
         assert len(exc_info.value.message) > 0
 
+    # --- canvas_op content block: special message kind on the Session ---
+
+    def test_canvas_op_event_emitted_when_content_is_canvas_op_dict(
+        self, tmp_path: Path
+    ) -> None:
+        canvas_op_content = {
+            "type": "canvas_op",
+            "canvas_op": {
+                "op": "set",
+                "widget_id": "w1",
+                "widget_kind": "meridian.text",
+                "props": {"text": "hello"},
+                "sequence": 1,
+                "session_id": "s1",
+                "timestamp": "2026-05-21T00:00:00Z",
+            },
+        }
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_end_turn_call()],
+            [{"tool_id": "tu_1", "content": canvas_op_content}],
+        )
+        reader = _FakePhaseReader(["waiting_for_tool", "waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        canvas_events = [d for _, et, d in event_log.events if et == "canvas_op"]
+        assert len(canvas_events) == 1
+
+    def test_canvas_op_event_payload_matches_canvas_op_block(
+        self, tmp_path: Path
+    ) -> None:
+        canvas_op_block = {
+            "op": "set",
+            "widget_id": "w1",
+            "widget_kind": "meridian.text",
+            "props": {"text": "hello"},
+            "sequence": 1,
+            "session_id": "s1",
+            "timestamp": "2026-05-21T00:00:00Z",
+        }
+        canvas_op_content = {"type": "canvas_op", "canvas_op": canvas_op_block}
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_end_turn_call()],
+            [{"tool_id": "tu_1", "content": canvas_op_content}],
+        )
+        reader = _FakePhaseReader(["waiting_for_tool", "waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        canvas_events = [d for _, et, d in event_log.events if et == "canvas_op"]
+        assert canvas_events[0] == canvas_op_block
+
+    def test_canvas_op_event_emitted_when_content_is_canvas_op_json_string(
+        self, tmp_path: Path
+    ) -> None:
+        canvas_op_block = {
+            "op": "patch",
+            "widget_id": "w2",
+            "widget_kind": "meridian.markdown",
+            "props": {"content": "# Hi"},
+            "sequence": 2,
+            "session_id": "s1",
+            "timestamp": "2026-05-21T00:01:00Z",
+        }
+        canvas_op_content = json.dumps({"type": "canvas_op", "canvas_op": canvas_op_block})
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_end_turn_call()],
+            [{"tool_id": "tu_1", "content": canvas_op_content}],
+        )
+        reader = _FakePhaseReader(["waiting_for_tool", "waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        canvas_events = [d for _, et, d in event_log.events if et == "canvas_op"]
+        assert len(canvas_events) == 1
+        assert canvas_events[0] == canvas_op_block
+
+    def test_no_canvas_op_event_for_non_canvas_tool_result(
+        self, tmp_path: Path
+    ) -> None:
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_end_turn_call()],
+            [{"tool_id": "tu_1", "content": "plain string result"}],
+        )
+        reader = _FakePhaseReader(["waiting_for_tool", "waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        canvas_events = [d for _, et, d in event_log.events if et == "canvas_op"]
+        assert canvas_events == []
+
+    def test_canvas_op_event_emitted_after_tool_call_result_event(
+        self, tmp_path: Path
+    ) -> None:
+        canvas_op_content = {
+            "type": "canvas_op",
+            "canvas_op": {
+                "op": "set",
+                "widget_id": "w1",
+                "widget_kind": "meridian.text",
+                "props": {"text": "x"},
+                "sequence": 1,
+                "session_id": "s1",
+                "timestamp": "2026-05-21T00:00:00Z",
+            },
+        }
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_end_turn_call()],
+            [{"tool_id": "tu_1", "content": canvas_op_content}],
+        )
+        reader = _FakePhaseReader(["waiting_for_tool", "waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        event_log = _FakeEventLogWriter()
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=event_log,
+            )
+        )
+        types = [et for _, et, _ in event_log.events]
+        result_idx = types.index("tool_call.result")
+        canvas_idx = types.index("canvas_op")
+        assert canvas_idx > result_idx
+
+    def test_no_canvas_op_event_without_event_log(self, tmp_path: Path) -> None:
+        canvas_op_content = {
+            "type": "canvas_op",
+            "canvas_op": {
+                "op": "set",
+                "widget_id": "w1",
+                "widget_kind": "meridian.text",
+                "props": {},
+                "sequence": 1,
+                "session_id": "s1",
+                "timestamp": "2026-05-21T00:00:00Z",
+            },
+        }
+        model, sandbox = _adapters(
+            tmp_path / "fix",
+            [_end_turn_call()],
+            [{"tool_id": "tu_1", "content": canvas_op_content}],
+        )
+        reader = _FakePhaseReader(["waiting_for_tool", "waiting_for_model"])
+        audit = FileAuditLog(tmp_path)
+        # Must not raise even when event_log is None.
+        asyncio.run(
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+                event_log=None,
+            )
+        )
+
 
 # ---------------------------------------------------------------------------
 # Tests: cache token capture via model_router path

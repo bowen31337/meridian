@@ -82,6 +82,22 @@ class _PhaseReader(Protocol):
     def current_phase(self, session_id: str) -> str: ...
 
 
+def _extract_canvas_op(content: Any) -> dict[str, Any] | None:
+    """Return the CanvasOp dict when *content* is a canvas_op content block, else None."""
+    if isinstance(content, dict) and content.get("type") == "canvas_op":
+        op = content.get("canvas_op")
+        return op if isinstance(op, dict) else None
+    if isinstance(content, str):
+        try:
+            parsed = json.loads(content)
+            if isinstance(parsed, dict) and parsed.get("type") == "canvas_op":
+                op = parsed.get("canvas_op")
+                return op if isinstance(op, dict) else None
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return None
+
+
 def _validate_tool_args(schema: dict[str, Any], data: Any) -> list[str]:
     """Return schema validation error strings for *data* against *schema*, or [] if valid."""
     validator = jsonschema.Draft7Validator(schema)
@@ -524,15 +540,25 @@ async def run_harness_loop(
                     result = sandbox_adapter.next_result()
                     tool_id = result.get("tool_id", "")
                     tool_name = result.get("tool_name", "")
+                    _content = result.get("content", "")
                     if event_log is not None:
                         await event_log.append(
                             session_id,
                             "tool_call.result",
                             {
                                 "tool_id": tool_id,
-                                "content": result.get("content", ""),
+                                "content": _content,
                             },
                         )
+                        # Emit a canvas_op event so the UI can rebuild canvas state
+                        # from the event log on page reload (replay semantics).
+                        _canvas_op_data = _extract_canvas_op(_content)
+                        if _canvas_op_data is not None:
+                            await event_log.append(
+                                session_id,
+                                "canvas_op",
+                                _canvas_op_data,
+                            )
                     if hooks_dir is not None:
                         await dispatch_hooks(
                             "post_tool_call",

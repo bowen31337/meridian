@@ -28,6 +28,8 @@ EventType = Literal[
     "acp.inbound",
     "memory.read",
     "memory.write",
+    "canvas_op",
+    "canvas_interaction",
     "error",
 ]
 
