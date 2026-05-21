@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/budgets-cost-di-system-soft-budget-exceeded-pre-message/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/web-ui-live-can-system-daemon-bundles-the-built-ui-asse/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

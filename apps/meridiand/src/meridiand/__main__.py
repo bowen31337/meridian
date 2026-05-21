@@ -142,6 +142,9 @@ def main(argv: list[str] | None = None) -> int:
             _LOG.error("provider init error: %s", exc.message)
             return 1
 
+    serve_ui = config.daemon.serve_ui if config.daemon is not None else False
+    ui_dist_path = Path(__file__).parent / "ui" if serve_ui else None
+
     app = create_app(
         services.audit_log,
         plugin_loader=services.plugin_loader,
@@ -152,6 +155,8 @@ def main(argv: list[str] | None = None) -> int:
         auth_config=config.auth,
         model_router=model_router,
         secret_resolver=secret_resolver,
+        serve_ui=serve_ui,
+        ui_dist_path=ui_dist_path,
     )
 
     bind = config.bind

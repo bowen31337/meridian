@@ -80,6 +80,7 @@ from ._idempotency_middleware import IdempotencyKeyMiddleware
 from ._system_audit_middleware import SystemAuditMiddleware
 from ._healthz import make_healthz_router
 from ._openapi_export import make_openapi_export_router
+from ._ui import make_ui_router
 from ._spawn import make_spawn_router
 from ._telemetry import get_tracer, record_create_event, record_factory_failure
 
@@ -114,6 +115,8 @@ def create_app(
     subscriber_bus: SubscriberBus | None = None,
     credential_proxy_providers: list[CredentialProxyProviderConfig] | None = None,
     harness_pool: HarnessPool | None = None,
+    serve_ui: bool = False,
+    ui_dist_path: Path | None = None,
 ) -> FastAPI:
     """
     Application factory for the meridiand HTTP API.
@@ -126,10 +129,15 @@ def create_app(
     """
     cors_enabled = cors is not None and bool(cors.allow_origins)
     bearer_token = auth_config.bearer_token if auth_config is not None else None
+    serve_ui_enabled = serve_ui and ui_dist_path is not None
     tracer = get_tracer()
     with tracer.start_as_current_span(
         "app.factory.create",
-        attributes={"cors.enabled": cors_enabled, "gzip.enabled": True},
+        attributes={
+            "cors.enabled": cors_enabled,
+            "gzip.enabled": True,
+            "ui.serve_enabled": serve_ui_enabled,
+        },
     ) as span:
         try:
             @asynccontextmanager
@@ -254,6 +262,11 @@ def create_app(
 
             app.include_router(make_healthz_router(audit_log=audit_log))
             app.include_router(make_openapi_export_router(audit_log=audit_log))
+            if serve_ui_enabled:
+                assert ui_dist_path is not None
+                app.include_router(
+                    make_ui_router(audit_log=audit_log, ui_dist_path=ui_dist_path)
+                )
 
             if storage_root is not None:
                 app.include_router(
@@ -483,6 +496,7 @@ def create_app(
                 cors_enabled=cors_enabled,
                 gzip_enabled=True,
                 router_count=len(app.routes),
+                serve_ui_enabled=serve_ui_enabled,
             )
             return app
 

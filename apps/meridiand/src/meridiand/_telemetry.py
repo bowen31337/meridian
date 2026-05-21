@@ -18,6 +18,7 @@ def record_create_event(
     cors_enabled: bool,
     gzip_enabled: bool,
     router_count: int,
+    serve_ui_enabled: bool = False,
 ) -> None:
     span.add_event(
         "app.factory.create",
@@ -25,6 +26,7 @@ def record_create_event(
             "cors_enabled": cors_enabled,
             "gzip_enabled": gzip_enabled,
             "router_count": router_count,
+            "serve_ui_enabled": serve_ui_enabled,
         },
     )
 

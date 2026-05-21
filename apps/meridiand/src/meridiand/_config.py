@@ -233,6 +233,7 @@ class DaemonConfig(BaseModel):
     bind: BindConfig = Field(default_factory=BindConfig)
     workspace_root: Path = Field(default_factory=lambda: Path.home() / ".meridian")
     log_level: str = "info"
+    serve_ui: bool = False
 
     @field_validator("workspace_root", mode="before")
     @classmethod
