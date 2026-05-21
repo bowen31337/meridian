@@ -19,6 +19,7 @@ from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from storage_event_log import EventLogWriter
+from storage_reposit import LocalEventLogReader, PhaseProjection
 
 from ._pagination import (
     DEFAULT_PAGE_SIZE,
@@ -171,6 +172,22 @@ class SessionNotFoundError(MeridianError):
 
     def http_status(self) -> int:
         return 404
+
+
+class SessionGetError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="session_get_failed", message=message, timestamp=timestamp, cause=cause
+        )
+
+    def http_status(self) -> int:
+        return 500
 
 
 # ---------------------------------------------------------------------------
@@ -419,6 +436,93 @@ def make_sessions_router(
             status_code=200,
             headers=response_headers,
         )
+
+    @router.get("/v1/sessions/{session_id}", status_code=200)
+    async def get_session(session_id: str) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "session.get",
+            attributes={"session.id": session_id},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="session.get.invocation",
+                    code="session_get",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                manifest_path = storage_root / "sessions" / session_id / "manifest.json"
+                if not manifest_path.exists():
+                    err = SessionNotFoundError(
+                        message=f"Session {session_id!r} not found",
+                        timestamp=_now(),
+                    )
+                    span.set_attribute("session.get.success", False)
+                    record_error(span, err)
+                    audit_log.write(
+                        AuditLogEntry(
+                            level="error",
+                            event="session.get.failed",
+                            code=err.code,
+                            timestamp=err.timestamp,
+                            detail={
+                                "session_id": session_id,
+                                "message": err.message,
+                            },
+                        )
+                    )
+                    raise err
+
+                record: dict[str, Any] = json.loads(manifest_path.read_text())
+                if "id" not in record:
+                    record["id"] = record.get("session_id", session_id)
+
+                reader = LocalEventLogReader(storage_root)
+                projection = PhaseProjection(reader)
+                record["phase"] = projection.current_phase(session_id)
+
+                span.set_attribute("session.get.success", True)
+
+                audit_log.write(
+                    AuditLogEntry(
+                        level="info",
+                        event="session.fetched",
+                        code="session_fetched",
+                        timestamp=_now(),
+                        detail={"session_id": session_id},
+                    )
+                )
+
+            except (SessionNotFoundError, SessionGetError):
+                raise
+            except Exception as exc:
+                err2 = SessionGetError(
+                    message=f"Failed to get session {session_id!r}: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                span.set_attribute("session.get.success", False)
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="session.get.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={
+                            "session_id": session_id,
+                            "message": err2.message,
+                        },
+                    )
+                )
+                raise err2
+
+        return JSONResponse(content=record, status_code=200)
 
     @router.get("/v1/sessions/{session_id}/threads", status_code=200)
     async def list_threads(
