@@ -21,6 +21,7 @@ from sdk_channel import ChannelRuntime
 from ._acp import AcpInboundHandler, AcpPeerClient, make_acp_router
 from ._acp_compliance import make_acp_compliance_router
 from ._cancel import make_cancel_router
+from ._session_cancel import make_session_cancel_router
 from ._checkpoint import make_checkpoint_router
 from ._ci_regression import make_ci_regression_router
 from ._crash_recovery_soak import make_crash_recovery_soak_router
@@ -396,6 +397,13 @@ def create_app(
                     )
                     app.include_router(
                         make_phase_router(
+                            audit_log=audit_log,
+                            storage_root=storage_root,
+                            event_log=event_log,
+                        )
+                    )
+                    app.include_router(
+                        make_session_cancel_router(
                             audit_log=audit_log,
                             storage_root=storage_root,
                             event_log=event_log,
