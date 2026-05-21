@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/skill-forge-sel-api-get-v1-x-skill-forge-proposals-list/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/skill-forge-sel-api-post-v1-x-skill-forge-proposals-id/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

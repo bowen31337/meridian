@@ -6,6 +6,11 @@ cursor-based pagination via ``cursor`` and ``limit`` query params.  Pass
 ``include_efficacy=true`` to attach the stored A/B metric record to each item.
 Returns 200 with ``{items, next_cursor, limit}`` on success.
 
+POST /v1/x/skill_forge/proposals/{proposal_id}/approve — promotes a quarantined
+proposal to an active SkillVersion; recomputes the content hash; available to
+Agents that opt in.  Returns 200 with the new SkillVersion record on success,
+404 if the proposal does not exist, 409 if the proposal is already promoted.
+
 POST /v1/x/skill_forge/proposals/{proposal_id}/reject — marks a proposal as
 rejected with an audit-logged reason.  Returns 200 on success, 404 if the
 proposal does not exist, 409 if the proposal is already promoted.
@@ -17,6 +22,7 @@ caller, and writes the failure to the audit log before re-raising.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -115,6 +121,54 @@ class SkillForgeProposalRejectError(MeridianError):
         return 500
 
 
+class SkillForgeProposalApproveError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="skill_forge_proposal_approve_failed",
+            message=message,
+            timestamp=timestamp,
+            cause=cause,
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
+# ---------------------------------------------------------------------------
+# Content hash (mirrors _skill_forge._proposal_version_id)
+# ---------------------------------------------------------------------------
+
+
+def _forge_version_id(
+    *,
+    skill_id: str,
+    instructions: str,
+    tools: list[dict[str, Any]],
+    tests: list[dict[str, Any]],
+    derived_from_session_ids: list[str] | None,
+) -> str:
+    """Return ``skillver_<sha256>`` over the canonical forge-proposal JSON body."""
+    body = {
+        "derived_from_session_ids": derived_from_session_ids,
+        "instructions": instructions,
+        "skill_id": skill_id,
+        "source": "forge",
+        "source_type": "forge",
+        "source_url": None,
+        "tests": tests,
+        "tools": tools,
+    }
+    canonical = json.dumps(body, sort_keys=True, separators=(",", ":"))
+    digest = hashlib.sha256(canonical.encode()).hexdigest()
+    return f"skillver_{digest}"
+
+
 # ---------------------------------------------------------------------------
 # Request model
 # ---------------------------------------------------------------------------
@@ -135,6 +189,8 @@ def make_skill_forge_proposals_router(
     router = APIRouter()
     proposals_dir = storage_root / "skill_forge" / "proposals"
     efficacy_dir = storage_root / "skill_forge" / "efficacy"
+    versions_dir = storage_root / "skill_versions"
+    skills_dir = storage_root / "skills"
 
     @router.get("/v1/x/skill_forge/proposals", status_code=200)
     async def list_proposals(
@@ -246,6 +302,152 @@ def make_skill_forge_proposals_router(
             status_code=200,
             headers=response_headers,
         )
+
+    @router.post(
+        "/v1/x/skill_forge/proposals/{proposal_id}/approve", status_code=200
+    )
+    async def approve_proposal(proposal_id: str) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "skill_forge.proposal.approve",
+            attributes={"skill_forge.proposal_id": proposal_id},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="skill_forge.proposal.approve.invocation",
+                    code="skill_forge_proposal_approve",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                proposal_file = proposals_dir / f"{proposal_id}.json"
+                if not proposal_file.exists():
+                    raise SkillForgeProposalNotFoundError(
+                        proposal_id=proposal_id, timestamp=now
+                    )
+
+                proposal: dict[str, Any] = json.loads(proposal_file.read_text())
+
+                if proposal.get("status") == "PROMOTED":
+                    raise SkillForgeProposalAlreadyPromotedError(
+                        proposal_id=proposal_id, timestamp=now
+                    )
+
+                skill_id: str = proposal["skill_id"]
+                instructions: str = proposal["instructions"]
+                tools: list[dict[str, Any]] = proposal.get("tools", [])
+                tests: list[dict[str, Any]] = proposal.get("tests", [])
+                derived_from_session_ids = proposal.get("derived_from_session_ids")
+
+                version_id = _forge_version_id(
+                    skill_id=skill_id,
+                    instructions=instructions,
+                    tools=tools,
+                    tests=tests,
+                    derived_from_session_ids=derived_from_session_ids,
+                )
+
+                versions_dir.mkdir(parents=True, exist_ok=True)
+                max_ver = 0
+                for vpath in versions_dir.glob("*.json"):
+                    try:
+                        vr = json.loads(vpath.read_text())
+                        if vr.get("skill_id") == skill_id:
+                            max_ver = max(max_ver, vr.get("version_number", 0))
+                    except Exception:
+                        pass
+                version_number = max_ver + 1
+
+                version_record: dict[str, Any] = {
+                    "id": version_id,
+                    "skill_id": skill_id,
+                    "version_number": version_number,
+                    "instructions": instructions,
+                    "tools": tools,
+                    "tests": tests,
+                    "created_at": now,
+                    "source_type": "forge",
+                    "source_url": None,
+                    "source": "forge",
+                    "derived_from_session_ids": derived_from_session_ids,
+                }
+                (versions_dir / f"{version_id}.json").write_text(
+                    json.dumps(version_record)
+                )
+
+                skill_file = skills_dir / f"{skill_id}.json"
+                if skill_file.exists():
+                    skill_record = json.loads(skill_file.read_text())
+                    skill_record["version"] = version_record
+                    skill_file.write_text(json.dumps(skill_record))
+
+                proposal["status"] = "PROMOTED"
+                proposal["promoted_at"] = now
+                proposal["promoted_version_id"] = version_id
+                proposal_file.write_text(json.dumps(proposal))
+
+                span.set_attribute("skill_forge.proposal.approve.success", True)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="info",
+                        event="skill_forge.proposal.approved",
+                        code="skill_forge_proposal_approved",
+                        timestamp=_now(),
+                        detail={
+                            "proposal_id": proposal_id,
+                            "skill_id": skill_id,
+                            "version_id": version_id,
+                        },
+                    )
+                )
+
+            except (
+                SkillForgeProposalNotFoundError,
+                SkillForgeProposalAlreadyPromotedError,
+            ) as err:
+                span.set_attribute("skill_forge.proposal.approve.success", False)
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="skill_forge.proposal.approve.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "proposal_id": proposal_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = SkillForgeProposalApproveError(
+                    message=f"Failed to approve proposal '{proposal_id}': {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                span.set_attribute("skill_forge.proposal.approve.success", False)
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="skill_forge.proposal.approve.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={
+                            "proposal_id": proposal_id,
+                            "message": err2.message,
+                        },
+                    )
+                )
+                raise err2
+
+        return JSONResponse(content=version_record, status_code=200)
 
     @router.post(
         "/v1/x/skill_forge/proposals/{proposal_id}/reject", status_code=200
