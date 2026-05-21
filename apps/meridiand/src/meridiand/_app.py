@@ -74,6 +74,7 @@ from ._cursor_middleware import CursorPaginationMiddleware
 from ._error_envelope_middleware import ErrorEnvelopeMiddleware
 from ._idempotency_middleware import IdempotencyKeyMiddleware
 from ._system_audit_middleware import SystemAuditMiddleware
+from ._healthz import make_healthz_router
 from ._openapi_export import make_openapi_export_router
 from ._spawn import make_spawn_router
 from ._telemetry import get_tracer, record_create_event, record_factory_failure
@@ -247,6 +248,7 @@ def create_app(
 
             install_error_handler(app, HandlerOptions(audit_log=audit_log))
 
+            app.include_router(make_healthz_router(audit_log=audit_log))
             app.include_router(make_openapi_export_router(audit_log=audit_log))
 
             if storage_root is not None:
