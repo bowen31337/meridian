@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/web-ui-live-can-system-chat-composer-component-submit-u/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/web-ui-live-can-system-session-viewer-connects-to-v1-se/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
