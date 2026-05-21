@@ -17,6 +17,8 @@ from core_errors import (
 )
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+from opentelemetry import context as otel_context, trace
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 from pydantic import BaseModel
 from sdk_capabilities import CapabilityParseError, is_subset, missing, parse_set
 
@@ -164,6 +166,38 @@ def make_spawn_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
         child_capabilities = sorted(str(c) for c in child_caps)
         session_dir = storage_root / "sessions" / child_session_id
         session_dir.mkdir(parents=True, exist_ok=True)
+
+        # Build a span link from the parent session's trace to the child trace.
+        _child_links: list[trace.Link] = []
+        _parent_manifest_path = storage_root / "sessions" / session_id / "manifest.json"
+        if _parent_manifest_path.exists():
+            try:
+                _parent_tp = json.loads(_parent_manifest_path.read_text()).get("traceparent", "")
+                if _parent_tp:
+                    _pctx = TraceContextTextMapPropagator().extract({"traceparent": _parent_tp})
+                    _pspan_ctx = trace.get_current_span(_pctx).get_span_context()
+                    if _pspan_ctx.is_valid:
+                        _child_links = [
+                            trace.Link(
+                                context=_pspan_ctx,
+                                attributes={"parent.session_id": session_id},
+                            )
+                        ]
+            except Exception:
+                pass
+
+        # Start child session root span in a new trace, linked back to parent.
+        _child_traceparent = ""
+        with tracer.start_as_current_span(
+            "child.session",
+            context=otel_context.Context(),
+            links=_child_links,
+            attributes={"session.id": child_session_id, "parent.session_id": session_id},
+        ):
+            _carrier: dict[str, str] = {}
+            TraceContextTextMapPropagator().inject(_carrier)
+            _child_traceparent = _carrier.get("traceparent", "")
+
         manifest = {
             "child_session_id": child_session_id,
             "parent_session_id": session_id,
@@ -171,6 +205,7 @@ def make_spawn_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
             "output_schema": body.output_schema,
             "created_at": now,
             "status": "spawned",
+            "traceparent": _child_traceparent,
         }
         (session_dir / "manifest.json").write_text(json.dumps(manifest))
 

@@ -17,6 +17,7 @@ from core_errors import (
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from opentelemetry import metrics
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 from storage_reposit import LocalEventLogReader, PhaseProjection
 
 from ._system_prompt_template import expand_system_prompt
@@ -153,8 +154,19 @@ def make_wake_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
         tracer = get_tracer()
         _wakes_counter.add(1, {"session.id": session_id})
 
+        # Pre-load manifest to extract traceparent so harness.wake continues
+        # the session's trace instead of starting a new root span.
+        _session_pre = _load_session(storage_root, session_id)
+        _traceparent = _session_pre.get("traceparent", "") if _session_pre is not None else ""
+        _parent_ctx = (
+            TraceContextTextMapPropagator().extract({"traceparent": _traceparent})
+            if _traceparent
+            else None
+        )
+
         with tracer.start_as_current_span(
             "harness.wake",
+            context=_parent_ctx,
             attributes={"session.id": session_id},
         ) as span:
             record_invocation_event(
@@ -167,8 +179,8 @@ def make_wake_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
             )
 
             try:
-                # Step 1: Load Session
-                session = _load_session(storage_root, session_id)
+                # Step 1: Use pre-loaded session (avoids double I/O).
+                session = _session_pre
                 if session is None:
                     err = WakeSessionNotFoundError(
                         message=f"Session {session_id!r} not found",

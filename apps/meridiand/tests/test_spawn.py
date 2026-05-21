@@ -19,6 +19,10 @@ Tests cover:
   - create_app omits spawn route when storage_root is None.
   - OTel span "session.spawn" emitted on success.
   - OTel span set to ERROR status on denial.
+  - OTel span "child.session" emitted on successful spawn.
+  - child.session span has a span link to parent session's root span when parent has traceparent.
+  - child.session span has no span link when parent has no manifest.
+  - child.session traceparent stored in child manifest.
   - Child session manifest written to storage_root/sessions/{id}/manifest.json.
   - output_schema is optional; stored in manifest when provided.
 """
@@ -597,3 +601,55 @@ class TestSpawnOtel:
         spawn_span = spans.get("session.spawn")
         assert spawn_span is not None
         assert spawn_span.attributes["session.id"] == "otel-3"
+
+    def test_child_session_span_emitted(self, storage_root: Path) -> None:
+        client = self._make_client(storage_root)
+        client.post("/v1/x/sessions/otel-child-1/spawn", json=_make_body())
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "child.session" in span_names
+
+    def test_child_session_span_has_link_to_parent(self, storage_root: Path) -> None:
+        # child.session should link back to parent session root span via stored traceparent.
+        parent_id = "link-parent-sess"
+        parent_trace_id = "cc" * 16  # 32 hex chars
+        parent_span_id = "dd" * 8   # 16 hex chars
+        parent_tp = f"00-{parent_trace_id}-{parent_span_id}-01"
+
+        parent_dir = storage_root / "sessions" / parent_id
+        parent_dir.mkdir(parents=True, exist_ok=True)
+        (parent_dir / "manifest.json").write_text(
+            json.dumps({"session_id": parent_id, "status": "active", "traceparent": parent_tp})
+        )
+
+        client = self._make_client(storage_root)
+        client.post(f"/v1/x/sessions/{parent_id}/spawn", json=_make_body())
+
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        child_span = spans.get("child.session")
+        assert child_span is not None
+        assert len(child_span.links) == 1
+        assert child_span.links[0].context.trace_id == int(parent_trace_id, 16)
+
+    def test_child_session_span_no_link_when_no_parent_manifest(
+        self, storage_root: Path
+    ) -> None:
+        # No parent manifest → no span link.
+        client = self._make_client(storage_root)
+        client.post("/v1/x/sessions/no-manifest-parent/spawn", json=_make_body())
+
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        child_span = spans.get("child.session")
+        assert child_span is not None
+        assert len(child_span.links) == 0
+
+    def test_child_traceparent_stored_in_manifest(self, storage_root: Path) -> None:
+        client = self._make_client(storage_root)
+        body = client.post("/v1/x/sessions/tp-parent/spawn", json=_make_body()).json()
+        child_id = body["child_session_id"]
+
+        manifest = json.loads(
+            (storage_root / "sessions" / child_id / "manifest.json").read_text()
+        )
+        assert "traceparent" in manifest
+        assert isinstance(manifest["traceparent"], str)
+        assert manifest["traceparent"].startswith("00-")

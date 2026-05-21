@@ -17,6 +17,7 @@ from core_errors import (
 )
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 from pydantic import BaseModel
 from storage_event_log import EventLogWriter
 from storage_reposit import LocalEventLogReader, PhaseProjection
@@ -229,85 +230,94 @@ def make_sessions_router(
         thread_id = f"thread_{uuid.uuid4().hex}"
 
         with tracer.start_as_current_span(
-            "session.create",
+            "session",
             attributes={"session.id": session_id},
-        ) as span:
-            record_invocation_event(
-                span,
-                StructuredEvent(
-                    name="session.create.invocation",
-                    code="session_create",
-                    timestamp=now,
-                ),
-            )
+        ) as root_span:
+            _carrier: dict[str, str] = {}
+            TraceContextTextMapPropagator().inject(_carrier)
+            _traceparent = _carrier.get("traceparent", "")
 
-            agent_version_id: str | None = None
+            with tracer.start_as_current_span(
+                "session.create",
+                attributes={"session.id": session_id},
+            ) as span:
+                record_invocation_event(
+                    span,
+                    StructuredEvent(
+                        name="session.create.invocation",
+                        code="session_create",
+                        timestamp=now,
+                    ),
+                )
 
-            try:
-                if body.agent_id is not None:
-                    agent_file = agents_dir / f"{body.agent_id}.json"
-                    if agent_file.exists():
-                        agent_record: dict[str, Any] = json.loads(agent_file.read_text())
-                        version = agent_record.get("version") or {}
-                        agent_version_id = version.get("id")
+                agent_version_id: str | None = None
 
-                session_dir = storage_root / "sessions" / session_id
-                session_dir.mkdir(parents=True, exist_ok=True)
-                manifest: dict[str, Any] = {
-                    "session_id": session_id,
-                    "agent_id": body.agent_id,
-                    "agent_version_id": agent_version_id,
-                    "thread_id": thread_id,
-                    "status": "idle",
-                    "created_at": now,
-                }
-                (session_dir / "manifest.json").write_text(json.dumps(manifest))
+                try:
+                    if body.agent_id is not None:
+                        agent_file = agents_dir / f"{body.agent_id}.json"
+                        if agent_file.exists():
+                            agent_record: dict[str, Any] = json.loads(agent_file.read_text())
+                            version = agent_record.get("version") or {}
+                            agent_version_id = version.get("id")
 
-                threads_dir = session_dir / "threads"
-                threads_dir.mkdir(parents=True, exist_ok=True)
-                thread_record: dict[str, Any] = {
-                    "thread_id": thread_id,
-                    "session_id": session_id,
-                    "created_at": now,
-                }
-                (threads_dir / f"{thread_id}.json").write_text(json.dumps(thread_record))
-
-                await event_log.append(
-                    session_id,
-                    "session.created",
-                    {
+                    session_dir = storage_root / "sessions" / session_id
+                    session_dir.mkdir(parents=True, exist_ok=True)
+                    manifest: dict[str, Any] = {
                         "session_id": session_id,
                         "agent_id": body.agent_id,
                         "agent_version_id": agent_version_id,
                         "thread_id": thread_id,
+                        "status": "idle",
                         "created_at": now,
-                    },
-                    thread_id=thread_id,
-                )
+                        "traceparent": _traceparent,
+                    }
+                    (session_dir / "manifest.json").write_text(json.dumps(manifest))
 
-            except SessionCreateError:
-                raise
-            except Exception as exc:
-                err = SessionCreateError(
-                    message=f"Failed to create session: {exc}",
-                    timestamp=_now(),
-                    cause=exc,
-                )
-                record_error(span, err)
-                audit_log.write(
-                    AuditLogEntry(
-                        level="error",
-                        event="session.create.failed",
-                        code=err.code,
-                        timestamp=err.timestamp,
-                        detail={
+                    threads_dir = session_dir / "threads"
+                    threads_dir.mkdir(parents=True, exist_ok=True)
+                    thread_record: dict[str, Any] = {
+                        "thread_id": thread_id,
+                        "session_id": session_id,
+                        "created_at": now,
+                    }
+                    (threads_dir / f"{thread_id}.json").write_text(json.dumps(thread_record))
+
+                    await event_log.append(
+                        session_id,
+                        "session.created",
+                        {
                             "session_id": session_id,
                             "agent_id": body.agent_id,
-                            "message": err.message,
+                            "agent_version_id": agent_version_id,
+                            "thread_id": thread_id,
+                            "created_at": now,
                         },
+                        thread_id=thread_id,
                     )
-                )
-                raise err
+
+                except SessionCreateError:
+                    raise
+                except Exception as exc:
+                    err = SessionCreateError(
+                        message=f"Failed to create session: {exc}",
+                        timestamp=_now(),
+                        cause=exc,
+                    )
+                    record_error(span, err)
+                    audit_log.write(
+                        AuditLogEntry(
+                            level="error",
+                            event="session.create.failed",
+                            code=err.code,
+                            timestamp=err.timestamp,
+                            detail={
+                                "session_id": session_id,
+                                "agent_id": body.agent_id,
+                                "message": err.message,
+                            },
+                        )
+                    )
+                    raise err
 
         return JSONResponse(
             content={

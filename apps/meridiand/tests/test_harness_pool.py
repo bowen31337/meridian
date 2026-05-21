@@ -18,6 +18,9 @@ Tests cover:
   - OTel span "harness.pool.assign" emitted on assign.
   - OTel span "harness.pool.wake" emitted on wake.
   - OTel span "harness.pool.start" emitted on start.
+  - Worker loop emits OTel span "session.run_span" when processing a session.
+  - session.run_span has session.id attribute.
+  - session.run_span continues the session trace when manifest has a stored traceparent.
   - assign span has session.id attribute.
   - assign span has harness.pool.worker_slot attribute.
   - assign span carries structured invocation event.
@@ -545,6 +548,65 @@ class TestHarnessPoolOtel:
         span = spans.get("harness.pool.assign")
         assert span is not None
         assert span.status.status_code == StatusCode.ERROR
+
+    def test_worker_loop_emits_session_run_span(self, tmp_path: Path) -> None:
+        pool = _make_pool(tmp_path)
+
+        async def run() -> None:
+            await pool.start()
+            await pool.wake("sess-run-span")
+            await asyncio.sleep(0)
+            await pool.stop()
+
+        asyncio.run(run())
+        span_names = [s.name for s in _otel_exporter.get_finished_spans()]
+        assert "session.run_span" in span_names
+
+    def test_session_run_span_has_session_id_attribute(self, tmp_path: Path) -> None:
+        pool = _make_pool(tmp_path)
+
+        async def run() -> None:
+            await pool.start()
+            await pool.wake("sess-run-id")
+            await asyncio.sleep(0)
+            await pool.stop()
+
+        asyncio.run(run())
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        span = spans.get("session.run_span")
+        assert span is not None
+        assert span.attributes["session.id"] == "sess-run-id"
+
+    def test_session_run_span_continues_session_trace(self, tmp_path: Path) -> None:
+        # session.run_span should share trace_id with the stored session traceparent.
+        session_id = "sess-trace-cont"
+        fake_trace_id = "aa" * 16  # 32 hex chars
+        fake_span_id = "bb" * 8   # 16 hex chars
+        fake_traceparent = f"00-{fake_trace_id}-{fake_span_id}-01"
+
+        session_dir = tmp_path / "sessions" / session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+        (session_dir / "manifest.json").write_text(
+            json.dumps({
+                "session_id": session_id,
+                "status": "active",
+                "traceparent": fake_traceparent,
+            })
+        )
+
+        pool = _make_pool(tmp_path)
+
+        async def run() -> None:
+            await pool.start()
+            await pool.wake(session_id)
+            await asyncio.sleep(0)
+            await pool.stop()
+
+        asyncio.run(run())
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        run_span = spans.get("session.run_span")
+        assert run_span is not None
+        assert run_span.context.trace_id == int(fake_trace_id, 16)
 
 
 # ---------------------------------------------------------------------------

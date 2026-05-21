@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -16,6 +17,7 @@ from core_errors import (
     record_error,
     record_invocation_event,
 )
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
 
 def _now() -> str:
@@ -90,11 +92,31 @@ class HarnessPool:
     def _slot_for(self, session_id: str) -> int:
         return hash(session_id) % self._num_workers
 
+    def _load_session_traceparent(self, session_id: str) -> str:
+        manifest_path = self._storage_root / "sessions" / session_id / "manifest.json"
+        if not manifest_path.exists():
+            return ""
+        try:
+            return json.loads(manifest_path.read_text()).get("traceparent", "")
+        except Exception:
+            return ""
+
     async def _worker_loop(self, slot: _WorkerSlot) -> None:
         while True:
             session_id = await slot.queue.get()
             try:
-                await self._run_session(session_id)
+                _traceparent = self._load_session_traceparent(session_id)
+                _ctx = (
+                    TraceContextTextMapPropagator().extract({"traceparent": _traceparent})
+                    if _traceparent
+                    else None
+                )
+                with get_tracer().start_as_current_span(
+                    "session.run_span",
+                    context=_ctx,
+                    attributes={"session.id": session_id},
+                ):
+                    await self._run_session(session_id)
             except Exception:
                 pass  # run_session is responsible for its own error handling
             finally:

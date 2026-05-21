@@ -22,6 +22,8 @@ Tests cover:
   - messages are sorted by sequence field.
   - OTel span "harness.wake" is emitted on success.
   - OTel span is set to ERROR status on failure.
+  - harness.wake continues the session trace when manifest has a stored traceparent.
+  - harness.wake starts a new trace when the manifest has no traceparent.
   - create_app wires the wake router when storage_root is supplied.
   - create_app omits the wake route when storage_root is None.
   - Agent config string values containing {{ memory.KEY }} are expanded at wake time.
@@ -558,6 +560,48 @@ class TestWakeOtel:
         wake_span = spans.get("harness.wake")
         assert wake_span is not None
         assert wake_span.status.status_code == StatusCode.ERROR
+
+    def test_harness_wake_continues_session_trace(self, storage_root: Path) -> None:
+        # harness.wake should share the trace_id from the session's stored traceparent.
+        fake_trace_id = "aa" * 16  # 32 hex chars
+        fake_span_id = "bb" * 8   # 16 hex chars
+        fake_traceparent = f"00-{fake_trace_id}-{fake_span_id}-01"
+
+        session_id = "otel-trace-wake"
+        session_dir = storage_root / "sessions" / session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+        (session_dir / "manifest.json").write_text(
+            json.dumps({
+                "session_id": session_id,
+                "status": "active",
+                "traceparent": fake_traceparent,
+            })
+        )
+
+        client = self._make_client(storage_root)
+        client.post(f"/v1/x/sessions/{session_id}/wake")
+
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        wake_span = spans.get("harness.wake")
+        assert wake_span is not None
+        assert wake_span.context.trace_id == int(fake_trace_id, 16)
+
+    def test_harness_wake_new_trace_when_no_traceparent(self, storage_root: Path) -> None:
+        # harness.wake starts a new (non-zero) trace when manifest has no traceparent.
+        session_id = "otel-no-tp-wake"
+        session_dir = storage_root / "sessions" / session_id
+        session_dir.mkdir(parents=True, exist_ok=True)
+        (session_dir / "manifest.json").write_text(
+            json.dumps({"session_id": session_id, "status": "active"})
+        )
+
+        client = self._make_client(storage_root)
+        client.post(f"/v1/x/sessions/{session_id}/wake")
+
+        spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
+        wake_span = spans.get("harness.wake")
+        assert wake_span is not None
+        assert wake_span.context.trace_id != 0
 
 
 # ---------------------------------------------------------------------------

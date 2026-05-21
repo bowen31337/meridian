@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/observability-system-json-structured-logs-to-stderr-fie/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/observability-system-opentelemetry-tracing-one-trace-pe/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
