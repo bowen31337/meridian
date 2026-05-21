@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/migration-impor-system-command-meridianimport-openclaw/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/skill-forge-sel-system-forge-watches-terminated-session/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

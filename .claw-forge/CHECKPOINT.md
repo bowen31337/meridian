@@ -1,8 +1,8 @@
-# Checkpoint — 20260521T220216
+# Checkpoint — 20260522T000000
 
 ## Status
-- Tests: 44 passing, 0 failing (diagnosis suite); pre-existing failures in test_daemon/test_harness_loop unrelated to this feature
-- Features: 21/21 complete
+- Tests: 81 passing, 0 failing (sel + diagnosis suites); pre-existing failures in test_daemon/test_harness_loop unrelated to this feature
+- Features: 22/22 complete
 - Snapshot: snapshots/snapshot-20260521T220216.json
 
 ## What's working
@@ -37,7 +37,13 @@
 - Reconciliation events as `memory.write` with action (deduped/merged/superseded/inserted)
 - Forge builds agentskills.io-shaped `SkillVersionRecord`; stores as PROPOSAL in quarantine
 
-### Session Failure Diagnosis (this feature — PRD §7.2 MTTR < 5 min)
+### Forge Session Selector — SEL (this feature)
+- `_skill_forge_sel.py` — `collect_terminated_sessions` scans `storage_root/events/**/<session_id>.ndjson`, identifies sessions with terminal `session.phase_change` events (`terminated` / `completed`), extracts tool-call sequences from `tool_call.requested` events
+- `cluster_trajectories` — groups sessions by identical (terminal_phase, tool_call_sequence) key; deterministic cluster IDs via `uuid.uuid5`; sorted by size descending
+- `run_forge_session_selector` — orchestrates scan → cluster → result; OTel span `skill_forge.sel.run` with `session_count` + `cluster_count` attributes; audit `skill_forge.sel.ran` (info) on success; `ForgeSelError` (code=`forge_sel_failed`, HTTP 500) + audit `skill_forge.sel.run.failed` (error) on failure
+- 37-test conformance suite in `test_skill_forge_sel.py`
+
+### Session Failure Diagnosis (PRD §7.2 MTTR < 5 min)
 - `GET /v1/sessions/{id}/diagnosis` — aggregates event log + audit + replay fixture into one postmortem JSON
 - Extracts `terminal_phase` and `stop_reason` from last `session.phase_change` event
 - `failure_events` — all error / phase_change / tool_call.vetoed / budget.warning / message.truncated events
