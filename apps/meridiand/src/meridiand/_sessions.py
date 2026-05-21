@@ -15,10 +15,18 @@ from core_errors import (
     record_error,
     record_invocation_event,
 )
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from storage_event_log import EventLogWriter
+
+from ._pagination import (
+    DEFAULT_PAGE_SIZE,
+    CursorDecodeError,
+    apply_cursor_filter,
+    decode_cursor,
+    make_cursor_page,
+)
 
 
 def _now() -> str:
@@ -26,7 +34,7 @@ def _now() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Error type
+# Error types
 # ---------------------------------------------------------------------------
 
 
@@ -40,6 +48,25 @@ class SessionCreateError(MeridianError):
     ) -> None:
         super().__init__(
             code="session_create_failed", message=message, timestamp=timestamp, cause=cause
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
+class ThreadListError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="session_threads_list_failed",
+            message=message,
+            timestamp=timestamp,
+            cause=cause,
         )
 
     def http_status(self) -> int:
@@ -164,6 +191,110 @@ def make_sessions_router(
                 "created_at": now,
             },
             status_code=201,
+        )
+
+    @router.get("/v1/sessions/{session_id}/threads", status_code=200)
+    async def list_threads(
+        session_id: str,
+        cursor: str | None = Query(default=None),
+        limit: int = Query(default=DEFAULT_PAGE_SIZE),
+    ) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span(
+            "session.threads.list",
+            attributes={"session.id": session_id},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="session.threads.list.invocation",
+                    code="session_threads_list",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                threads_dir = storage_root / "sessions" / session_id / "threads"
+                all_threads: list[dict[str, Any]] = []
+                if threads_dir.exists():
+                    for path in threads_dir.glob("*.json"):
+                        record = json.loads(path.read_text())
+                        if "id" not in record:
+                            record["id"] = record.get("thread_id", "")
+                        record.setdefault("title", None)
+                        record.setdefault("branch_of_event_seq", None)
+                        all_threads.append(record)
+
+                all_threads.sort(
+                    key=lambda r: (r.get("created_at", ""), r.get("id", "")),
+                    reverse=True,
+                )
+
+                if cursor is not None:
+                    c_created_at, c_id = decode_cursor(cursor, timestamp=now)
+                    all_threads = apply_cursor_filter(all_threads, c_created_at, c_id)
+
+                page, next_cursor = make_cursor_page(all_threads, limit)
+
+                span.set_attribute("session.threads.list.count", len(page))
+                span.set_attribute("session.threads.list.success", True)
+
+                audit_log.write(
+                    AuditLogEntry(
+                        level="info",
+                        event="session.threads.listed",
+                        code="session_threads_listed",
+                        timestamp=_now(),
+                        detail={
+                            "session_id": session_id,
+                            "count": len(page),
+                        },
+                    )
+                )
+
+            except CursorDecodeError as err:
+                span.set_attribute("session.threads.list.success", False)
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="session.threads.list.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={"session_id": session_id, "message": err.message},
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = ThreadListError(
+                    message=f"Failed to list threads for session {session_id}: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                span.set_attribute("session.threads.list.success", False)
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="session.threads.list.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={"session_id": session_id, "message": err2.message},
+                    )
+                )
+                raise err2
+
+        response_headers: dict[str, str] = {}
+        if next_cursor is not None:
+            response_headers["X-Next-Cursor"] = next_cursor
+
+        return JSONResponse(
+            content={"items": page, "next_cursor": next_cursor, "limit": limit},
+            status_code=200,
+            headers=response_headers,
         )
 
     return router
