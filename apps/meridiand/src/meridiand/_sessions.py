@@ -142,6 +142,25 @@ class MessageAppendError(MeridianError):
         return 500
 
 
+class SessionListError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="session_list_failed",
+            message=message,
+            timestamp=timestamp,
+            cause=cause,
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
 class SessionNotFoundError(MeridianError):
     def __init__(self, *, message: str, timestamp: str) -> None:
         super().__init__(
@@ -283,6 +302,122 @@ def make_sessions_router(
                 "created_at": now,
             },
             status_code=201,
+        )
+
+    @router.get("/v1/sessions", status_code=200)
+    async def list_sessions(
+        cursor: str | None = Query(default=None),
+        limit: int = Query(default=DEFAULT_PAGE_SIZE),
+        phase: str | None = Query(default=None),
+        agent_id: str | None = Query(default=None),
+        user_profile_id: str | None = Query(default=None),
+        channel_id: str | None = Query(default=None),
+        parent_session_id: str | None = Query(default=None),
+        created_after: str | None = Query(default=None),
+        created_before: str | None = Query(default=None),
+    ) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+
+        with tracer.start_as_current_span("session.list") as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="session.list.invocation",
+                    code="session_list",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                sessions_dir = storage_root / "sessions"
+                all_sessions: list[dict[str, Any]] = []
+                if sessions_dir.exists():
+                    for manifest_path in sessions_dir.glob("*/manifest.json"):
+                        record = json.loads(manifest_path.read_text())
+                        if "id" not in record:
+                            record["id"] = record.get("session_id", "")
+                        if phase is not None and record.get("phase") != phase:
+                            continue
+                        if agent_id is not None and record.get("agent_id") != agent_id:
+                            continue
+                        if user_profile_id is not None and record.get("user_profile_id") != user_profile_id:
+                            continue
+                        if channel_id is not None and record.get("channel_id") != channel_id:
+                            continue
+                        if parent_session_id is not None and record.get("parent_session_id") != parent_session_id:
+                            continue
+                        if created_after is not None and record.get("created_at", "") <= created_after:
+                            continue
+                        if created_before is not None and record.get("created_at", "") >= created_before:
+                            continue
+                        all_sessions.append(record)
+
+                all_sessions.sort(
+                    key=lambda r: (r.get("created_at", ""), r.get("id", "")),
+                    reverse=True,
+                )
+
+                if cursor is not None:
+                    c_created_at, c_id = decode_cursor(cursor, timestamp=now)
+                    all_sessions = apply_cursor_filter(all_sessions, c_created_at, c_id)
+
+                page, next_cursor = make_cursor_page(all_sessions, limit)
+
+                span.set_attribute("session.list.count", len(page))
+                span.set_attribute("session.list.success", True)
+
+                audit_log.write(
+                    AuditLogEntry(
+                        level="info",
+                        event="session.listed",
+                        code="session_listed",
+                        timestamp=_now(),
+                        detail={"count": len(page)},
+                    )
+                )
+
+            except CursorDecodeError as err:
+                span.set_attribute("session.list.success", False)
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="session.list.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={"message": err.message},
+                    )
+                )
+                raise
+
+            except Exception as exc:
+                err2 = SessionListError(
+                    message=f"Failed to list sessions: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                span.set_attribute("session.list.success", False)
+                record_error(span, err2)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="session.list.failed",
+                        code=err2.code,
+                        timestamp=err2.timestamp,
+                        detail={"message": err2.message},
+                    )
+                )
+                raise err2
+
+        response_headers: dict[str, str] = {}
+        if next_cursor is not None:
+            response_headers["X-Next-Cursor"] = next_cursor
+
+        return JSONResponse(
+            content={"items": page, "next_cursor": next_cursor, "limit": limit},
+            status_code=200,
+            headers=response_headers,
         )
 
     @router.get("/v1/sessions/{session_id}/threads", status_code=200)
