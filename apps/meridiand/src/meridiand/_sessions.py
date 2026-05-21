@@ -73,13 +73,49 @@ class ThreadListError(MeridianError):
         return 500
 
 
+class ThreadCreateError(MeridianError):
+    def __init__(
+        self,
+        *,
+        message: str,
+        timestamp: str,
+        cause: BaseException | None = None,
+    ) -> None:
+        super().__init__(
+            code="session_thread_create_failed",
+            message=message,
+            timestamp=timestamp,
+            cause=cause,
+        )
+
+    def http_status(self) -> int:
+        return 500
+
+
+class SessionNotFoundError(MeridianError):
+    def __init__(self, *, message: str, timestamp: str) -> None:
+        super().__init__(
+            code="session_not_found",
+            message=message,
+            timestamp=timestamp,
+        )
+
+    def http_status(self) -> int:
+        return 404
+
+
 # ---------------------------------------------------------------------------
-# Request model
+# Request models
 # ---------------------------------------------------------------------------
 
 
 class SessionCreateRequest(BaseModel):
     agent_id: str | None = None
+
+
+class ThreadCreateRequest(BaseModel):
+    branch_of_event_seq: int
+    title: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -295,6 +331,127 @@ def make_sessions_router(
             content={"items": page, "next_cursor": next_cursor, "limit": limit},
             status_code=200,
             headers=response_headers,
+        )
+
+    @router.post("/v1/sessions/{session_id}/threads", status_code=201)
+    async def create_thread(session_id: str, body: ThreadCreateRequest) -> JSONResponse:
+        now = _now()
+        tracer = get_tracer()
+        thread_id = f"thread_{uuid.uuid4().hex}"
+
+        with tracer.start_as_current_span(
+            "session.thread.create",
+            attributes={"session.id": session_id},
+        ) as span:
+            record_invocation_event(
+                span,
+                StructuredEvent(
+                    name="session.thread.create.invocation",
+                    code="session_thread_create",
+                    timestamp=now,
+                ),
+            )
+
+            try:
+                session_dir = storage_root / "sessions" / session_id
+                if not session_dir.exists():
+                    not_found = SessionNotFoundError(
+                        message=f"Session {session_id} not found",
+                        timestamp=_now(),
+                    )
+                    span.set_attribute("session.thread.create.success", False)
+                    record_error(span, not_found)
+                    audit_log.write(
+                        AuditLogEntry(
+                            level="error",
+                            event="session.thread.create.failed",
+                            code=not_found.code,
+                            timestamp=not_found.timestamp,
+                            detail={
+                                "session_id": session_id,
+                                "message": not_found.message,
+                            },
+                        )
+                    )
+                    raise not_found
+
+                threads_dir = session_dir / "threads"
+                threads_dir.mkdir(parents=True, exist_ok=True)
+
+                thread_record: dict[str, Any] = {
+                    "thread_id": thread_id,
+                    "session_id": session_id,
+                    "created_at": now,
+                    "branch_of_event_seq": body.branch_of_event_seq,
+                }
+                if body.title is not None:
+                    thread_record["title"] = body.title
+
+                (threads_dir / f"{thread_id}.json").write_text(json.dumps(thread_record))
+
+                await event_log.append(
+                    session_id,
+                    "thread.created",
+                    {
+                        "thread_id": thread_id,
+                        "session_id": session_id,
+                        "branch_of_event_seq": body.branch_of_event_seq,
+                        "title": body.title,
+                        "created_at": now,
+                    },
+                    thread_id=thread_id,
+                )
+
+                span.set_attribute("session.thread.create.success", True)
+
+                audit_log.write(
+                    AuditLogEntry(
+                        level="info",
+                        event="session.thread.created",
+                        code="session_thread_created",
+                        timestamp=_now(),
+                        detail={
+                            "session_id": session_id,
+                            "thread_id": thread_id,
+                            "branch_of_event_seq": body.branch_of_event_seq,
+                        },
+                    )
+                )
+
+            except (SessionNotFoundError, ThreadCreateError):
+                raise
+            except Exception as exc:
+                err = ThreadCreateError(
+                    message=f"Failed to create thread for session {session_id}: {exc}",
+                    timestamp=_now(),
+                    cause=exc,
+                )
+                span.set_attribute("session.thread.create.success", False)
+                record_error(span, err)
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error",
+                        event="session.thread.create.failed",
+                        code=err.code,
+                        timestamp=err.timestamp,
+                        detail={
+                            "session_id": session_id,
+                            "message": err.message,
+                        },
+                    )
+                )
+                raise err
+
+        return JSONResponse(
+            content={
+                "thread_id": thread_id,
+                "id": thread_id,
+                "session_id": session_id,
+                "created_at": now,
+                "branch_of_event_seq": body.branch_of_event_seq,
+                "title": body.title,
+            },
+            status_code=201,
         )
 
     return router
