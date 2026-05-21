@@ -65,6 +65,8 @@ from ._phase import make_phase_router
 from ._replay import make_replay_router
 from ._resume import make_resume_router
 from ._sessions import make_sessions_router
+from ._session_wake import make_session_wake_router
+from ._harness_pool import HarnessPool
 from ._wake import make_wake_router
 from ._auth_middleware import AuthMiddleware
 from ._cursor_middleware import CursorPaginationMiddleware
@@ -105,6 +107,7 @@ def create_app(
     os_keychain_backend: OsKeychainVaultBackend | None = None,
     subscriber_bus: SubscriberBus | None = None,
     credential_proxy_providers: list[CredentialProxyProviderConfig] | None = None,
+    harness_pool: HarnessPool | None = None,
 ) -> FastAPI:
     """
     Application factory for the meridiand HTTP API.
@@ -268,6 +271,14 @@ def create_app(
                 app.include_router(
                     make_wake_router(audit_log=audit_log, storage_root=storage_root)
                 )
+                if harness_pool is not None:
+                    app.include_router(
+                        make_session_wake_router(
+                            audit_log=audit_log,
+                            storage_root=storage_root,
+                            harness_pool=harness_pool,
+                        )
+                    )
                 app.include_router(
                     make_kb_router(audit_log=audit_log, storage_root=storage_root)
                 )
