@@ -33,4 +33,11 @@ export const queryKeys = {
     all: () => ["forge-proposals"] as const,
     list: () => ["forge-proposals", "list"] as const,
   },
+  channels: {
+    all: () => ["channels"] as const,
+    list: () => ["channels", "list"] as const,
+  },
+  messages: {
+    all: (sessionId: string) => ["sessions", sessionId, "messages"] as const,
+  },
 } as const;

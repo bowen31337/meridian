@@ -159,6 +159,37 @@ export interface ForgeProposalList {
   limit: number;
 }
 
+export interface Channel {
+  id: string;
+  kind: string;
+  name: string;
+  status: string;
+  created_at: string;
+}
+
+export interface ChannelList {
+  items: Channel[];
+  next_cursor: string | null;
+  limit: number;
+}
+
+export interface Message {
+  id: string;
+  session_id: string;
+  thread_id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  sequence: number;
+  created_at: string;
+}
+
+export interface SendMessageRequest {
+  content: string;
+  channel_id?: string;
+}
+
+export type SessionCreateBody = CreateSessionRequest & { agent_id?: string };
+
 export class ApiError extends Error {
   readonly status: number;
   readonly body: ErrorBody | undefined;
@@ -200,7 +231,7 @@ function toQuery(params?: Record<string, number | string | undefined>): string {
 
 export interface ApiClient {
   listSessions(params?: ListSessionsParams): Promise<SessionList>;
-  createSession(body: CreateSessionRequest): Promise<Session>;
+  createSession(body: SessionCreateBody): Promise<Session>;
   getSession(sessionId: string): Promise<Session>;
   closeSession(sessionId: string): Promise<void>;
   listProviders(): Promise<ProviderList>;
@@ -220,6 +251,8 @@ export interface ApiClient {
   listForgeProposals(): Promise<ForgeProposalList>;
   approveForgeProposal(proposalId: string): Promise<SkillVersion>;
   rejectForgeProposal(proposalId: string, reason: string): Promise<ForgeProposal>;
+  listChannels(): Promise<ChannelList>;
+  sendMessage(sessionId: string, body: SendMessageRequest): Promise<Message>;
 }
 
 export function createApiClient(baseUrl: string): ApiClient {
@@ -290,5 +323,11 @@ export function createApiClient(baseUrl: string): ApiClient {
         `/v1/x/skill_forge/proposals/${encodeURIComponent(proposalId)}/reject`,
         { method: "POST", body: JSON.stringify({ reason }) },
       ),
+    listChannels: () => request<ChannelList>(baseUrl, "/v1/channels"),
+    sendMessage: (sessionId, body) =>
+      request<Message>(baseUrl, `/v1/sessions/${encodeURIComponent(sessionId)}/messages`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
   };
 }

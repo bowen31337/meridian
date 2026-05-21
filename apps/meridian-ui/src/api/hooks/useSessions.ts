@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { CreateSessionRequest, ListSessionsParams } from "../client.js";
+import type { ListSessionsParams, SessionCreateBody } from "../client.js";
 import { createApiClient } from "../client.js";
 import { useMeridianApi } from "../context.js";
 import { queryKeys } from "../query-keys.js";
@@ -67,7 +67,7 @@ export function useCreateSession() {
   const { baseUrl, auditLog } = useMeridianApi();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (body: CreateSessionRequest) => {
+    mutationFn: (body: SessionCreateBody) => {
       const tracer = getTracer();
       return tracer.startActiveSpan("api.sessions.create", async (span) => {
         recordApiInvocationEvent(span, {
