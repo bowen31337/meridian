@@ -2,6 +2,8 @@
 export type {
   CanvasOp,
   CanvasOpKind,
+  CanvasInteraction,
+  CanvasInteractionKind,
   ContentBlock,
   ContentBlockCanvasOp,
   AuditLogEntry,
@@ -20,6 +22,10 @@ export { defineWidget } from "./contract.js";
 // Audit log
 export type { AuditLog } from "./audit.js";
 export { AuditLogContext, useAuditLog } from "./audit.js";
+
+// Interaction context
+export type { OnInteraction } from "./interaction.js";
+export { InteractionContext, useInteraction } from "./interaction.js";
 
 // Telemetry
 export { getTracer, recordInvocationEvent, recordWidgetFailure } from "./telemetry.js";
@@ -47,6 +53,7 @@ export {
 } from "./widgets/index.js";
 export type {
   CodeProps,
+  FormAction,
   FormField,
   FormFieldType,
   FormProps,

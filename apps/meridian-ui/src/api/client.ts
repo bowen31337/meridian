@@ -188,6 +188,23 @@ export interface SendMessageRequest {
   channel_id?: string;
 }
 
+export interface CanvasInteractionRequest {
+  kind: "form.submit" | "button.click";
+  widget_id: string;
+  widget_kind: string;
+  payload: Record<string, unknown>;
+}
+
+export interface CanvasInteractionResponse {
+  interaction_id: string;
+  session_id: string;
+  kind: string;
+  widget_id: string;
+  widget_kind: string;
+  payload: Record<string, unknown>;
+  timestamp: string;
+}
+
 export type SessionCreateBody = CreateSessionRequest & { agent_id?: string };
 
 export class ApiError extends Error {
@@ -253,6 +270,10 @@ export interface ApiClient {
   rejectForgeProposal(proposalId: string, reason: string): Promise<ForgeProposal>;
   listChannels(): Promise<ChannelList>;
   sendMessage(sessionId: string, body: SendMessageRequest): Promise<Message>;
+  submitCanvasInteraction(
+    sessionId: string,
+    body: CanvasInteractionRequest,
+  ): Promise<CanvasInteractionResponse>;
 }
 
 export function createApiClient(baseUrl: string): ApiClient {
@@ -329,5 +350,11 @@ export function createApiClient(baseUrl: string): ApiClient {
         method: "POST",
         body: JSON.stringify(body),
       }),
+    submitCanvasInteraction: (sessionId, body) =>
+      request<CanvasInteractionResponse>(
+        baseUrl,
+        `/v1/sessions/${encodeURIComponent(sessionId)}/canvas_interactions`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
   };
 }

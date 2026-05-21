@@ -58,3 +58,22 @@ export interface StructuredEvent {
   readonly timestamp: string;
   readonly [key: string]: unknown;
 }
+
+/** Kind of user interaction originating from a canvas widget. */
+export type CanvasInteractionKind = "form.submit" | "button.click";
+
+/**
+ * A user interaction event emitted by a canvas widget (form submission or
+ * button click).  The harness surfaces these as new user-role messages so the
+ * running session receives structured input from the UI.
+ */
+export interface CanvasInteraction {
+  readonly kind: CanvasInteractionKind;
+  readonly widget_id: string;
+  readonly widget_kind: string;
+  readonly session_id: string;
+  readonly sequence: number;
+  readonly timestamp: string;
+  /** Interaction-specific data: form field values or button name. */
+  readonly payload: Record<string, unknown>;
+}

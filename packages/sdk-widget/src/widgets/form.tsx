@@ -1,6 +1,9 @@
-import React from "react";
+import React, { useCallback, useState } from "react";
+import { useAuditLog } from "../audit.js";
 import { defineWidget } from "../contract.js";
 import type { WidgetProps } from "../contract.js";
+import { useInteraction } from "../interaction.js";
+import { getTracer, recordInvocationEvent, recordWidgetFailure } from "../telemetry.js";
 
 export type FormFieldType = "text" | "number" | "email" | "url" | "checkbox" | "textarea";
 
@@ -12,10 +15,18 @@ export interface FormField {
   readonly value?: unknown;
 }
 
+/** An optional standalone action button rendered below the form fields. */
+export interface FormAction {
+  readonly name: string;
+  readonly label: string;
+}
+
 export interface FormProps {
   readonly fields: readonly FormField[];
   /** Optional title rendered above the fields. */
   readonly title?: string;
+  /** Optional action buttons; each click produces a button.click interaction. */
+  readonly actions?: readonly FormAction[];
 }
 
 const MANIFEST = {
@@ -41,6 +52,18 @@ const MANIFEST = {
               enum: ["text", "number", "email", "url", "checkbox", "textarea"],
             },
             value: {},
+          },
+          additionalProperties: false,
+        },
+      },
+      actions: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["name", "label"],
+          properties: {
+            name: { type: "string" },
+            label: { type: "string" },
           },
           additionalProperties: false,
         },
@@ -88,19 +111,207 @@ function renderField(field: FormField): React.ReactElement {
   );
 }
 
-function FormWidgetImpl({ props }: WidgetProps<FormProps>): React.ReactElement {
+function FormWidgetImpl({ ctx, props }: WidgetProps<FormProps>): React.ReactElement {
   const fields = (props.fields as FormField[]) ?? [];
+  const actions = (props.actions as FormAction[] | undefined) ?? [];
+
+  const onInteraction = useInteraction();
+  const auditLog = useAuditLog();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const handleSubmit = useCallback(
+    async (e: React.FormEvent<HTMLFormElement>) => {
+      e.preventDefault();
+      if (!onInteraction || isSubmitting) return;
+
+      const formData = new FormData(e.currentTarget);
+      const values: Record<string, unknown> = {};
+      for (const field of fields) {
+        const fieldType = field.type ?? "text";
+        if (fieldType === "checkbox") {
+          values[field.name] = formData.has(field.name);
+        } else if (fieldType === "number") {
+          const raw = formData.get(field.name) as string | null;
+          values[field.name] = raw !== null && raw !== "" ? Number(raw) : null;
+        } else {
+          values[field.name] = (formData.get(field.name) as string) ?? "";
+        }
+      }
+
+      const tracer = getTracer();
+      const timestamp = new Date().toISOString();
+      setIsSubmitting(true);
+      setErrorMessage(null);
+
+      await tracer.startActiveSpan(
+        "form.submit",
+        {
+          attributes: {
+            "widget.id": ctx.widgetId,
+            "widget.kind": ctx.widgetKind,
+            "session.id": ctx.sessionId,
+            "widget.sequence": ctx.sequence,
+          },
+        },
+        async (span) => {
+          recordInvocationEvent(span, {
+            name: "form.submit.invocation",
+            widget_id: ctx.widgetId,
+            widget_kind: ctx.widgetKind,
+            session_id: ctx.sessionId,
+            sequence: ctx.sequence,
+            timestamp,
+          });
+
+          try {
+            await onInteraction({
+              kind: "form.submit",
+              widget_id: ctx.widgetId,
+              widget_kind: ctx.widgetKind,
+              session_id: ctx.sessionId,
+              sequence: ctx.sequence,
+              timestamp,
+              payload: { values },
+            });
+            span.end();
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            recordWidgetFailure(span, {
+              code: "FORM_SUBMIT_FAILED",
+              message,
+              widget_id: ctx.widgetId,
+              widget_kind: ctx.widgetKind,
+              session_id: ctx.sessionId,
+              timestamp: new Date().toISOString(),
+              cause: err,
+            });
+            span.end();
+            auditLog.write({
+              level: "error",
+              event: "form.submit.failed",
+              widget_id: ctx.widgetId,
+              widget_kind: ctx.widgetKind,
+              session_id: ctx.sessionId,
+              timestamp: new Date().toISOString(),
+              detail: { message },
+            });
+            setErrorMessage(message);
+          }
+        },
+      );
+
+      setIsSubmitting(false);
+    },
+    [onInteraction, isSubmitting, fields, ctx, auditLog],
+  );
+
+  const handleActionClick = useCallback(
+    async (action: FormAction) => {
+      if (!onInteraction || isSubmitting) return;
+
+      const tracer = getTracer();
+      const timestamp = new Date().toISOString();
+      setIsSubmitting(true);
+      setErrorMessage(null);
+
+      await tracer.startActiveSpan(
+        "button.click",
+        {
+          attributes: {
+            "widget.id": ctx.widgetId,
+            "widget.kind": ctx.widgetKind,
+            "session.id": ctx.sessionId,
+            "button.name": action.name,
+          },
+        },
+        async (span) => {
+          recordInvocationEvent(span, {
+            name: "button.click.invocation",
+            widget_id: ctx.widgetId,
+            widget_kind: ctx.widgetKind,
+            session_id: ctx.sessionId,
+            sequence: ctx.sequence,
+            timestamp,
+          });
+
+          try {
+            await onInteraction({
+              kind: "button.click",
+              widget_id: ctx.widgetId,
+              widget_kind: ctx.widgetKind,
+              session_id: ctx.sessionId,
+              sequence: ctx.sequence,
+              timestamp,
+              payload: { action: action.name },
+            });
+            span.end();
+          } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            recordWidgetFailure(span, {
+              code: "BUTTON_CLICK_FAILED",
+              message,
+              widget_id: ctx.widgetId,
+              widget_kind: ctx.widgetKind,
+              session_id: ctx.sessionId,
+              timestamp: new Date().toISOString(),
+              cause: err,
+            });
+            span.end();
+            auditLog.write({
+              level: "error",
+              event: "button.click.failed",
+              widget_id: ctx.widgetId,
+              widget_kind: ctx.widgetKind,
+              session_id: ctx.sessionId,
+              timestamp: new Date().toISOString(),
+              detail: { message, action: action.name },
+            });
+            setErrorMessage(message);
+          }
+        },
+      );
+
+      setIsSubmitting(false);
+    },
+    [onInteraction, isSubmitting, ctx, auditLog],
+  );
+
+  const hasInteraction = onInteraction !== null;
 
   return (
     <form
       data-widget-kind="meridian.form"
-      onSubmit={(e) => e.preventDefault()}
+      onSubmit={hasInteraction ? handleSubmit : (e) => e.preventDefault()}
       style={{ display: "flex", flexDirection: "column", gap: 12 }}
     >
       {props.title != null && (
         <h3 style={{ margin: 0, fontSize: "1rem" }}>{props.title as string}</h3>
       )}
       {fields.map((field) => renderField(field))}
+      {errorMessage && (
+        <div role="alert" data-testid="form-widget-error" style={{ color: "red", fontSize: "0.875rem" }}>
+          {errorMessage}
+        </div>
+      )}
+      {hasInteraction && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="submit" data-testid="form-submit-button" disabled={isSubmitting}>
+            {isSubmitting ? "Submitting…" : "Submit"}
+          </button>
+          {actions.map((action) => (
+            <button
+              key={action.name}
+              type="button"
+              data-testid={`form-action-${action.name}`}
+              disabled={isSubmitting}
+              onClick={() => void handleActionClick(action)}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      )}
     </form>
   );
 }

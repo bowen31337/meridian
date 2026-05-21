@@ -60,6 +60,7 @@ from ._user_profiles import make_user_profiles_router
 from ._hooks import make_hooks_router
 from ._webhooks import make_webhooks_router
 from ._diagnosis import make_diagnosis_router
+from ._canvas_interactions import make_canvas_interactions_router
 from ._events import make_events_router
 from ._files import make_files_router
 from ._handoff import make_handoff_router
@@ -432,6 +433,13 @@ def create_app(
                 if event_log is not None:
                     app.include_router(
                         make_sessions_router(
+                            audit_log=audit_log,
+                            storage_root=storage_root,
+                            event_log=event_log,
+                        )
+                    )
+                    app.include_router(
+                        make_canvas_interactions_router(
                             audit_log=audit_log,
                             storage_root=storage_root,
                             event_log=event_log,

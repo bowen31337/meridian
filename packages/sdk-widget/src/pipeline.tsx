@@ -4,6 +4,8 @@ import { AuditLogContext } from "./audit.js";
 import type { AuditLog } from "./audit.js";
 import type { WidgetComponent, WidgetContext } from "./contract.js";
 import { CanvasWidgetErrorBoundary, WidgetErrorDisplay } from "./error.js";
+import { InteractionContext } from "./interaction.js";
+import type { OnInteraction } from "./interaction.js";
 import { validateProps } from "./manifest.js";
 import { getTracer, recordInvocationEvent, recordWidgetFailure } from "./telemetry.js";
 import type { ContentBlockCanvasOp, WidgetError } from "./types.js";
@@ -16,6 +18,11 @@ export interface RenderOptions {
   readonly auditLog: AuditLog;
   /** Called on pre-render failures (sync) and render-time failures (async via boundary). */
   readonly onError?: (error: WidgetError) => void;
+  /**
+   * Callback invoked when a widget emits a user interaction (form submit,
+   * button click).  When omitted, interactive controls are not rendered.
+   */
+  readonly onInteraction?: OnInteraction;
 }
 
 function _failWithError(
@@ -148,9 +155,11 @@ export class WidgetRegistry {
         const Component = component;
         return (
           <AuditLogContext.Provider value={options.auditLog}>
-            <CanvasWidgetErrorBoundary ctx={ctx} onError={options.onError}>
-              <Component ctx={ctx} props={op.props} />
-            </CanvasWidgetErrorBoundary>
+            <InteractionContext.Provider value={options.onInteraction ?? null}>
+              <CanvasWidgetErrorBoundary ctx={ctx} onError={options.onError}>
+                <Component ctx={ctx} props={op.props} />
+              </CanvasWidgetErrorBoundary>
+            </InteractionContext.Provider>
           </AuditLogContext.Provider>
         );
       },

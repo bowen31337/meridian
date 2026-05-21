@@ -2,7 +2,7 @@ export { CodeWidget } from "./code.js";
 export type { CodeProps } from "./code.js";
 
 export { FormWidget } from "./form.js";
-export type { FormField, FormFieldType, FormProps } from "./form.js";
+export type { FormAction, FormField, FormFieldType, FormProps } from "./form.js";
 
 export { ImageWidget } from "./image.js";
 export type { ImageProps } from "./image.js";

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef } from "react";
 import type { AuditLog as WidgetAuditLog, AuditLogEntry as WidgetAuditLogEntry, CanvasOp } from "@meridian/sdk-widget";
 import { defaultRegistry } from "@meridian/sdk-widget";
 import { useMeridianApi } from "../api/context.js";
+import { useSubmitCanvasInteraction } from "../api/hooks/useCanvasInteraction.js";
 import { useListSessionEvents } from "../api/hooks/useSessionEvents.js";
 import type { AuditLog } from "../workspace/audit.js";
 import { getTracer, recordInvocationEvent } from "./telemetry.js";
@@ -27,6 +28,7 @@ export interface LiveCanvasPanelProps {
 
 export function LiveCanvasPanel({ sessionId }: LiveCanvasPanelProps): React.ReactElement {
   const { auditLog } = useMeridianApi();
+  const onInteraction = useSubmitCanvasInteraction(sessionId);
   const { data, isLoading, isError, error } = useListSessionEvents(sessionId);
 
   const widgetMap = useMemo(() => {
@@ -92,7 +94,10 @@ export function LiveCanvasPanel({ sessionId }: LiveCanvasPanelProps): React.Reac
     <div data-testid="canvas-panel">
       {Array.from(widgetMap.values()).map((entry) => (
         <div key={entry.widget_id} data-widget-id={entry.widget_id}>
-          {defaultRegistry.renderCanvasOp(toContentBlock(entry), { auditLog: widgetAuditLog })}
+          {defaultRegistry.renderCanvasOp(toContentBlock(entry), {
+            auditLog: widgetAuditLog,
+            onInteraction,
+          })}
         </div>
       ))}
     </div>
