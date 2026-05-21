@@ -14,6 +14,7 @@ from storage_repository import RepositoryFailure, SqliteRepositoryDriver
 
 from ._app import create_app
 from ._config import load_config, resolve_config_location, validate_config
+from ._logging import LoggingConfigError, configure_json_logging, emit_early_error
 from ._provider_factory import ProviderFactoryError, build_model_router, build_provider_registry
 from ._secret_ref import SecretRefResolver
 from ._services import init_services
@@ -54,31 +55,32 @@ def main(argv: list[str] | None = None) -> int:
         try:
             config_path = resolve_config_location()
         except Exception as exc:
-            print(f"meridiand: config location error: {exc}", file=sys.stderr)
+            emit_early_error("meridiand", f"config location error: {exc}")
             return 1
 
     try:
         config = load_config(config_path)
     except Exception as exc:
-        print(f"meridiand: config error: {exc}", file=sys.stderr)
+        emit_early_error("meridiand", f"config error: {exc}")
         return 1
 
     try:
         services = init_services(config)
     except Exception as exc:
-        print(f"meridiand: service init error: {exc}", file=sys.stderr)
+        emit_early_error("meridiand", f"service init error: {exc}")
         return 1
 
     try:
         validate_config(config, audit_log=services.audit_log)
     except Exception as exc:
-        print(f"meridiand: config error: {exc}", file=sys.stderr)
+        emit_early_error("meridiand", f"config error: {exc}")
         return 1
 
-    logging.basicConfig(
-        level=config.log_level.upper(),
-        format="%(asctime)s %(name)s %(levelname)s %(message)s",
-    )
+    try:
+        configure_json_logging(config.log_level, audit_log=services.audit_log)
+    except LoggingConfigError as exc:
+        emit_early_error("meridiand", f"logging config error: {exc.message}")
+        return 1
 
     try:
         asyncio.run(_run_db_migrations(config.storage_root / "meridian.db"))
@@ -93,7 +95,7 @@ def main(argv: list[str] | None = None) -> int:
                     detail={"message": exc.message},
                 )
             )
-        print(f"meridiand: migration failed: {exc.message}", file=sys.stderr)
+        _LOG.error("migration failed: %s", exc.message)
         return 1
     except Exception as exc:
         with contextlib.suppress(Exception):
@@ -106,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
                     detail={"message": str(exc)},
                 )
             )
-        print(f"meridiand: migration error: {exc}", file=sys.stderr)
+        _LOG.error("migration error: %s", exc)
         return 1
 
     # Build the provider registry and model router when providers are configured.
@@ -137,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
                         detail={"message": exc.message},
                     )
                 )
-            print(f"meridiand: provider init error: {exc.message}", file=sys.stderr)
+            _LOG.error("provider init error: %s", exc.message)
             return 1
 
     app = create_app(
@@ -187,7 +189,7 @@ def main(argv: list[str] | None = None) -> int:
             bind_port=bind.port,
         )
         try:
-            uvicorn.run(app, log_level=config.log_level.lower(), **server_kwargs)  # type: ignore[arg-type]
+            uvicorn.run(app, log_level=config.log_level.lower(), log_config=None, **server_kwargs)  # type: ignore[arg-type]
         except Exception as exc:
             msg = str(exc)
             record_daemon_failure(span, exc)
@@ -201,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
                         detail={"message": msg},
                     )
                 )
-            print(f"meridiand: server error: {msg}", file=sys.stderr)
+            _LOG.error("server error: %s", msg)
             return 1
 
     return 0
