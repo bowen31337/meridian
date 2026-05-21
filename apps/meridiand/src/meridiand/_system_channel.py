@@ -56,6 +56,7 @@ from sdk_channel import (
 from sdk_sandbox import ExecutionContext
 
 from ._hook_dispatch import dispatch_hooks
+from ._metrics_registry import channel_inbound_total, channel_outbound_total
 from ._webhook_channel_driver import SecretResolver, NoopSecretResolver, _sign_payload
 
 
@@ -696,6 +697,8 @@ def make_system_channel_router(
                                     json.dumps(other_sess)
                                 )
 
+                channel_inbound_total.labels(kind=channel.get("kind", "unknown")).inc()
+
             except (ChannelInboundNotFoundError, ChannelInboundHmacError) as err:
                 record_error(span, err)
                 audit_log.write(
@@ -824,6 +827,8 @@ def make_system_channel_router(
                     send_request,
                     RuntimeOptions(audit_log=NoopAuditLog()),
                 )
+
+                channel_outbound_total.labels(kind=channel["kind"]).inc()
 
                 await dispatch_hooks(
                     "on_channel_outbound",
@@ -976,6 +981,7 @@ def make_system_channel_router(
                             send_request,
                             RuntimeOptions(audit_log=NoopAuditLog()),
                         )
+                        channel_outbound_total.labels(kind=channel["kind"]).inc()
                         results.append(
                             {
                                 "channel_id": ch_id,

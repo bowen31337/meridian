@@ -34,6 +34,7 @@ from core_errors import (
     record_invocation_event,
 )
 
+from ._metrics_registry import skill_forge_proposals_total
 from ._skill_efficacy import TrajectoryRunner, compare_proposal_trajectories
 
 
@@ -410,6 +411,7 @@ async def build_skill_version_proposal(
                     json.dumps(notification_record)
                 )
 
+            skill_forge_proposals_total.labels(outcome="proposed").inc()
             span.set_attribute("skill_forge.proposal_id", proposal_id)
             span.set_attribute("skill_forge.build_proposal.success", True)
             audit_log.write(

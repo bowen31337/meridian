@@ -41,6 +41,7 @@ from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from ._metrics_registry import skill_forge_proposals_total
 from ._pagination import (
     DEFAULT_PAGE_SIZE,
     CursorDecodeError,
@@ -390,6 +391,7 @@ def make_skill_forge_proposals_router(
                 proposal["promoted_version_id"] = version_id
                 proposal_file.write_text(json.dumps(proposal))
 
+                skill_forge_proposals_total.labels(outcome="approved").inc()
                 span.set_attribute("skill_forge.proposal.approve.success", True)
                 audit_log.write(
                     AuditLogEntry(
@@ -490,6 +492,7 @@ def make_skill_forge_proposals_router(
                 proposal["rejection_reason"] = body.reason
                 proposal_file.write_text(json.dumps(proposal))
 
+                skill_forge_proposals_total.labels(outcome="rejected").inc()
                 span.set_attribute("skill_forge.proposal.reject.success", True)
                 audit_log.write(
                     AuditLogEntry(

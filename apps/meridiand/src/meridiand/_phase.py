@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from storage_event_log import EventLogWriter
 from storage_reposit import LocalEventLogReader, PhaseProjection
 
-from ._metrics_registry import session_duration_seconds, sessions_total
+from ._metrics_registry import active_sessions, session_duration_seconds, sessions_total
 
 _TERMINAL_PHASES = frozenset({"terminated", "completed"})
 
@@ -109,6 +109,9 @@ def make_phase_router(
                     },
                 )
                 sessions_total.labels(phase=body.to_phase).inc()
+                active_sessions.labels(phase=body.to_phase).inc()
+                if before is not None:
+                    active_sessions.labels(phase=before).dec()
                 if body.to_phase in _TERMINAL_PHASES:
                     manifest_path = storage_root / "sessions" / session_id / "manifest.json"
                     try:

@@ -16,18 +16,11 @@ from core_errors import (
 )
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from opentelemetry import metrics
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 from storage_reposit import LocalEventLogReader, PhaseProjection
 
+from ._metrics_registry import harness_wakes_total
 from ._system_prompt_template import expand_system_prompt
-from ._version import MERIDIAND_VERSION
-
-_meter = metrics.get_meter("meridian.meridiand", MERIDIAND_VERSION)
-_wakes_counter = _meter.create_counter(
-    "meridian_harness_wakes_total",
-    description="Total number of harness wake invocations",
-)
 
 
 def _now() -> str:
@@ -152,7 +145,7 @@ def make_wake_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
     async def wake_session(session_id: str) -> JSONResponse:
         now = _now()
         tracer = get_tracer()
-        _wakes_counter.add(1, {"session.id": session_id})
+        harness_wakes_total.inc()
 
         # Pre-load manifest to extract traceparent so harness.wake continues
         # the session's trace instead of starting a new root span.

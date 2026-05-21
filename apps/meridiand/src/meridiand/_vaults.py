@@ -19,6 +19,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
+from ._metrics_registry import vault_accesses_total
 from ._vault_backend_encrypted_file import EncryptedFileVaultBackend
 from ._vault_backend_os_keychain import OsKeychainVaultBackend
 
@@ -731,6 +732,7 @@ def make_vaults_router(
                     "last_accessed_at": record["last_accessed_at"],
                     "requester_counts": record["requester_counts"],
                 }
+                vault_accesses_total.labels(vault_id=vault_id).inc()
 
             except (VaultNotFoundError, VaultSecretNotFoundError) as err:
                 record_error(span, err)

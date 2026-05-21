@@ -20,7 +20,7 @@ from opentelemetry import metrics
 from storage_event_log import EventLogWriter
 from storage_reposit import LocalEventLogReader, PhaseProjection
 
-from ._metrics_registry import session_duration_seconds, sessions_total
+from ._metrics_registry import active_sessions, session_duration_seconds, sessions_total
 from ._version import MERIDIAND_VERSION
 
 _meter = metrics.get_meter("meridian.meridiand", MERIDIAND_VERSION)
@@ -198,6 +198,9 @@ def make_session_cancel_router(
                     },
                 )
                 sessions_total.labels(phase="terminated").inc()
+                active_sessions.labels(phase="terminated").inc()
+                if before is not None:
+                    active_sessions.labels(phase=before).dec()
                 try:
                     manifest_content = json.loads(manifest_path.read_text())
                     created_at = manifest_content.get("created_at", "")
