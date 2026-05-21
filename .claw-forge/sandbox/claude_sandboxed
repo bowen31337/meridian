@@ -1,2 +1,2 @@
 #!/bin/bash
-exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/web-ui-live-can-system-session-viewer-connects-to-v1-se/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"
+exec /usr/bin/sandbox-exec -f "/Users/bowenli/development/meridian/.claw-forge/worktrees/observability-api-get-readyz-returns-200-when-storage-p/.claw-forge/sandbox/sandbox.sb" "/opt/homebrew/bin/claude" "$@"

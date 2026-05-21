@@ -79,6 +79,7 @@ from ._error_envelope_middleware import ErrorEnvelopeMiddleware
 from ._idempotency_middleware import IdempotencyKeyMiddleware
 from ._system_audit_middleware import SystemAuditMiddleware
 from ._healthz import make_healthz_router
+from ._readyz import ReadyzState, make_readyz_router
 from ._openapi_export import make_openapi_export_router
 from ._ui import make_ui_router
 from ._spawn import make_spawn_router
@@ -140,8 +141,13 @@ def create_app(
         },
     ) as span:
         try:
+            readyz_state = ReadyzState()
+
             @asynccontextmanager
             async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+                readyz_state.storage = True
+                readyz_state.providers = True
+
                 if plugin_loader is not None:
                     result = plugin_loader.load_all()
                     _LOG.info(
@@ -157,6 +163,7 @@ def create_app(
                             err.message,
                             extra={"plugin.name": err.plugin_name, "error.code": err.code},
                         )
+                readyz_state.plugins = True
 
                 compaction_task: asyncio.Task[None] | None = None
                 if (
@@ -261,6 +268,7 @@ def create_app(
             install_error_handler(app, HandlerOptions(audit_log=audit_log))
 
             app.include_router(make_healthz_router(audit_log=audit_log))
+            app.include_router(make_readyz_router(audit_log=audit_log, state=readyz_state))
             app.include_router(make_openapi_export_router(audit_log=audit_log))
             if serve_ui_enabled:
                 assert ui_dist_path is not None

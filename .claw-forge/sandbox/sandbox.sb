@@ -1,7 +1,7 @@
 (version 1)
 (allow default)
 (deny file-write* (subpath "/Users/bowenli/development/meridian"))
-(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/web-ui-live-can-system-session-viewer-connects-to-v1-se"))
+(allow file-write* (subpath "/Users/bowenli/development/meridian/.claw-forge/worktrees/observability-api-get-readyz-returns-200-when-storage-p"))
 (allow file-write* (subpath "/Users/bowenli/development/meridian/.git"))
 (deny file-write* (subpath "/Users/bowenli/.ssh"))
 (deny file-write* (subpath "/Users/bowenli/.aws"))
