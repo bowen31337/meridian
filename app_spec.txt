@@ -1,0 +1,1641 @@
+<!--
+  Meridian — Project Specification for claw-forge
+  ================================================
+  Source: docs/PRD.md v0.4, docs/ARCHITECTURE.md v0.4
+  Generated: 2026-05-15
+
+  Meridian is a self-hosted control plane for AI agents that runs equally as
+  a coding/dev agent and a personal-assistant gateway — one binary, one data
+  model, two front-doors.
+
+  Architectural sources synthesized:
+    - Anthropic Managed Agents beta SDK (Session/Harness/Sandbox primitives)
+    - OpenClaw (multi-channel Gateway surface)
+    - hermes-agent (Skill Forge, Model Router, Environment Manager, ACP)
+    - Meridian-original (capability-by-intersection, deterministic replay,
+      mid-run checkpoints, hooks-with-verdict, hybrid retrieval KB,
+      Agent/Session/Run budget aggregation)
+
+  Polyglot monorepo: Python 3.11+ daemon (apps/meridiand), TypeScript UI
+  (apps/meridian-ui), OpenAPI codegen bridging the two
+  (packages/sdk-py + packages/sdk-ts generated from packages/schemas).
+
+  Every feature in PRD §5 is load-bearing for the SOTA claim and ships in
+  one v1 release (PRD §8.1). The Infrastructure Track (v1.1 → v2) adds
+  backends behind the v1 plugin SDKs without changing the feature surface.
+
+  Each <feature> below = one agent task. Plugin-shaped features dispatch
+  in parallel; core-shaped features serialize via the single-flight rule.
+-->
+<project_specification mode="greenfield">
+  <project_name>meridian</project_name>
+
+  <overview>
+    Meridian is a self-hosted, local-first control plane for AI agents that fuses
+    Anthropic Managed Agents primitives (Session / Harness / Sandbox), OpenClaw's
+    multi-channel Gateway, and hermes-agent's Skill Forge + Model Router into a
+    single daemon. It is simultaneously a coding/dev agent (CLI + editor plugin)
+    and a personal-assistant gateway (Telegram / Slack / Discord / webhook), with
+    one durable Session reachable across every surface. SOTA differentiators:
+    API-compatible with Anthropic beta SDK, capability-by-intersection sandboxing,
+    deterministic replay with fixtures, mid-session checkpoints, self-improving
+    Skill Forge producing agentskills.io-compatible skills, two-mode Anthropic
+    provider (subscription OAuth + API key) for dev-loop economics, polyglot
+    Python daemon + TypeScript UI bridged by OpenAPI codegen.
+  </overview>
+
+  <target_audience>
+    P1 — Dev-loop user (coding agent): plans and executes work in a workspace,
+    cares about tool safety, deterministic replay, multi-agent supervision, branch
+    and PR workflows. Lives in CLI and editor plugin.
+
+    P2 — On-the-go user (PA gateway): reaches the agent on Telegram or Slack —
+    "what's my todo for today?", "summarize the project meeting". Cares about
+    memory continuity, channel availability, voice.
+
+    P3 — Platform/infra engineer: self-hosts Meridian on a team server. Cares
+    about deployment, sandbox isolation, secret management, multi-user separation,
+    audit logs, cost controls.
+
+    P4 — Tool/skill author: publishes reusable tools (MCP-compatible or HTTP) and
+    skills (agentskills.io-shaped). Cares about distribution, versioning,
+    capability declarations.
+  </target_audience>
+
+  <technology_stack>
+    <frontend>
+      <framework>React 18 with Vite (apps/meridian-ui)</framework>
+      <language>TypeScript strict + noUncheckedIndexedAccess</language>
+      <styling>Tailwind CSS</styling>
+      <state_management>TanStack Query + React hooks + Zustand for local state</state_management>
+      <routing>React Router v6</routing>
+      <streaming>EventSource (SSE) for /v1/sessions/{id}/events stream</streaming>
+      <lint_format>Biome (single Rust-backed tool replaces eslint + prettier)</lint_format>
+      <type_check>tsc --noEmit</type_check>
+      <sdk>@meridian/sdk-ts (generated from packages/schemas/openapi.yaml via openapi-typescript)</sdk>
+    </frontend>
+    <backend>
+      <framework>Python 3.11+ with FastAPI (apps/meridiand)</framework>
+      <validation>Pydantic v2 for all DTOs, config, and event payloads</validation>
+      <async>anyio (asyncio + trio compatibility); async-first throughout</async>
+      <orm>Raw SQL via the Repository pattern; SQL lives only in meridiand.storage</orm>
+      <auth_v1>Loopback + Unix domain socket; optional bearer token from config</auth_v1>
+      <auth_v1_1>OIDC backend lands in v1.1 for team-shared installs</auth_v1_1>
+      <tooling>uv is the only Python entrypoint — manages workspace, lockfiles, venvs, installs, scripts</tooling>
+      <lint>ruff (replaces black + isort + flake8) + pyright strict + import-linter for cross-package layering</lint>
+      <agent_sdks>claude-agent-sdk-python (scoped to providers/anthropic_oauth only per Rule L1); anthropic SDK (scoped to providers/anthropic_apikey)</agent_sdks>
+    </backend>
+    <database>
+      <primary_v1>SQLite WAL (single-daemon laptop install; zero external services)</primary_v1>
+      <primary_v1_2>PostgreSQL 14+ supported tier (Repository pattern means zero application change)</primary_v1_2>
+      <vectors_v1>sqlite-vec extension for vector embeddings</vectors_v1>
+      <vectors_v1_2>pgvector for KB and MemoryStore vectors</vectors_v1_2>
+      <full_text>SQLite FTS5 (BM25) for keyword retrieval</full_text>
+      <event_log>NDJSON files (append-only, fsync configurable) per Session under $STORAGE_ROOT/events/&lt;YYYY&gt;/&lt;MM&gt;/&lt;DD&gt;/&lt;session_id&gt;.ndjson</event_log>
+      <blobs>Local FS in v1; S3-compatible in v1.2</blobs>
+    </database>
+    <communication>
+      <api_style>REST mirroring Anthropic beta SDK paths under /v1, extensions under /v1/x</api_style>
+      <streaming>Server-Sent Events (SSE) for server-to-client streams; resumable via Last-Event-ID; HTTP POST for client tool-result submission</streaming>
+      <response_format>JSON with error envelope: { "error": { "code": "string", "message": "string", "details": {} } }</response_format>
+      <ids>ULIDs throughout with typed prefixes (agent_, sess_, thr_, msg_, tc_, skill_, env_, mem_, vault_, usr_, chan_, file_, wh_)</ids>
+      <content_blocks>Match Anthropic wire format: text / tool_use / tool_result / image / thinking</content_blocks>
+    </communication>
+    <infrastructure>
+      <process_model>Single daemon (meridiand) hosts HTTP API, Session Service, Harness Pool, Gateway, Event Bus, Model Router, Environment Manager, Vault, KB, observability exporters</process_model>
+      <skill_forge>Separate background worker process with its own rate-limited model budget</skill_forge>
+      <workers>Sandboxed workers spawn per tool/hook call; local-backend workers are warm-pooled subprocesses; container backends call out to Docker / Modal / Daytona / Vercel / Singularity / SSH</workers>
+      <observability>OpenTelemetry traces (one per session); Prometheus metrics on /metrics; JSON structured logs to stderr</observability>
+      <config>Single YAML config at ~/.meridian/config.yml with secret_ref://vault/{id}/{key} indirection; hot-reload via SIGHUP and POST /v1/x/config/reload (validate-then-atomic-swap)</config>
+      <codegen>FastAPI exports packages/schemas/openapi.yaml; openapi-typescript generates packages/sdk-ts; datamodel-code-generator generates packages/sdk-py; CI fails on drift</codegen>
+      <ci_lint>uv run ruff + pyright + lint-imports (Python); pnpm biome + tsc --noEmit (TypeScript)</ci_lint>
+    </infrastructure>
+  </technology_stack>
+
+  <prerequisites>
+    - Python 3.11+ with uv installed (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
+    - Node.js 20+ and pnpm 9+ for the UI workspace
+    - SQLite 3.38+ with FTS5 and the sqlite-vec extension available at runtime
+    - Docker Desktop (for the docker environment backend; optional for laptop dev)
+    - Optional: Claude Code CLI installed and `claude login` completed for the anthropic-oauth provider
+    - Optional: API keys for Anthropic / OpenAI / OpenRouter stored in OS keychain (managed by Meridian Vault on first use)
+    - Optional: Ollama running locally on :11434 for the local provider path
+    - Environment variables: MERIDIAN_CONFIG (override config path), MERIDIAN_WORKSPACE (default workspace root); documented in .env.example
+    - OS Keychain support (macOS Keychain / Windows Credential Manager / libsecret on Linux) for the default Vault backend
+  </prerequisites>
+
+  <core_features>
+
+    <category name="Foundation &amp; Repository Scaffolding">
+      <feature index="1" shape="core" touches_files="pyproject.toml,uv.lock,apps/meridiand/pyproject.toml,apps/meridian-cli/pyproject.toml,packages/sdk-py/pyproject.toml,packages/sdk-channel/pyproject.toml,packages/sdk-environment/pyproject.toml,packages/sdk-provider/pyproject.toml,packages/sdk-tool/pyproject.toml">
+        <description>System initializes uv workspace at repo root with apps/meridiand, apps/meridian-cli, and packages/* as workspace members (Python 3.11+); uv.lock committed at repo root; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="2" shape="core" touches_files="package.json,pnpm-workspace.yaml,pnpm-lock.yaml,apps/meridian-ui/package.json,packages/sdk-ts/package.json,packages/sdk-widget/package.json">
+        <description>System initializes pnpm workspace with apps/meridian-ui and packages/sdk-ts + packages/sdk-widget as workspace members; pnpm-lock.yaml committed at repo root; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="3" shape="core" touches_files="Makefile,scripts/codegen.sh,scripts/lint.sh">
+        <description>System Makefile at repo root wraps cross-language tasks: make dev runs daemon + UI together; make ci runs codegen + lint + test; make codegen, make lint, make test available individually; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="4" shape="core" touches_files="biome.json">
+        <description>System Biome config at repo root replaces eslint + prettier — single tool for TS lint and format with one command (biome check --write); CI fails on biome errors; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="5" shape="core" touches_files="apps/meridiand/pyproject.toml,ruff.toml">
+        <description>System Ruff config enforces formatting, isort import ordering, and Python lint rules (replaces black + isort + flake8); CI fails on ruff errors; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="6" shape="core" touches_files="apps/meridiand/pyproject.toml,pyrightconfig.json">
+        <description>System Pyright strict mode CI config requires type annotations on every public symbol; CI fails on any pyright error; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="7" shape="core" touches_files="importlinter.ini" depends_on="1">
+        <description>System Import-linter config defines cross-package layering rules; CI rejects PRs that violate package boundaries with an error message naming the offending import</description>
+      </feature>
+      <feature index="8" shape="core" touches_files="importlinter.ini" depends_on="7">
+        <description>System Lint Rule L1 — claude_agent_sdk imports allowed only inside apps/meridiand/src/meridiand/providers/anthropic_oauth/** per ARCHITECTURE §13.4 + §13.5; CI emits error message pointing at the rule</description>
+      </feature>
+      <feature index="9" shape="core" touches_files="importlinter.ini" depends_on="7">
+        <description>System Lint Rule L2 — provider SDKs (anthropic, openai, openrouter, ollama) each scoped to their own providers/&lt;name&gt;/** subtree; CI emits error message naming the offending import</description>
+      </feature>
+      <feature index="10" shape="core" touches_files="importlinter.ini" depends_on="7">
+        <description>System Lint Rule L3 — sqlite3, aiosqlite, psycopg, asyncpg, sqlalchemy imports allowed only inside meridiand/storage/** (Repository pattern enforcement); CI emits error message naming the offending import</description>
+      </feature>
+      <feature index="11" shape="core" touches_files=".github/workflows/ci.yml">
+        <description>System CI workflow runs uv lock check, ruff, pyright, lint-imports, biome check, tsc --noEmit, codegen-drift check, pytest, vitest on every PR; CI fails with error message naming the failed stage</description>
+      </feature>
+      <feature index="12" shape="core" touches_files=".pre-commit-config.yaml">
+        <description>System pre-commit hooks run ruff format + lint, biome check; pre-commit rejects manual edits to generated SDK files (packages/sdk-ts/src, packages/sdk-py/src) with error message pointing at codegen pipeline</description>
+      </feature>
+      <feature index="13" shape="core" touches_files="apps/meridiand/src/meridiand/__init__.py,apps/meridiand/src/meridiand/__main__.py">
+        <description>System daemon entrypoint at python -m meridiand parses YAML config, initializes services, binds to socket, runs uvicorn ASGI server; logs "meridiand ready" on successful boot; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="14" shape="core" touches_files="apps/meridiand/src/meridiand/ids.py">
+        <description>System ULID generator produces monotonic, URL-safe IDs with typed prefixes (agent_, sess_, thr_, msg_, tc_, skill_, skillver_, env_, mem_, vault_, usr_, chan_, file_, wh_); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="15" shape="core" touches_files="apps/meridiand/src/meridiand/errors.py">
+        <description>System MeridianError base class with code: str field; subclasses for capability_denied, schema_invalid, vault_unauthorized, budget_exceeded, divergence, plus a global FastAPI exception handler emitting the error envelope; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="YAML Configuration &amp; Hot Reload">
+      <feature index="16" shape="plugin" plugin="config" depends_on="13">
+        <description>System Pydantic v2 MeridianConfig model declares top-level version: 1 field; daemon refuses to start if version mismatches binary; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="17" shape="plugin" plugin="config" depends_on="16">
+        <description>System Config loader resolves location by first-match — $MERIDIAN_CONFIG, then ~/.meridian/config.yml, then the system-wide path; daemon emits OpenTelemetry span and structured log event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="18" shape="plugin" plugin="config" depends_on="16">
+        <description>System Config validates providers list with kind, optional mode, optional base_url, optional auth (plaintext or secret_ref://); rejects unknown kinds at load; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="19" shape="plugin" plugin="config" depends_on="16">
+        <description>System Config validates routing.default.rules with when-clause shape (skill_id, estimated_input_tokens.gt/lte, metadata_match, role) and routing.default.fallbacks list; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="20" shape="plugin" plugin="config" depends_on="16">
+        <description>System Config validates vaults, daemon (bind, workspace_root, log_level), and storage (database, event_log, blob_store) sections; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="21" shape="plugin" plugin="config" depends_on="16">
+        <description>System secret_ref://vault/{vault_id}/{key} resolver is lazy — secrets fetched at first use, not at config load, so rotation in Vault takes effect without restart; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="22" shape="plugin" plugin="config" depends_on="18">
+        <description>System Plaintext credentials (auth: sk-ant-...) are accepted but the daemon logs a config.plaintext_secret warning per occurrence on every startup; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="23" shape="plugin" plugin="config" depends_on="18">
+        <description>API POST /v1/x/config/reload triggers validate-then-atomic-swap: parse new config, construct new provider instances, swap registry pointer atomically, drain old instances, close them; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="24" shape="plugin" plugin="config" depends_on="23">
+        <description>System SIGHUP signal handler invokes the same validate-then-atomic-swap reload path as POST /v1/x/config/reload; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="25" shape="plugin" plugin="config" depends_on="23">
+        <description>System Reload failure (invalid new config) keeps the old config in effect, logs structured error, returns 422 with details — no service interruption</description>
+      </feature>
+      <feature index="26" shape="plugin" plugin="config" depends_on="16">
+        <description>System command meridianconfig schema CLI command emits the MeridianConfig JSON Schema to stdout for editor autocomplete (drop into .vscode/settings.json or YAML language server); on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="27" shape="plugin" plugin="config" depends_on="16">
+        <description>System command meridian config migrate rewrites the YAML config file from version N to version N+1 (forward-only); each version bump ships an idempotent upgrade script in apps/meridiand/src/meridiand/config/upgrades/; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="28" shape="plugin" plugin="config" depends_on="16">
+        <description>System command meridianconfig validate CLI command parses ~/.meridian/config.yml and prints either OK or a structured list of validation errors; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Storage &amp; Repository Pattern">
+      <feature index="29" shape="core" touches_files="apps/meridiand/src/meridiand/storage/__init__.py,apps/meridiand/src/meridiand/storage/repository.py">
+        <description>System Repository abstract base classes define one interface per resource (Agent, Session, Thread, Message, ToolCall, Skill, Environment, MemoryStore, Vault, UserProfile, Channel, Webhook); SQLite and Postgres implementations share migration SQL in lowest-common dialect; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="30" shape="core" touches_files="apps/meridiand/src/meridiand/storage/sqlite.py" depends_on="29">
+        <description>System SQLite WAL backend implementation opens database with PRAGMA journal_mode=WAL, busy_timeout=5000, synchronous=NORMAL, foreign_keys=ON; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="31" shape="core" touches_files="db/migrations/0001_init.sql" depends_on="30">
+        <description>System Migration 0001 creates agents, agent_versions, sessions, threads, messages, tool_calls, skills, skill_versions, environments, memory_stores, vaults, user_profiles, channels, webhooks tables; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="32" shape="core" touches_files="db/migrations/0002_projections.sql" depends_on="31">
+        <description>System Migration 0002 creates projection tables: sessions(phase, last_event_seq, ...), tool_calls projection, usage_rollups(session_id, hour, input_tokens, output_tokens, cache_tokens, dollars), message_index; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="33" shape="core" touches_files="db/migrations/0003_audit.sql" depends_on="31">
+        <description>System Migration 0003 creates append-only audit table for capability decisions, vault accesses, channel pairings, skill promotions, environment changes; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="34" shape="core" touches_files="apps/meridiand/src/meridiand/storage/migrations.py" depends_on="30">
+        <description>System Migration runner reads db/migrations/*.sql in order, applies forward-only; daemon refuses to start if schema version on disk exceeds binary's supported version; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="35" shape="core" touches_files="apps/meridiand/src/meridiand/storage/sqlite_vec.py" depends_on="30">
+        <description>System sqlite-vec extension loaded at connection time; vector columns created via vec0 virtual tables; cosine-distance ANN queries via vec_search(); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="36" shape="core" touches_files="apps/meridiand/src/meridiand/storage/event_log.py">
+        <description>System NDJSON event log writer appends one JSON line per event to $STORAGE_ROOT/events/&lt;YYYY&gt;/&lt;MM&gt;/&lt;DD&gt;/&lt;session_id&gt;.ndjson with O_APPEND; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="37" shape="core" touches_files="apps/meridiand/src/meridiand/storage/event_log.py" depends_on="36">
+        <description>System fsync policy configurable: every N events (default 100) or T milliseconds (default 100ms), whichever comes first; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="38" shape="core" touches_files="apps/meridiand/src/meridiand/storage/event_log.py" depends_on="36">
+        <description>System Event log reader supports tail (readEvents(since: EventSeq) returns AsyncIterable) and full replay (cat-equivalent); on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="39" shape="core" touches_files="apps/meridiand/src/meridiand/storage/projections.py" depends_on="36">
+        <description>System Background indexer reads new events from event log and updates SQLite projection rows; projections trail the log by milliseconds and never contradict it; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="40" shape="core" touches_files="apps/meridiand/src/meridiand/storage/blobs.py">
+        <description>System Blob store interface with local-FS implementation: put(key, bytes), get(key), delete(key); used for Files, attachments, checkpoint snapshots, fixtures; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="HTTP API &amp; Auth">
+      <feature index="41" shape="core" touches_files="apps/meridiand/src/meridiand/http/app.py" depends_on="13">
+        <description>System FastAPI application factory configures /v1 base path with /v1/x for Meridian extensions; CORS configurable; gzip middleware enabled; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="42" shape="core" touches_files="apps/meridiand/src/meridiand/http/middleware/error_envelope.py" depends_on="15,41">
+        <description>System Error-envelope middleware catches uncaught exceptions and emits { "error": { "code", "message", "details": {} } } with appropriate HTTP status; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="43" shape="core" touches_files="apps/meridiand/src/meridiand/http/middleware/auth.py" depends_on="41">
+        <description>System Auth middleware enforces loopback-only by default; optional bearer-token check when daemon.auth.bearer_token is configured; UDS connections bypass bearer check; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="44" shape="core" touches_files="apps/meridiand/src/meridiand/http/middleware/idempotency.py" depends_on="41">
+        <description>System Idempotency-Key middleware on POST endpoints stores response body for 24h keyed by header; replays cached response on duplicate key; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="45" shape="core" touches_files="apps/meridiand/src/meridiand/http/middleware/pagination.py" depends_on="41">
+        <description>System Cursor pagination middleware encodes (created_at, id) as opaque base64 cursor; default page size 50, max 200; emits Link headers per RFC 8288; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="46" shape="core" touches_files="apps/meridiand/src/meridiand/http/middleware/openapi_export.py" depends_on="41">
+        <description>System OpenAPI export endpoint dumps the FastAPI app's OpenAPI spec to packages/schemas/openapi.yaml; called via make codegen on every PR; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="47" shape="core" touches_files="scripts/codegen.sh" depends_on="46">
+        <description>System Codegen pipeline runs openapi-typescript to generate packages/sdk-ts/src and datamodel-code-generator to generate packages/sdk-py/src; CI fails if committed SDKs are out of date; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="48" shape="core" touches_files="apps/meridiand/src/meridiand/http/server.py" depends_on="41">
+        <description>System Daemon binds to Unix domain socket at ~/.meridian/meridiand.sock by default; optional loopback :8888 binding via config; TLS proxy assumed downstream for non-loopback; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="49" shape="core" touches_files="apps/meridiand/src/meridiand/http/middleware/audit.py" depends_on="42">
+        <description>System Audit-log middleware emits append-only audit.ndjson entries for capability decisions, vault accesses, channel pairings, skill promotions, environment changes; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="50" shape="core" touches_files="apps/meridiand/src/meridiand/http/middleware/audit.py" depends_on="49">
+        <description>System Ed25519 audit log signing optional in v1 (mandatory in v1.1 multi-user installs per PRD §6.3); each line signed with daemon private key for tamper-evidence; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Agents Resource">
+      <feature index="51" shape="plugin" plugin="agents-resource" touches_files="apps/meridiand/src/meridiand/http/routes/agents.py,apps/meridiand/src/meridiand/agents/service.py" depends_on="29,41">
+        <description>API POST /v1/agents creates an Agent and its first AgentVersionRecord; body becomes version body; returns 201 with both records</description>
+      </feature>
+      <feature index="52" shape="plugin" plugin="agents-resource" touches_files="apps/meridiand/src/meridiand/http/routes/agents.py" depends_on="51">
+        <description>API GET /v1/agents/{id} returns current Agent view including pinned current_version pointer; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="53" shape="plugin" plugin="agents-resource" touches_files="apps/meridiand/src/meridiand/http/routes/agents.py" depends_on="51">
+        <description>API GET /v1/agents lists Agents with cursor pagination; filters by name prefix, by created_at range (returns 200 with a paginated result page)</description>
+      </feature>
+      <feature index="54" shape="plugin" plugin="agents-resource" touches_files="apps/meridiand/src/meridiand/http/routes/agents.py" depends_on="51">
+        <description>API GET /v1/agents/{id}/versions lists every AgentVersionRecord for an Agent, newest first; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="55" shape="plugin" plugin="agents-resource" touches_files="apps/meridiand/src/meridiand/http/routes/agents.py" depends_on="51">
+        <description>API GET /v1/agents/{id}/versions/{ver} returns a specific AgentVersionRecord by content hash; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="56" shape="plugin" plugin="agents-resource" touches_files="apps/meridiand/src/meridiand/agents/service.py" depends_on="51">
+        <description>API POST /v1/agents/{id}/versions content-addresses the new version (SHA-256 of canonical JSON body, prefixed agentver_); returns existing version if hash matches; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="57" shape="plugin" plugin="agents-resource" touches_files="apps/meridiand/src/meridiand/agents/service.py" depends_on="56">
+        <description>System AgentVersionRecord carries instructions, model_routing, skills[], tools[], default_environment_id, capabilities[], hooks[], budgets, memory_store_refs[], metadata; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="58" shape="plugin" plugin="agents-resource" touches_files="apps/meridiand/src/meridiand/http/routes/agents.py" depends_on="51">
+        <description>API DELETE /v1/agents/{id} soft-deletes the Agent (sets deleted_at); existing Sessions retain their pinned version and continue to function; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="59" shape="plugin" plugin="agents-resource" touches_files="apps/meridiand/src/meridiand/agents/service.py" depends_on="57">
+        <description>System Agent body schema validated via Pydantic v2: instructions length cap, model_routing.rules well-formed, capabilities follow §6 grammar, tools[] reference declared tool names; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Sessions &amp; Event Log">
+      <feature index="60" shape="plugin" plugin="sessions-resource" touches_files="apps/meridiand/src/meridiand/sessions/service.py,apps/meridiand/src/meridiand/http/routes/sessions.py" depends_on="29,36,57">
+        <description>API POST /v1/sessions creates a Session, pins to agent_version, creates initial Thread, writes session.created event, returns Session record; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="61" shape="plugin" plugin="sessions-resource" touches_files="apps/meridiand/src/meridiand/http/routes/sessions.py" depends_on="60">
+        <description>API GET /v1/sessions/{id} returns Session with current phase projection (idle / waiting_for_model / waiting_for_tool / waiting_for_user / paused / terminated); on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="62" shape="plugin" plugin="sessions-resource" touches_files="apps/meridiand/src/meridiand/http/routes/sessions.py" depends_on="60">
+        <description>API GET /v1/sessions lists Sessions with cursor pagination; filters by phase, agent_id, user_profile_id, channel_id, parent_session_id, created_at range; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="63" shape="plugin" plugin="session-events" touches_files="apps/meridiand/src/meridiand/sessions/events.py" depends_on="36">
+        <description>System SessionEvent type union covers session.created, session.phase_change, message.added, message.delta, tool_call.requested/dispatched/result/error, model_call.started/completed, hook.invoked/verdict, usage.delta, budget.warning/exceeded, checkpoint.created, child_session.spawned/completed, channel.inbound/outbound, acp.outbound/inbound, memory.read/write, error; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="64" shape="plugin" plugin="sessions-resource" touches_files="apps/meridiand/src/meridiand/http/routes/sessions.py" depends_on="63">
+        <description>API GET /v1/sessions/{id}/events returns the full event log as JSON array or NDJSON streamed download; supports ?since=&lt;seq&gt; and ?type=&lt;type1,type2&gt; filters; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="65" shape="plugin" plugin="sessions-resource" touches_files="apps/meridiand/src/meridiand/streaming/sse.py,apps/meridiand/src/meridiand/http/routes/sessions.py" depends_on="64">
+        <description>API GET /v1/sessions/{id}/events?stream=true emits SSE with event: &lt;type&gt;, id: &lt;seq&gt;, data: &lt;json&gt;; resumable via Last-Event-ID header per RFC; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="66" shape="plugin" plugin="sessions-resource" touches_files="apps/meridiand/src/meridiand/streaming/sse.py" depends_on="65">
+        <description>System SSE backpressure: bounded in-process channel of 1024 events per subscriber; overflow drops live subscriber with subscriber_lagged event; durable log is the truth, harness never blocks; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="67" shape="plugin" plugin="sessions-resource" touches_files="apps/meridiand/src/meridiand/http/routes/sessions.py" depends_on="60">
+        <description>API POST /v1/sessions/{id}/messages appends a user or system message and writes message.added event; rejects assistant/tool roles (harness writes those); on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="68" shape="plugin" plugin="sessions-resource" touches_files="apps/meridiand/src/meridiand/http/routes/sessions.py" depends_on="60">
+        <description>API GET /v1/sessions/{id}/messages lists messages with cursor pagination; filterable by thread_id and role; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="69" shape="plugin" plugin="sessions-resource" touches_files="apps/meridiand/src/meridiand/http/routes/sessions.py" depends_on="60">
+        <description>API POST /v1/sessions/{id}/cancel transitions phase to terminated with reason=cancelled and propagates cancellation to active tool calls and child sessions; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="70" shape="plugin" plugin="sessions-resource" touches_files="apps/meridiand/src/meridiand/http/routes/sessions.py" depends_on="60">
+        <description>API POST /v1/sessions/{id}/submit_tool_results accepts tool_results for a session in waiting_for_tool phase and triggers harness wake; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="71" shape="plugin" plugin="sessions-resource" touches_files="apps/meridiand/src/meridiand/http/routes/sessions.py" depends_on="60">
+        <description>API POST /v1/sessions/{id}/wake explicit harness wake (usually implicit on inbound events); returns 202 with harness instance id</description>
+      </feature>
+      <feature index="72" shape="plugin" plugin="sessions-resource" touches_files="apps/meridiand/src/meridiand/sessions/threads.py" depends_on="60">
+        <description>API POST /v1/sessions/{id}/threads creates a forked Thread at a specific event seq; new Thread carries branch_of_event_seq pointer and optional title; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="73" shape="plugin" plugin="sessions-resource" touches_files="apps/meridiand/src/meridiand/sessions/threads.py" depends_on="60">
+        <description>API GET /v1/sessions/{id}/threads lists Threads for a Session; each Thread carries title and branch_of_event_seq; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="74" shape="plugin" plugin="phase-projection" touches_files="apps/meridiand/src/meridiand/sessions/phase.py" depends_on="63">
+        <description>System Phase projection function derives current phase from event log tail; transitions only via harness; every transition writes session.phase_change with before/after, timestamp, reason; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="75" shape="plugin" plugin="sessions-resource" touches_files="apps/meridiand/src/meridiand/sessions/phase.py" depends_on="74">
+        <description>System Property-test suite asserts every (phase, event_type) pair yields a deterministic next-phase derivation; terminated is absorbing and final; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Harness &amp; Run Loop">
+      <feature index="76" shape="plugin" plugin="harness-core" touches_files="apps/meridiand/src/meridiand/harness/harness.py" depends_on="74">
+        <description>System Stateless Harness.wake(session_id) loads Session, AgentVersion, active skills, tails event log to determine current phase, rebuilds model context from messages in the most recent Thread; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="77" shape="plugin" plugin="harness-core" touches_files="apps/meridiand/src/meridiand/harness/harness.py" depends_on="76">
+        <description>System Harness run loop iterates while phase is not in {idle, paused, terminated}; releases session on idle/paused/terminated so any harness can re-wake; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="78" shape="plugin" plugin="harness-core" touches_files="apps/meridiand/src/meridiand/harness/harness.py" depends_on="77">
+        <description>System In waiting_for_tool branch: dispatch pending tool calls via Sandbox + Environment, append tool_call.result events, transition to waiting_for_model; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="79" shape="plugin" plugin="harness-core" touches_files="apps/meridiand/src/meridiand/harness/harness.py" depends_on="77">
+        <description>System In waiting_for_model branch: run pre_message hooks, Model Router selects provider/model, stream completion, emit message.delta events per chunk; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="80" shape="plugin" plugin="harness-core" touches_files="apps/meridiand/src/meridiand/harness/harness.py" depends_on="79">
+        <description>System On stop_reason end_turn: append final message, transition phase to idle, run post_message hooks; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="81" shape="plugin" plugin="harness-core" touches_files="apps/meridiand/src/meridiand/harness/harness.py" depends_on="79">
+        <description>System On stop_reason tool_use: schema-validate args per tool, run capability intersection check, run pre_tool_call hooks, write tool_call.requested events, transition to waiting_for_tool; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="82" shape="plugin" plugin="harness-core" touches_files="apps/meridiand/src/meridiand/harness/harness.py" depends_on="79">
+        <description>System On stop_reason max_tokens: emit partial message, loop if continue allowed by policy, else transition to waiting_for_user; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="83" shape="plugin" plugin="harness-core" touches_files="apps/meridiand/src/meridiand/harness/harness.py" depends_on="79">
+        <description>System On model call error: run on_error hooks; transition to terminated unless hook verdict marks recoverable; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="84" shape="plugin" plugin="harness-core" touches_files="apps/meridiand/src/meridiand/harness/harness.py" depends_on="77">
+        <description>System Per-iteration budget check: hard breach transitions phase to terminated with reason=budget_exceeded; soft breach emits budget.warning event and surfaces approval prompt via waiting_for_user; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="85" shape="plugin" plugin="harness-core" touches_files="apps/meridiand/src/meridiand/harness/pool.py" depends_on="77">
+        <description>System Harness Pool manages in-process harness workers; assignments routed by session_id hash; on SIGKILL-induced restart, all active sessions auto-resume via wake(); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="86" shape="plugin" plugin="harness-core" touches_files="apps/meridiand/src/meridiand/harness/pool.py" depends_on="85">
+        <description>System Harness wake latency p99 &lt; 100ms target (no model call); measured via OTel span harness.wake; metric meridian_harness_wakes_total; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Sandbox &amp; Tool Dispatch">
+      <feature index="87" shape="plugin" plugin="sandbox-dispatch" touches_files="apps/meridiand/src/meridiand/sandbox/dispatch.py">
+        <description>System Sandbox.execute(name, input, context) is the single dispatch surface for every executable action; harness does not branch on backend; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="88" shape="plugin" plugin="sandbox-dispatch" touches_files="apps/meridiand/src/meridiand/sandbox/dispatch.py" depends_on="87">
+        <description>System ToolHandler union discriminates by kind: in_process (Python module), subprocess (any-language binary), mcp (MCP server URL), http (POST endpoint), container (Environment-scoped image entrypoint); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="89" shape="plugin" plugin="sandbox-dispatch" touches_files="apps/meridiand/src/meridiand/sandbox/validation.py" depends_on="87">
+        <description>System Pre-dispatch JSON Schema validation on tool input args; schema failure returns synthetic tool_result with is_error: true, NOT an orchestrator crash; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="90" shape="plugin" plugin="sandbox-dispatch" touches_files="apps/meridiand/src/meridiand/sandbox/validation.py" depends_on="87">
+        <description>System Post-dispatch JSON Schema validation on tool output; output schema failure returns synthetic tool_result with is_error: true and the offending field path; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="91" shape="plugin" plugin="sandbox-dispatch" touches_files="apps/meridiand/src/meridiand/sandbox/dispatch.py" depends_on="88">
+        <description>System Subprocess/container protocol: stdin receives { args, context: { workspace, session_id, thread_id, scratch_dir } }; stdout returns { result } or { error: { code, message } }; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="92" shape="plugin" plugin="sandbox-dispatch" touches_files="apps/meridiand/src/meridiand/sandbox/dispatch.py" depends_on="91">
+        <description>System Subprocess stderr captured, truncated to 64KB, attached to tool_call.result event for debugging; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="93" shape="plugin" plugin="sandbox-dispatch" touches_files="apps/meridiand/src/meridiand/sandbox/dispatch.py" depends_on="91">
+        <description>System Subprocess timeout enforcement: SIGTERM at configured timeout, SIGKILL after 2s grace period; tool_call.error event records timeout reason; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="94" shape="plugin" plugin="sandbox-dispatch" touches_files="apps/meridiand/src/meridiand/sandbox/dispatch.py" depends_on="87">
+        <description>System Tool definitions carry: name, description, input JSON schema, output JSON schema, declared capabilities, requires_env (e.g. requires: env=docker), timeout_ms, memory_cap_mb; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="95" shape="plugin" plugin="sandbox-dispatch" touches_files="apps/meridiand/src/meridiand/sandbox/mcp_proxy.py" depends_on="88">
+        <description>System MCP server integration: Sandbox proxies tool calls into MCP server over stdio or HTTP transport; tool list discovered via MCP tools/list; results normalized to Sandbox return shape; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="96" shape="plugin" plugin="sandbox-dispatch" touches_files="apps/meridiand/src/meridiand/sandbox/dispatch.py" depends_on="89">
+        <description>System Sandbox dispatch overhead targets: in_process p99 &lt; 20ms, subprocess p99 &lt; 200ms, container backend (warm pool) p99 &lt; 500ms — measured via OTel tool.call spans; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="97" shape="plugin" plugin="sandbox-dispatch" touches_files="apps/meridiand/src/meridiand/sandbox/worker_pool.py" depends_on="91">
+        <description>System Warm subprocess worker pool for local backend; configurable pool size; idle workers reclaimed after timeout; reused workers receive fresh scratch_dir per call; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Built-in Tools">
+      <feature index="98" shape="plugin" plugin="builtin-tools/exec" depends_on="87">
+        <description>System exec built-in tool runs shell command in Environment with cwd=workspace; declares exec.shell capability requirement; returns stdout, stderr, exit_code; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="99" shape="plugin" plugin="builtin-tools/read" depends_on="87">
+        <description>System read built-in tool reads file from workspace; declares fs.read[glob] capability; returns content as text or base64; path canonicalized against $WORKSPACE jail; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="100" shape="plugin" plugin="builtin-tools/write" depends_on="87">
+        <description>System write built-in tool writes file to workspace; declares fs.write[glob] capability; supports create or overwrite modes; rejects symlinks pointing outside jail; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="101" shape="plugin" plugin="builtin-tools/grep" depends_on="87">
+        <description>System grep built-in tool runs ripgrep against workspace; declares fs.read[glob] capability; returns matches with file path, line number, and surrounding context; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="102" shape="plugin" plugin="builtin-tools/kb_search" depends_on="87">
+        <description>System kb_search built-in tool queries the Knowledge Base hybrid index (BM25 + vector + glob) with scope filter; declares kb.read[scope] capability; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="103" shape="plugin" plugin="builtin-tools/spawn" depends_on="87">
+        <description>System spawn built-in tool launches a child Session with declared capability subset; declares agent.spawn[agent_id] capability; returns child_session_id immediately; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="104" shape="plugin" plugin="builtin-tools/parallel_runs" depends_on="103">
+        <description>System parallel_runs built-in tool spawns N children in parallel and awaits all; aggregates child results; parent's hard budget overflow cancels all descendants synchronously; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="105" shape="plugin" plugin="builtin-tools/canvas" depends_on="87">
+        <description>System canvas built-in tool emits content_block.canvas_op messages that render in the Live Canvas; supports text, markdown, simple form, code block, image embed, table, progress bar widgets; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Environment Backends">
+      <feature index="106" shape="plugin" plugin="env-manager" touches_files="apps/meridiand/src/meridiand/environments/manager.py,apps/meridiand/src/meridiand/http/routes/environments.py" depends_on="29,41">
+        <description>System Environment Manager exposes CRUD over /v1/environments; each Environment declares backend, image/template, mounted workspace path, env_passthrough[], network_policy, caps_envelope, default_timeout_ms; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="107" shape="plugin" plugin="env-local" depends_on="106">
+        <description>System local backend implementation: spawns subprocess in a scratch directory rooted at workspace_path; warm subprocess pool; default ships in v1; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="108" shape="plugin" plugin="env-docker" depends_on="106">
+        <description>System docker backend implementation: provisions on demand at tool-call time per Anthropic pattern; mounts $WORKSPACE; passes env_passthrough vars; enforces caps_envelope via cgroup limits; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="109" shape="plugin" plugin="env-ssh" depends_on="106">
+        <description>System ssh backend implementation: opens SSH session to remote host, syncs scratch dir via rsync, runs entrypoint, captures stdout/stderr/exit; host key verification mandatory; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="110" shape="plugin" plugin="env-mcp" depends_on="106">
+        <description>System mcp backend implementation: connects to MCP server via stdio or SSE transport, proxies tool calls per MCP protocol, normalizes returns to Sandbox shape; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="111" shape="plugin" plugin="env-http" depends_on="106">
+        <description>System http backend implementation: POSTs tool input to configured URL with auth from Vault; expects JSON response matching the Sandbox return shape; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="112" shape="plugin" plugin="env-manager" touches_files="apps/meridiand/src/meridiand/environments/lifecycle.py" depends_on="106">
+        <description>System Environment lifecycle: provision on first use, warm pool, reclaim idle workers after configurable TTL; container/serverless backends provision on demand at tool-call time; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="113" shape="plugin" plugin="env-manager" touches_files="tests/environments/conformance.py" depends_on="106">
+        <description>System Environment conformance suite: schema-valid round-trip for reference inputs, capability enforcement, timeout behavior, scratch directory isolation, env-var scoping, network policy honored; every backend must pass; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="114" shape="plugin" plugin="env-manager" touches_files="apps/meridiand/src/meridiand/environments/manager.py" depends_on="106">
+        <description>System switches environments per-tool via configuration change, not code change; Sandbox dispatch surface is identical across backends (Principle 4 — Sandbox is one shape); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="261" shape="plugin" plugin="env-manager" touches_files="apps/meridiand/src/meridiand/http/routes/environments.py" depends_on="106">
+        <description>API GET /v1/environments/{id} returns a single Environment with backend, image, network policy, caps_envelope (returns 200 with record, 404 if not found)</description>
+      </feature>
+      <feature index="262" shape="plugin" plugin="env-manager" touches_files="apps/meridiand/src/meridiand/http/routes/environments.py" depends_on="106">
+        <description>API PATCH /v1/environments/{id} updates Environment config fields (returns 200 with updated record, 409 if active Sessions still reference the old config)</description>
+      </feature>
+      <feature index="263" shape="plugin" plugin="env-manager" touches_files="apps/meridiand/src/meridiand/http/routes/environments.py" depends_on="106">
+        <description>API DELETE /v1/environments/{id} removes an Environment (returns 204, 409 if any Agent's default_environment_id still references it)</description>
+      </feature>
+    </category>
+
+    <category name="Capabilities &amp; Security">
+      <feature index="115" shape="plugin" plugin="capability-grammar" touches_files="apps/meridiand/src/meridiand/capabilities/grammar.py">
+        <description>System Capability grammar: dotted-name strings with optional parameters — fs.read[glob], fs.write[glob], fs.delete[glob], net.fetch[host], net.listen, exec.shell, exec.sudo, exec.pty, kb.read[scope], kb.write[scope], memory.read[mem_id], memory.write[mem_id], agent.spawn[agent_id], agent.cancel, secret.read[vault/name], hook.invoke[name], channel.send[chan_id], channel.receive[chan_id], acp.outbound[target], acp.inbound[target]; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="116" shape="plugin" plugin="capability-grammar" touches_files="apps/meridiand/src/meridiand/capabilities/intersection.py" depends_on="115">
+        <description>System authorize(agent_caps, required, args) verifies the intersection: each required cap must be satisfied by at least one agent grant, with glob-parameterized grants narrowing the match scope; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="117" shape="plugin" plugin="capability-grammar" touches_files="apps/meridiand/src/meridiand/capabilities/intersection.py" depends_on="116">
+        <description>System Capability denial produces synthetic tool_result with is_error: true and code=capability_denied back to the model; never silent failure, never orchestrator crash; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="118" shape="plugin" plugin="capability-grammar" touches_files="apps/meridiand/src/meridiand/capabilities/intersection.py" depends_on="116">
+        <description>System Sub-session capability subsetting: child Session caps are a declared subset of parent; passing a cap the parent does not hold fails the spawn (no upward escalation, ever); on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="119" shape="plugin" plugin="capability-grammar" touches_files="apps/meridiand/src/meridiand/capabilities/fs_jail.py" depends_on="115">
+        <description>System Filesystem jail: fs.* capabilities take glob parameters matched against canonicalized paths under $WORKSPACE; symlinks outside the jail rejected; container/SSH backends mount only the workspace; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="120" shape="plugin" plugin="capability-grammar" touches_files="apps/meridiand/src/meridiand/capabilities/network_policy.py" depends_on="115">
+        <description>System Network policy: default-deny per Environment; allowlists per Agent; outbound proxy enforces host allowlist and emits net.outbound audit events; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="121" shape="plugin" plugin="capability-grammar" touches_files="apps/meridiand/src/meridiand/http/routes/capabilities.py" depends_on="115">
+        <description>API GET /v1/x/capabilities lists declared capabilities and their parameterizations; POST /v1/x/capabilities registers a new capability namespace (for plugin extensions); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Vaults &amp; Credentials">
+      <feature index="122" shape="plugin" plugin="vaults-resource" touches_files="apps/meridiand/src/meridiand/vault/manager.py,apps/meridiand/src/meridiand/http/routes/vaults.py" depends_on="29,41">
+        <description>API POST /v1/vaults creates a Vault with backend (os_keychain or encrypted_file in v1); GET lists; DELETE removes (rejects if any provider/channel still references it); on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="123" shape="plugin" plugin="vault-os-keychain" depends_on="122">
+        <description>System os_keychain Vault backend: macOS Keychain, Windows Credential Manager, libsecret (Linux); default on workstations; secrets stored under service=meridian, account=&lt;vault_id&gt;/&lt;key&gt;; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="124" shape="plugin" plugin="vault-encrypted-file" depends_on="122">
+        <description>System encrypted_file Vault backend: age/sops-encrypted JSON file unlocked at daemon start via passphrase or key file; for headless servers where keychain is unavailable; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="125" shape="plugin" plugin="vaults-resource" touches_files="apps/meridiand/src/meridiand/vault/proxy.py" depends_on="122">
+        <description>System Inline ref substitution: tool args carry secret_ref://vault/{id}/{name}; harness substitutes at dispatch and writes original ref form to event log so plaintext never enters the log; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="126" shape="plugin" plugin="vaults-resource" touches_files="apps/meridiand/src/meridiand/vault/proxy.py" depends_on="125">
+        <description>System In-harness credential proxy: network tools needing OAuth call a localhost proxy URL on the harness; harness injects token at outbound request time so workers never see token even on stdin; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="127" shape="plugin" plugin="vaults-resource" touches_files="apps/meridiand/src/meridiand/vault/proxy.py" depends_on="125">
+        <description>System Every secret access (read or substitute) emits an audit.secret_access event with vault_id, name, requester agent_id, requester tool_call_id; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="128" shape="plugin" plugin="vaults-resource" touches_files="apps/meridiand/src/meridiand/http/routes/vaults.py" depends_on="122">
+        <description>API POST /v1/vaults/{id}/secrets stores a secret (key, value); GET /v1/vaults/{id}/secrets/{name}/meta returns metadata only (NEVER the value) — created_at, last_accessed_at, requester counts; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="129" shape="plugin" plugin="vaults-resource" touches_files="tests/security/vault_leak_test.py" depends_on="125">
+        <description>System CI test: soak run asserts no plaintext from any vault:// key appears in any log file, event log, hook stdin, or trace attribute (per Risk R7 mitigation); on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Memory Stores &amp; Dialectic Modeling">
+      <feature index="130" shape="plugin" plugin="memory-resource" touches_files="apps/meridiand/src/meridiand/memory/service.py,apps/meridiand/src/meridiand/http/routes/memory_stores.py" depends_on="29,41">
+        <description>API POST /v1/memory_stores creates a MemoryStore with backend (sqlite-vec in v1; pgvector v1.2; http) and scope (global / user / agent / project); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="131" shape="plugin" plugin="memory-resource" touches_files="apps/meridiand/src/meridiand/memory/service.py" depends_on="130">
+        <description>API POST /v1/memory_stores/{id}/write inserts a memory; embedder_id specifies the embedding model; emits memory.write event with the action taken; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="132" shape="plugin" plugin="memory-resource" touches_files="apps/meridiand/src/meridiand/memory/service.py" depends_on="130">
+        <description>API POST /v1/memory_stores/{id}/query runs hybrid retrieval: BM25 (FTS5) + vector + scope filter, fused via reciprocal-rank-fusion with tunable weights; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="133" shape="plugin" plugin="memory-resource" touches_files="apps/meridiand/src/meridiand/memory/dialectic.py" depends_on="131">
+        <description>System Honcho-style dialectic write: retrieve top-K most-similar existing memories, run a small model to classify as duplicate / refinement / contradiction / net-new, apply outcome (dedupe / merge / supersede with provenance edge / insert); on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="134" shape="plugin" plugin="memory-resource" touches_files="apps/meridiand/src/meridiand/memory/dialectic.py" depends_on="133">
+        <description>System Reconciliation events recorded as memory.write with action taken (deduped / merged / superseded / inserted) and link to existing memory id when superseded; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="135" shape="plugin" plugin="memory-resource" touches_files="apps/meridiand/src/meridiand/memory/templates.py" depends_on="130">
+        <description>System Prompt template expansion: agent instructions and skills reference memories via {{ memory.user.preferences.commit_style }} fields; harness expands at run start (or per turn for short-TTL memories); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Knowledge Base (Hybrid Retrieval)">
+      <feature index="136" shape="plugin" plugin="kb-hybrid" touches_files="apps/meridiand/src/meridiand/kb/indexer.py">
+        <description>System Workspace indexer watches $WORKSPACE via fsevents/inotify; tree-sitter parses code files into symbol-level chunks; markdown and plain text chunked by heading boundaries; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="137" shape="plugin" plugin="kb-hybrid" touches_files="apps/meridiand/src/meridiand/kb/indexer.py" depends_on="136">
+        <description>System KB index rows carry: scope (global/project/agent/session), file path, chunk start/end, BM25 tokens (FTS5), embedding vector (sqlite-vec), content hash; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="138" shape="plugin" plugin="kb-hybrid" touches_files="apps/meridiand/src/meridiand/http/routes/kb.py" depends_on="136">
+        <description>API POST /v1/x/kb/query runs glob + BM25 + vector hybrid search, fused via RRF; scope filter narrows to global/project/agent/session; p95 &lt; 250ms target on 50k-file workspace; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="139" shape="plugin" plugin="kb-hybrid" touches_files="apps/meridiand/src/meridiand/http/routes/kb.py" depends_on="136">
+        <description>API POST /v1/x/kb/index triggers manual re-index of a path or scope; GET /v1/x/kb returns index status, last update time, row counts per scope; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="User Profiles &amp; Pairing">
+      <feature index="140" shape="plugin" plugin="user-profiles-resource" touches_files="apps/meridiand/src/meridiand/users/service.py,apps/meridiand/src/meridiand/http/routes/user_profiles.py" depends_on="29,41">
+        <description>API POST /v1/user_profiles creates a UserProfile; is_primary flag set on the first profile created (primary user has full host access); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="141" shape="plugin" plugin="user-profiles-resource" touches_files="apps/meridiand/src/meridiand/http/routes/user_profiles.py" depends_on="140">
+        <description>System UserProfile carries: display_name, is_primary, memories[] (MemoryStore refs), capabilities[] (per-user grant ceiling), channel_pairings[] ({ channel_id, remote_id }); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="142" shape="plugin" plugin="user-profiles-resource" touches_files="apps/meridiand/src/meridiand/users/pairing.py" depends_on="140">
+        <description>API POST /v1/channels/{id}/pair issues an out-of-band single-use pairing token; binding remote_id to UserProfile occurs on token redemption from the channel side; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="143" shape="plugin" plugin="user-profiles-resource" touches_files="apps/meridiand/src/meridiand/users/pairing.py" depends_on="142">
+        <description>System pairing rule: channel + remote_id deterministically resolves to UserProfile (returns 200 with profile id); same Session is reachable from every paired channel</description>
+      </feature>
+      <feature index="264" shape="plugin" plugin="user-profiles-resource" touches_files="apps/meridiand/src/meridiand/http/routes/user_profiles.py" depends_on="140">
+        <description>API GET /v1/user_profiles/{id} returns a single UserProfile with display_name, is_primary, memories, capabilities, channel_pairings (returns 200 or 404)</description>
+      </feature>
+      <feature index="265" shape="plugin" plugin="user-profiles-resource" touches_files="apps/meridiand/src/meridiand/http/routes/user_profiles.py" depends_on="140">
+        <description>API PATCH /v1/user_profiles/{id} updates display_name, capabilities[], memories[] (returns 200 with updated record, 422 on invalid capabilities)</description>
+      </feature>
+      <feature index="266" shape="plugin" plugin="user-profiles-resource" touches_files="apps/meridiand/src/meridiand/http/routes/user_profiles.py" depends_on="140">
+        <description>API DELETE /v1/user_profiles/{id} removes a UserProfile (returns 204, 409 if profile is_primary or has active Sessions)</description>
+      </feature>
+    </category>
+
+    <category name="Channels &amp; Gateway">
+      <feature index="144" shape="plugin" plugin="channels-service" touches_files="apps/meridiand/src/meridiand/gateway/service.py,apps/meridiand/src/meridiand/http/routes/channels.py" depends_on="29,41,140">
+        <description>API POST /v1/channels creates a Channel with kind, config containing token_vault_ref and per-kind fields, default_agent_id, default_user_profile_id, inbound_policy (open / paired_only / quarantine), egress_policy; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="145" shape="plugin" plugin="channels-service" touches_files="apps/meridiand/src/meridiand/gateway/service.py" depends_on="144">
+        <description>System Inbound message resolves to a Session attached to the right Agent + UserProfile via channel.inbound_policy: open creates UserProfile if needed; paired_only rejects unpaired; quarantine drops into a quarantine UserProfile with minimal caps; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="146" shape="plugin" plugin="channels-service" touches_files="apps/meridiand/src/meridiand/gateway/service.py" depends_on="144">
+        <description>System Outbound messages from a Session route to all attached channels whose egress_policy is enabled — Session is channel-agnostic; the same Session is reachable from CLI, Telegram, and webhook concurrently; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="147" shape="plugin" plugin="channels-service" touches_files="apps/meridiand/src/meridiand/gateway/quarantine.py" depends_on="145">
+        <description>System Untrusted-inbound default: non-paired senders run in a quarantine Environment with minimal caps envelope (fs.read on dedicated sandbox dir only, no exec.*, no net.fetch); auto-expire after N minutes of silence; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="148" shape="plugin" plugin="channels-service" touches_files="apps/meridiand/src/meridiand/gateway/service.py" depends_on="144">
+        <description>System Channel inbound latency target: inbound message → harness wake p95 &lt; 1s end-to-end per PRD §6.1; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="149" shape="plugin" plugin="channels-service" touches_files="apps/meridiand/src/meridiand/http/routes/channels.py" depends_on="144">
+        <description>API POST /v1/channels/{id}/inbound accepts channel-driver-pushed events; validates HMAC signature where channel kind supports it; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Channel Drivers (v1 set)">
+      <feature index="150" shape="plugin" plugin="channel-cli" depends_on="144">
+        <description>System CLI channel driver: synchronous TTY interface; reads stdin lines as inbound, writes assistant content blocks to stdout with token streaming and tool-call inlining; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="151" shape="plugin" plugin="channel-telegram" depends_on="144">
+        <description>System Telegram channel driver: long-poll or webhook mode, bot token from Vault, inbound DM and group message handling, outbound reply via sendMessage with Markdown rendering; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="152" shape="plugin" plugin="channel-slack" depends_on="144">
+        <description>System Slack channel driver: Socket Mode or events HTTP, bot token from Vault, rich Block Kit rendering for outbound, slash command and mention parsing for inbound; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="153" shape="plugin" plugin="channel-discord" depends_on="144">
+        <description>System Discord channel driver: gateway intent subscriptions, bot token from Vault, slash command registration, embed rendering for outbound, threaded reply support; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="154" shape="plugin" plugin="channel-webhook" depends_on="144">
+        <description>System Generic webhook channel driver: inbound via POST /v1/channels/{id}/inbound with HMAC verification, outbound via configured target URL with signed payload; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Skills &amp; agentskills.io">
+      <feature index="155" shape="plugin" plugin="skills-resource" touches_files="apps/meridiand/src/meridiand/skills/service.py,apps/meridiand/src/meridiand/http/routes/skills.py" depends_on="29,41">
+        <description>API POST /v1/skills creates a Skill and its first SkillVersionRecord; body conforms to agentskills.io schema with name, description, instructions, tools[], tests[] (optional), metadata; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="156" shape="plugin" plugin="skills-resource" touches_files="apps/meridiand/src/meridiand/skills/service.py" depends_on="155">
+        <description>System SkillVersionRecord is content-addressed (SHA-256 of canonical JSON body, prefixed skillver_); source field tags authored vs forge; derived_from_session_ids tracks forge provenance; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="157" shape="plugin" plugin="skills-resource" touches_files="apps/meridiand/src/meridiand/skills/install.py" depends_on="155">
+        <description>System Skills installable from: local directory (file:// path), npm package, git URL, agentskills.io registry URL; provenance metadata recorded on the SkillVersion; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="158" shape="plugin" plugin="skills-resource" touches_files="apps/meridiand/src/meridiand/skills/service.py" depends_on="155">
+        <description>System Skill activation per Agent is explicit — installing a skill does not auto-bind it to any Agent; activation requires audit-logged human approval per PRD D2; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="159" shape="plugin" plugin="skills-resource" touches_files="apps/meridiand/src/meridiand/skills/auto_suggest.py" depends_on="158">
+        <description>System Opt-in auto-suggest activation mode (agent.skill_activation_mode = 'auto_suggest'): harness emits skill_suggestion event; user must approve before binding; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="160" shape="plugin" plugin="skills-resource" touches_files="apps/meridiand/src/meridiand/http/routes/skills.py" depends_on="155">
+        <description>API GET /v1/skills lists installed Skills with version, source, provenance; GET /v1/skills/{id}/versions lists every SkillVersion newest first (returns 200 with a paginated result page)</description>
+      </feature>
+      <feature index="260" shape="plugin" plugin="skills-resource" touches_files="apps/meridiand/src/meridiand/http/routes/skills.py" depends_on="155">
+        <description>API GET /v1/skills/{id}/versions/{ver} returns a specific SkillVersionRecord by content hash (returns 200 with body, 404 if not found)</description>
+      </feature>
+    </category>
+
+    <category name="Skill Forge (Self-Improvement Loop)">
+      <feature index="161" shape="plugin" plugin="skill-forge" touches_files="apps/meridiand/src/meridiand/skill_forge/worker.py" depends_on="155">
+        <description>System Skill Forge runs as a separate background worker process with its own rate-limited model budget; can be throttled or disabled in config; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="162" shape="plugin" plugin="skill-forge" touches_files="apps/meridiand/src/meridiand/skill_forge/cluster.py" depends_on="161">
+        <description>System Forge watches terminated Sessions, pulls event log + tool-call summary, clusters trajectories by structural similarity (tool call sequence, pre/post conditions, file scopes touched); on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="163" shape="plugin" plugin="skill-forge" touches_files="apps/meridiand/src/meridiand/skill_forge/distill.py" depends_on="162">
+        <description>System For each cluster, Forge asks a model (via Model Router) to extract: skill name + description, distilled general (not session-specific) instructions, tool list + capability requirements, candidate replayable test cases; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="164" shape="plugin" plugin="skill-forge" touches_files="apps/meridiand/src/meridiand/skill_forge/propose.py" depends_on="163">
+        <description>System Forge builds an agentskills.io-shaped SkillVersionRecord with source='forge' and derived_from_session_ids; stores as PROPOSAL in quarantine; notifies primary user; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="165" shape="plugin" plugin="skill-forge" touches_files="apps/meridiand/src/meridiand/http/routes/skill_forge.py" depends_on="164">
+        <description>API POST /v1/x/skill_forge/proposals/{id}/approve promotes a quarantined proposal to active SkillVersion; recomputes content hash; available to Agents that opt in; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="166" shape="plugin" plugin="skill-forge" touches_files="apps/meridiand/src/meridiand/http/routes/skill_forge.py" depends_on="164">
+        <description>API GET /v1/x/skill_forge/proposals lists quarantined proposals with trajectory provenance and optional A/B comparison (with-vs-without skill on the proposal's test cases); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="271" shape="plugin" plugin="skill-forge" touches_files="apps/meridiand/src/meridiand/http/routes/skill_forge.py" depends_on="164">
+        <description>API POST /v1/x/skill_forge/proposals/{id}/reject marks a proposal as rejected with audit-logged reason (returns 200, 404 if not found, 409 if already promoted)</description>
+      </feature>
+      <feature index="167" shape="plugin" plugin="skill-forge" touches_files="apps/meridiand/src/meridiand/skill_forge/metrics.py" depends_on="164">
+        <description>System Forge precision metric: proportion of proposals a user approves; target 50% at v1 release, climbing to 75% within 90 days post-v1 as corpus grows (PRD §7.2); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="168" shape="plugin" plugin="skill-forge" touches_files="apps/meridiand/src/meridiand/skill_forge/metrics.py" depends_on="164">
+        <description>System Skill efficacy metric: A/B trajectory comparison (with vs without skill) on proposal test cases; recorded on each proposal for review; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Model Router">
+      <feature index="169" shape="plugin" plugin="model-router" touches_files="apps/meridiand/src/meridiand/model_router/router.py">
+        <description>System Model Router selects provider/model per call based on declarative ModelRoutingPolicy (rules + fallbacks); per-Agent, per-Skill, per-Session metadata, per estimated input tokens, per role; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="170" shape="plugin" plugin="model-router" touches_files="apps/meridiand/src/meridiand/model_router/router.py" depends_on="169">
+        <description>System ModelRoutingRule.when supports: skill_id, estimated_input_tokens.gt/lte, metadata_match (dict equality), role (planner/worker/reviewer/string); first matching rule wins; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="171" shape="plugin" plugin="model-router" touches_files="apps/meridiand/src/meridiand/model_router/router.py" depends_on="169">
+        <description>System Every model call records model_call.started event with the routing rule that fired and the chosen provider/model — auditable and replay-stable; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="172" shape="plugin" plugin="model-router" touches_files="apps/meridiand/src/meridiand/model_router/failover.py" depends_on="169">
+        <description>System Failover policy: on rate_limit / timeout / 5xx / any, retry against a configured fallback model; failover decisions logged in event log; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="173" shape="plugin" plugin="model-router" touches_files="apps/meridiand/src/meridiand/model_router/provider_registry.py" depends_on="169">
+        <description>System Provider registry holds instantiated ModelProvider instances keyed by config-level name; hot-swap on config reload uses atomic pointer swap with drain of in-flight calls; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="174" shape="plugin" plugin="model-router" touches_files="apps/meridiand/src/meridiand/model_router/cache.py" depends_on="169">
+        <description>System Per-call prompt-cache header injection where supported (Anthropic cache_control); cache hit/miss recorded in usage.delta events; aggregated in usage_rollups projection; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Model Providers">
+      <feature index="175" shape="plugin" plugin="provider-anthropic-apikey" depends_on="169">
+        <description>System AnthropicApiKeyProvider (Mode 1, package meridian-provider-anthropic-apikey): uses raw anthropic Python SDK, API key from Vault, direct HTTPS to api.anthropic.com, per-token billing, full feature surface; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="176" shape="plugin" plugin="provider-anthropic-oauth" depends_on="169">
+        <description>System AnthropicOAuthProvider (Mode 2, package meridian-provider-anthropic-oauth): uses claude-agent-sdk-python driving Claude Code CLI subprocess; OAuth token managed by claude login; subscription billing; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="177" shape="plugin" plugin="provider-anthropic-oauth" depends_on="176">
+        <description>System OAuth provider Contract 1 — disallowed_tools: places Claude Code's built-in Read/Write/Bash/Edit in ALL_CLAUDE_CODE_BUILTIN_TOOLS so the inner loop cannot call them, preserving Meridian's capability boundary; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="178" shape="plugin" plugin="provider-anthropic-oauth" depends_on="176">
+        <description>System OAuth provider Contract 2 — Sandbox-proxy MCP bridge: create_sdk_mcp_server exposes a meridian_tool_proxy that forwards every inner-loop tool call back into Meridian's Sandbox.execute() with full cap check, schema validation, hooks, and audit; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="179" shape="plugin" plugin="provider-anthropic-oauth" depends_on="176">
+        <description>System OAuth provider Contract 3 — SDK→Meridian hook mapping: Claude Code SDK PreToolUse hook translates to Meridian's pre_tool_call (§9) with continue/mutate/veto verdict round-trip; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="180" shape="plugin" plugin="provider-anthropic-oauth" depends_on="176">
+        <description>System OAuth provider Contract 4 — event translation: token deltas, tool-use blocks, thinking blocks, message completions emitted by Claude Code are translated into Meridian SessionEvent rows so the event log remains the source of truth; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="181" shape="plugin" plugin="provider-anthropic-oauth" depends_on="176">
+        <description>System OAuth provider subprocess lifecycle: plugin owns spawn, health-check, restart on hang, kill on cancel for the Claude Code CLI process; CLI version pinned in meridian.lock; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="182" shape="plugin" plugin="provider-openai" depends_on="169">
+        <description>System OpenAIProvider: uses openai Python SDK, API key from Vault, supports streaming and tool-use, normalizes responses to ModelEvent shape; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="183" shape="plugin" plugin="provider-openrouter" depends_on="169">
+        <description>System OpenRouterProvider: gateway adapter that unlocks many models on one adapter via OpenRouter API; honors model-specific feature flags (caching, vision, tools); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="184" shape="plugin" plugin="provider-ollama" depends_on="169">
+        <description>System OllamaProvider: HTTP client to local Ollama daemon (default :11434); model list discovery via /api/tags; streaming chat via /api/chat; covers the local/offline path; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="185" shape="core" touches_files="apps/meridiand/src/meridiand/model_router/types.py" depends_on="169">
+        <description>System ModelProvider Protocol requires: name, kind, async call(opts) yielding ModelEvent, async count_tokens(req), async close(); no provider may import Session Service, Vault, or Sandbox directly per §13.5 isolation contract; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Multi-Agent &amp; ACP Adapter">
+      <feature index="186" shape="plugin" plugin="multi-agent" touches_files="apps/meridiand/src/meridiand/multi_agent/spawn.py" depends_on="103,118">
+        <description>System agent.spawn capability gates child Session creation; child inherits parent_session_id, cancellation propagation, declared capability subset (must be subset of parent grants); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="187" shape="plugin" plugin="multi-agent" touches_files="apps/meridiand/src/meridiand/multi_agent/handoff.py" depends_on="186">
+        <description>System Typed handoff: parent declares output_schema; child's terminal message must validate against schema or child is given one retry (transitions to waiting_for_user); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="188" shape="plugin" plugin="multi-agent" touches_files="apps/meridiand/src/meridiand/multi_agent/budgets.py" depends_on="186">
+        <description>System Budget aggregation: usage.delta events from descendants roll up to parent budgets; parent hard breach cancels all descendants synchronously; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="189" shape="plugin" plugin="multi-agent" touches_files="apps/meridiand/src/meridiand/multi_agent/cancellation.py" depends_on="186">
+        <description>System Cancellation propagation: parent session cancel propagates to all descendants via session_id tree walk; child sessions emit child_session.completed with reason=cancelled; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="190" shape="plugin" plugin="acp-adapter" touches_files="apps/meridiand/src/meridiand/acp/adapter.py,apps/meridiand/src/meridiand/http/routes/acp.py" depends_on="186">
+        <description>System ACP adapter implements outbound calls to peer agents in other systems (hermes, openclaw, foreign Meridian installs) per Hermes's reference ACP spec; acp.outbound[target] capability gates reach; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="191" shape="plugin" plugin="acp-adapter" touches_files="apps/meridiand/src/meridiand/http/routes/acp.py" depends_on="190">
+        <description>API POST /v1/x/acp/inbound receives ACP messages from peer systems; acp.inbound[target] capability gates which targets are accepted; emits acp.inbound events; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="192" shape="plugin" plugin="acp-adapter" touches_files="tests/integration/acp_compliance_test.py" depends_on="190">
+        <description>System ACP CI compliance suite runs Hermes's reference test suite where one exists; any deliberate deviation documented in docs/acp-deviations.md per PRD D1; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="269" shape="plugin" plugin="multi-agent" touches_files="apps/meridiand/src/meridiand/http/routes/sessions.py" depends_on="186">
+        <description>API POST /v1/x/sessions/{id}/spawn explicitly creates a child Session with declared capability subset and optional output_schema (returns 201 with child_session_id, 403 if requested caps exceed parent grants)</description>
+      </feature>
+      <feature index="270" shape="plugin" plugin="acp-adapter" touches_files="apps/meridiand/src/meridiand/http/routes/acp.py" depends_on="190">
+        <description>API POST /v1/x/acp/outbound sends an ACP message to a peer system (returns 200 with peer response, 403 if acp.outbound[target] capability missing)</description>
+      </feature>
+    </category>
+
+    <category name="Lifecycle Hooks">
+      <feature index="193" shape="plugin" plugin="hooks-system" touches_files="apps/meridiand/src/meridiand/hooks/registry.py,apps/meridiand/src/meridiand/http/routes/hooks.py" depends_on="76">
+        <description>API POST /v1/x/hooks registers a HookBinding with event, name, handler (in_process/subprocess/mcp/http/container), match filter, timeout_ms, failure_mode; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="194" shape="plugin" plugin="hooks-system" touches_files="apps/meridiand/src/meridiand/hooks/registry.py" depends_on="193">
+        <description>System Hook events: session_start, session_end, pre_message, post_message, pre_tool_call, post_tool_call, on_stop, on_compact, on_handoff, on_checkpoint, on_error, on_channel_inbound, on_channel_outbound, on_model_call; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="195" shape="plugin" plugin="hooks-system" touches_files="apps/meridiand/src/meridiand/hooks/verdicts.py" depends_on="193">
+        <description>System Hook verdict types: continue (no-op), continue with mutate (args or messages), veto with reason (pre_* only), fail with reason; harness honors verdict; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="196" shape="plugin" plugin="hooks-system" touches_files="apps/meridiand/src/meridiand/hooks/dispatcher.py" depends_on="193">
+        <description>System Hooks dispatch via the same Sandbox surface as tools: timeouts, capability scoping, subprocess isolation apply; failure_mode=block raises hook fail, log records and continues; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="197" shape="plugin" plugin="hooks-system" touches_files="apps/meridiand/src/meridiand/hooks/redaction.py" depends_on="193">
+        <description>System Hook stdin redaction: vault refs unsubstituted unless hook declares secret.read[name]; CI test asserts no plaintext from vault keys reaches hook stdin (Risk R7); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Checkpoints &amp; Deterministic Replay">
+      <feature index="198" shape="plugin" plugin="checkpoints-replay" touches_files="apps/meridiand/src/meridiand/checkpoints/snapshot.py,apps/meridiand/src/meridiand/http/routes/checkpoints.py" depends_on="63">
+        <description>API POST /v1/x/sessions/{id}/checkpoint serializes SessionCheckpoint (seq, phase, pending_tool_calls, message_tail, usage, taken_at) to $STORAGE_ROOT/checkpoints/&lt;session_id&gt;/&lt;seq&gt;.json with atomic rename to latest.json; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="199" shape="plugin" plugin="checkpoints-replay" touches_files="apps/meridiand/src/meridiand/checkpoints/resume.py" depends_on="198">
+        <description>API POST /v1/x/sessions/{id}/resume loads latest checkpoint (fallback: replay log), re-dispatches tool calls whose result is missing, transitions phase appropriately, wakes harness; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="200" shape="plugin" plugin="checkpoints-replay" touches_files="apps/meridiand/src/meridiand/checkpoints/resume.py" depends_on="199">
+        <description>System Tool author contract documented: tool implementations should be idempotent on retry — same args + idempotency_key returns same result; surfaced in tool-author docs; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="201" shape="plugin" plugin="checkpoints-replay" touches_files="apps/meridiand/src/meridiand/replay/replay.py,apps/meridiand/src/meridiand/http/routes/replay.py" depends_on="63">
+        <description>API POST /v1/x/sessions/{id}/replay runs harness with FakeModelAdapter + FakeSandboxAdapter reading canned responses from fixture NDJSON files (model_responses, tool_responses); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="202" shape="plugin" plugin="checkpoints-replay" touches_files="apps/meridiand/src/meridiand/replay/replay.py" depends_on="201">
+        <description>System Replay divergence detection: when harness picks a different tool or output than recorded, replay aborts with divergence error pinned to the first deviating event seq; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="203" shape="plugin" plugin="checkpoints-replay" touches_files="apps/meridiand/src/meridiand/replay/fakes.py" depends_on="201">
+        <description>System FakeModelAdapter and FakeSandboxAdapter read canned responses from fixtures/*.ndjson; tests run identically across hosts; replay fidelity target ≥ 99% per PRD §7.2; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="204" shape="plugin" plugin="checkpoints-replay" touches_files="tests/replay/ci_replay_test.py" depends_on="201">
+        <description>System CI regression suite: re-runs every recorded fixture session on every PR; failure points at the first deviating event seq + the prompt change that caused divergence; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Budgets &amp; Cost Discipline">
+      <feature index="205" shape="plugin" plugin="budgets" touches_files="apps/meridiand/src/meridiand/budgets/config.py" depends_on="57">
+        <description>System BudgetConfig supports hard and soft thresholds per Agent / per Session / per Run-span across dimensions: input_tokens, output_tokens, cache_tokens, dollars, wall_clock_seconds; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="206" shape="plugin" plugin="budgets" touches_files="apps/meridiand/src/meridiand/budgets/tracker.py" depends_on="205">
+        <description>System Per-call usage.delta events accumulate into per-Agent / per-Session / per-Run-span counters; price book is a per-provider JSON config (dollars-per-1k-tokens by model and direction); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="207" shape="plugin" plugin="budgets" touches_files="apps/meridiand/src/meridiand/budgets/enforcement.py" depends_on="206">
+        <description>System Soft budget exceeded: pre_message hook receives budget_warning context; harness transitions to waiting_for_user with budget approval prompt; user_can_continue resumes; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="208" shape="plugin" plugin="budgets" touches_files="apps/meridiand/src/meridiand/budgets/enforcement.py" depends_on="206">
+        <description>System Hard budget exceeded: session phase transitions to terminated with reason=budget_exceeded; budget.exceeded event records dimension and overage; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="209" shape="plugin" plugin="budgets" touches_files="apps/meridiand/src/meridiand/budgets/reports.py" depends_on="206">
+        <description>System Cost breakdown reports: by Agent, by Session, by tool, by provider/model, for a time window; queryable via GET /v1/x/budgets/reports; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="210" shape="plugin" plugin="budgets" touches_files="apps/meridiand/src/meridiand/budgets/enforcement.py" depends_on="208">
+        <description>System Budget overrun discipline: average overrun vs configured soft budget &lt; 5%; 100% of hard-budget transitions tagged with correct reason code (PRD §7.3); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Webhooks &amp; Cron">
+      <feature index="211" shape="plugin" plugin="webhooks-system" touches_files="apps/meridiand/src/meridiand/webhooks/service.py,apps/meridiand/src/meridiand/http/routes/webhooks.py" depends_on="29,41">
+        <description>API POST /v1/webhooks creates a Webhook with name, url, secret_ref (HMAC signing), event_filter (types[], optional session_id), max_retries, backoff (exponential or linear); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="212" shape="plugin" plugin="webhooks-system" touches_files="apps/meridiand/src/meridiand/webhooks/sender.py" depends_on="211">
+        <description>System Webhook sender posts filtered session events with HMAC-SHA256 signature; retryable with exponential backoff; permanent failures land in dead-letter queue; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="213" shape="plugin" plugin="cron-system" touches_files="apps/meridiand/src/meridiand/cron/service.py,apps/meridiand/src/meridiand/http/routes/cron.py" depends_on="29,41">
+        <description>API POST /v1/x/cron creates a Cron resource scheduling recurring or one-shot Session invocations; trigger types: timestamp, interval, channel event, file change, webhook, memory anniversary; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="214" shape="plugin" plugin="cron-system" touches_files="apps/meridiand/src/meridiand/cron/scheduler.py" depends_on="213">
+        <description>System Cron scheduler is durable across daemon restart; persisted next_fire_at; missed fires policy configurable (catch-up or skip); cron-triggered sessions inherit declared Agent capabilities, never escalate; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="215" shape="plugin" plugin="cron-system" touches_files="apps/meridiand/src/meridiand/cron/triggers.py" depends_on="213">
+        <description>System memory-anniversary trigger fires N days before a date-typed memory (e.g. birthday memory + 3 days reminder); supports recurring annual triggers; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="267" shape="plugin" plugin="webhooks-system" touches_files="apps/meridiand/src/meridiand/http/routes/webhooks.py" depends_on="211">
+        <description>API DELETE /v1/webhooks/{id} removes a Webhook (returns 204, 404 if not found)</description>
+      </feature>
+      <feature index="268" shape="plugin" plugin="cron-system" touches_files="apps/meridiand/src/meridiand/http/routes/cron.py" depends_on="213">
+        <description>API DELETE /v1/x/cron/{id} removes a Cron resource and unschedules pending fires (returns 204, 404 if not found)</description>
+      </feature>
+    </category>
+
+    <category name="Files &amp; Messages Resources">
+      <feature index="216" shape="plugin" plugin="files-system" touches_files="apps/meridiand/src/meridiand/files/service.py,apps/meridiand/src/meridiand/http/routes/files.py" depends_on="40,41">
+        <description>API POST /v1/files uploads a file (multipart or base64-in-JSON), stored in blob store, returns FileId; GET /v1/files/{id} returns metadata; GET /v1/files/{id}/content streams bytes; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="217" shape="plugin" plugin="files-system" touches_files="apps/meridiand/src/meridiand/http/routes/messages.py" depends_on="41">
+        <description>API POST /v1/messages single-shot inference endpoint: provides a stateless one-call interface to the Model Router for non-Session use cases; mirrors Anthropic /v1/messages; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="218" shape="plugin" plugin="files-system" touches_files="apps/meridiand/src/meridiand/http/routes/models.py" depends_on="169">
+        <description>API GET /v1/models lists models available across configured providers with provider name, model name, context window, capability flags (streaming, thinking, vision, tools, cache); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Observability">
+      <feature index="219" shape="plugin" plugin="observability" touches_files="apps/meridiand/src/meridiand/observability/otel.py">
+        <description>System OpenTelemetry tracing: one trace per session with span hierarchy — session (root), harness.wake, session.run_span, model.call, tool.call, hook.call, skill_forge.proposal, acp.outbound/inbound, child_session (span link); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="220" shape="plugin" plugin="observability" touches_files="apps/meridiand/src/meridiand/observability/prometheus.py" depends_on="219">
+        <description>System Prometheus /metrics endpoint exposes: meridian_sessions_total{phase}, meridian_session_duration_seconds{result}, meridian_tool_calls_total{tool, backend, result}, meridian_tool_call_duration_seconds (histogram); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="221" shape="plugin" plugin="observability" touches_files="apps/meridiand/src/meridiand/observability/prometheus.py" depends_on="220">
+        <description>System Additional Prometheus metrics: meridian_model_tokens_total{provider, model, kind}, meridian_model_call_duration_seconds (histogram), meridian_hook_invocations_total{event, verdict}; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="222" shape="plugin" plugin="observability" touches_files="apps/meridiand/src/meridiand/observability/prometheus.py" depends_on="220">
+        <description>System Channel and operational metrics: meridian_channel_inbound_total{kind}, meridian_channel_outbound_total{kind}, meridian_active_sessions{phase}, meridian_harness_wakes_total, meridian_skill_forge_proposals_total{outcome}, meridian_vault_accesses_total{vault_id}; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="223" shape="plugin" plugin="observability" touches_files="apps/meridiand/src/meridiand/observability/logs.py">
+        <description>System JSON structured logs to stderr; fields: ts, level, component, session_id?, agent_id?, tool_name?, provider?, msg; application logs distinct from domain event log; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="224" shape="plugin" plugin="observability" touches_files="apps/meridiand/src/meridiand/observability/mttr.py" depends_on="219">
+        <description>System mean time to root cause for a failed session target &lt; 5 min using only Meridian artifacts (event log + trace + audit + replay); enforced via on-call drill at v1 release (PRD §7.2); on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="272" shape="plugin" plugin="observability" touches_files="apps/meridiand/src/meridiand/http/routes/health.py">
+        <description>API GET /healthz returns 200 with body { "status": "ok" } when the daemon is alive (liveness probe; no dependency checks)</description>
+      </feature>
+      <feature index="273" shape="plugin" plugin="observability" touches_files="apps/meridiand/src/meridiand/http/routes/health.py" depends_on="272">
+        <description>API GET /readyz returns 200 when storage, providers, and plugins have all initialized; returns 503 with body { "status": "not_ready", "components": [...] } during boot or after dependency failure</description>
+      </feature>
+    </category>
+
+    <category name="CLI &amp; TUI">
+      <feature index="225" shape="plugin" plugin="meridian-cli" depends_on="41">
+        <description>System command meridianCLI tool (apps/meridian-cli) talks to local daemon via UDS or HTTP loopback; subcommands cover CRUD over every resource (agents, sessions, skills, environments, channels, vaults, memory_stores, user_profiles, webhooks, files, hooks, cron); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="226" shape="plugin" plugin="meridian-cli" depends_on="225">
+        <description>System command meridianrun streams session events to terminal with human-friendly TTY renderer: token streaming, tool-call inlining, collapsed thinking blocks, color-coded phase transitions; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="227" shape="plugin" plugin="meridian-cli" depends_on="225">
+        <description>System command meridiantui launches an interactive TUI gateway with multi-session navigation, channel view pane, live event tail, keyboard-driven approval prompts for budget/skill activation; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="228" shape="plugin" plugin="meridian-cli" depends_on="225">
+        <description>System command meridiansessions archive &lt;id&gt; compresses event log tail and moves full log to blob store; meridian sessions restore &lt;id&gt; reverses the operation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="229" shape="plugin" plugin="meridian-cli" depends_on="225">
+        <description>System Auto-compaction policy: sessions idle &gt; 30 days compact automatically (event log tail → compressed summary, full log archived); configurable per install (PRD D4); on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Web UI &amp; Live Canvas">
+      <feature index="230" shape="core" touches_files="apps/meridian-ui/src/main.tsx,apps/meridian-ui/src/routes/index.tsx,apps/meridian-ui/vite.config.ts">
+        <description>System Thin React SPA scaffold at apps/meridian-ui; React Router routes for / (home), /sessions, /sessions/:id, /agents, /agents/:id, /skills, /channels, /vaults, /memory_stores, /settings; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="231" shape="core" touches_files="apps/meridian-ui/src/api/client.ts" depends_on="47">
+        <description>UI client uses generated @meridian/sdk-ts types; TanStack Query wrappers per resource; never edits sdk-ts/src by hand (enforced by pre-commit hook L6); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="232" shape="core" touches_files="apps/meridian-ui/src/routes/session-viewer.tsx" depends_on="230">
+        <description>System Session viewer: connects to /v1/sessions/{id}/events?stream=true via EventSource; renders message timeline, tool-call inlining, thinking-block collapse, phase indicator; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="233" shape="core" touches_files="apps/meridian-ui/src/components/chat-composer.tsx" depends_on="230">
+        <description>System Chat composer component: submit user message to POST /v1/sessions/{id}/messages; agent picker for new session creation; channel selection for cross-channel routing; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="234" shape="core" touches_files="apps/meridian-ui/src/routes/agent-inspector.tsx" depends_on="230">
+        <description>System Agent inspector: shows current_version, version history with diff, model_routing rules, capability grants, hook bindings, budget config, memory store refs; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="235" shape="core" touches_files="apps/meridian-ui/src/routes/skill-registry.tsx" depends_on="230">
+        <description>System Skill registry view: installed Skills with source (authored/forge), provenance, version history, activation toggle per Agent; Forge proposal review with approve/reject UI; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="236" shape="core" touches_files="apps/meridian-ui/src/routes/vault-inspector.tsx" depends_on="230">
+        <description>System Vault inspector: lists secret names (NEVER values) with metadata — created_at, last_accessed_at, requester counts; deletion requires confirmation; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="237" shape="core" touches_files="apps/meridian-ui/src/live-canvas/canvas.tsx" depends_on="105,230">
+        <description>System Live Canvas panel renders content_block.canvas_op messages with v1 widget set: text, markdown, simple form (text input/select/checkbox/button), code block, image embed, table, progress bar; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="238" shape="core" touches_files="apps/meridian-ui/src/live-canvas/canvas.tsx" depends_on="237">
+        <description>System Canvas state lives as a special message kind on the Session (content_block.canvas_op); replay/rebuild is automatic from event log on page reload; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="239" shape="core" touches_files="apps/meridian-ui/src/live-canvas/interactions.tsx" depends_on="237">
+        <description>System Canvas user interactions (form submit, button click) produce events that the harness surfaces as new user messages with structured payload; preserves replay semantics; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="240" shape="core" touches_files="apps/meridiand/src/meridiand/http/static.py" depends_on="41,230">
+        <description>System Daemon bundles the built UI assets and serves them at /ui when daemon.serve_ui=true in config; rides on whatever auth the daemon enforces (loopback v1, bearer/OIDC v1.1+); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Plugin SDKs (v1)">
+      <feature index="241" shape="plugin" plugin="sdk-channel">
+        <description>System Channel Driver SDK (packages/sdk-channel, Python): exports ChannelDriver protocol with start/send/stop, manifest schema, install flow (meridian channel install ./pkg), capability declaration helpers; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="242" shape="plugin" plugin="sdk-environment">
+        <description>System Environment Backend SDK (packages/sdk-environment, Python): exports Environment contract (provision, execute, reclaim, network policy, capability envelope); must pass environment conformance suite; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="243" shape="plugin" plugin="sdk-provider">
+        <description>System Model Provider SDK (packages/sdk-provider, Python): exports ModelProvider protocol + optional capability hints (streaming, thinking, cache_control); Router honors declared feature flags; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="244" shape="plugin" plugin="sdk-tool">
+        <description>System Tool Plugin SDK (packages/sdk-tool, Python or any-language): in-process Python tool decorator (@meridian_tool) and out-of-process subprocess/HTTP/MCP tool helpers; JSON Schema validation per §11; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="245" shape="plugin" plugin="sdk-widget">
+        <description>System Live Canvas Widget SDK (packages/sdk-widget, TypeScript): React component contract for widgets, manifest schema, content_block.canvas_op render pipeline, declarative layout helpers; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="246" shape="core" touches_files="apps/meridiand/src/meridiand/plugins/loader.py" depends_on="241,242,243,244">
+        <description>System Plugin loader discovers installed plugins via entry_points and an explicit ~/.meridian/plugins.yml; manifests declare kind, capability requirements, sandbox mode (in-daemon trusted vs out-of-process); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Migration Importers">
+      <feature index="247" shape="plugin" plugin="import-openclaw">
+        <description>System command meridianimport openclaw $PATH reads channel configs → /v1/channels records, sessions → /v1/sessions + event-log replay, MEMORY.md → /v1/memory_stores (scope=agent, tagged from:openclaw), tool definitions → tool registry with conservative capability defaults; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="248" shape="plugin" plugin="import-hermes">
+        <description>System command meridianimport hermes $PATH reads skills (already agentskills.io) → /v1/skills, environments → /v1/environments (backend mapping preserved), providers → Model Router config, session histories → /v1/sessions + event-log replay, Honcho user profiles → /v1/user_profiles + memory imports, cron jobs → /v1/x/cron, ACP registry → ACP adapter config; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="249" shape="plugin" plugin="migration-audit" touches_files="apps/meridiand/src/meridiand/migration/audit.py">
+        <description>System import audit log: every meridian import openclaw or meridian import hermes invocation produces meridian-import-&lt;timestamp&gt;.audit.ndjson listing each record translated and any lossy field mapping; manual review checklist generated; transactional (all-or-nothing); on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Reliability &amp; Crash Recovery">
+      <feature index="250" shape="plugin" plugin="reliability-soak" touches_files="tests/integration/crash_recovery_test.py" depends_on="76,85">
+        <description>System Crash recovery: single-node Meridian survives SIGKILL mid-session; fresh harness recovers via wake(session_id) to the last event; auto-resume rate &gt; 99% over 10k synthetic crashes (PRD §7.4); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="251" shape="plugin" plugin="reliability-soak" touches_files="apps/meridiand/src/meridiand/harness/isolation.py" depends_on="87">
+        <description>System Tool/hook/skill-forge crash isolation: subprocess failures do not crash the harness or daemon; emitted as tool_call.error with stderr tail; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="252" shape="plugin" plugin="reliability-soak" touches_files="tests/integration/soak_test.py" depends_on="250">
+        <description>System E8 hardening soak test: multi-day, multi-agent, multi-channel dogfood run with SIGKILL injection on harness, on tool workers, and on the daemon itself; success criteria from PRD §7; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+    <category name="Testing &amp; Conformance">
+      <feature index="253" shape="plugin" plugin="testing-suite" touches_files="tests/unit/capability_intersection_test.py" depends_on="116">
+        <description>System Unit tests for capability intersection: glob narrowing, parameter matching, missing-cap error path, subset enforcement on spawn; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="254" shape="plugin" plugin="testing-suite" touches_files="tests/unit/phase_machine_test.py" depends_on="74">
+        <description>System Property tests for the phase state machine: every (phase, event_type) pair asserts a deterministic next-phase derivation; terminated is final and absorbing; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="255" shape="plugin" plugin="testing-suite" touches_files="tests/integration/full_session_test.py" depends_on="76">
+        <description>System Integration test: full POST /v1/sessions → wake → model call → tool dispatch → tool result → end_turn → idle flow with FakeModel and FakeSandbox; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="256" shape="plugin" plugin="testing-suite" touches_files="tests/integration/multi_agent_test.py" depends_on="186">
+        <description>System Multi-agent integration test: parent spawns 3 workers via parallel_runs, aggregates budgets, propagates cancellation when parent exceeds hard budget; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="257" shape="plugin" plugin="testing-suite" touches_files="tests/channels/conformance.py" depends_on="144">
+        <description>System Channel conformance suite: every driver passes pairing round-trip, inbound message resolves to right UserProfile + Agent + Session, outbound delivery confirmation, untrusted-inbound quarantine; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="258" shape="plugin" plugin="testing-suite" touches_files="tests/soak/skill_forge_soak.py" depends_on="161">
+        <description>System Skill Forge soak test: run forge on a corpus of recorded fixtures; measure proposal precision; assert ≥ 50% at v1 release per PRD §7.2; emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+      <feature index="259" shape="plugin" plugin="testing-suite" touches_files="tests/integration/dogfood_test.py" depends_on="250">
+        <description>System Internal dogfood checkpoint: mandatory from E5 onwards (gateway available); weekly demo gate; mis-shaped features fixed before v1 rather than ship-then-fix (PRD Risk R11 mitigation); emits OpenTelemetry span and logs structured event on each invocation; on failure surfaces an error message to the caller and writes the failure to the audit log</description>
+      </feature>
+    </category>
+
+  </core_features>
+
+  <database_schema>
+    <tables>
+
+      <table name="agents">
+        <column>id TEXT PRIMARY KEY</column>
+        <column>current_version TEXT NOT NULL</column>
+        <column>name TEXT NOT NULL</column>
+        <column>description TEXT</column>
+        <column>created_at TEXT NOT NULL</column>
+        <column>updated_at TEXT NOT NULL</column>
+        <column>deleted_at TEXT</column>
+      </table>
+
+      <table name="agent_versions">
+        <column>id TEXT PRIMARY KEY</column>
+        <column>agent_id TEXT NOT NULL REFERENCES agents(id) ON DELETE CASCADE</column>
+        <column>body_json TEXT NOT NULL</column>
+        <column>content_hash TEXT NOT NULL UNIQUE</column>
+        <column>created_at TEXT NOT NULL</column>
+      </table>
+
+      <table name="sessions">
+        <column>id TEXT PRIMARY KEY</column>
+        <column>agent_id TEXT NOT NULL REFERENCES agents(id)</column>
+        <column>agent_version TEXT NOT NULL REFERENCES agent_versions(id)</column>
+        <column>user_profile_id TEXT REFERENCES user_profiles(id)</column>
+        <column>channel_id TEXT REFERENCES channels(id)</column>
+        <column>parent_session_id TEXT REFERENCES sessions(id)</column>
+        <column>phase TEXT NOT NULL</column>
+        <column>phase_reason TEXT</column>
+        <column>last_event_seq INTEGER NOT NULL DEFAULT 0</column>
+        <column>metadata_json TEXT NOT NULL DEFAULT '{}'</column>
+        <column>usage_json TEXT NOT NULL DEFAULT '{}'</column>
+        <column>created_at TEXT NOT NULL</column>
+        <column>updated_at TEXT NOT NULL</column>
+      </table>
+
+      <table name="threads">
+        <column>id TEXT PRIMARY KEY</column>
+        <column>session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE</column>
+        <column>branch_of_event_seq INTEGER</column>
+        <column>title TEXT</column>
+        <column>created_at TEXT NOT NULL</column>
+      </table>
+
+      <table name="messages">
+        <column>id TEXT PRIMARY KEY</column>
+        <column>session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE</column>
+        <column>thread_id TEXT NOT NULL REFERENCES threads(id)</column>
+        <column>role TEXT NOT NULL CHECK (role IN ('user','assistant','tool','system'))</column>
+        <column>content_json TEXT NOT NULL</column>
+        <column>parent_id TEXT REFERENCES messages(id)</column>
+        <column>event_seq INTEGER NOT NULL</column>
+        <column>created_at TEXT NOT NULL</column>
+      </table>
+
+      <table name="tool_calls">
+        <column>id TEXT PRIMARY KEY</column>
+        <column>session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE</column>
+        <column>message_id TEXT NOT NULL REFERENCES messages(id)</column>
+        <column>tool_name TEXT NOT NULL</column>
+        <column>environment_id TEXT REFERENCES environments(id)</column>
+        <column>arguments_json TEXT NOT NULL</column>
+        <column>result_json TEXT</column>
+        <column>error_json TEXT</column>
+        <column>started_at TEXT NOT NULL</column>
+        <column>ended_at TEXT</column>
+      </table>
+
+      <table name="skills">
+        <column>id TEXT PRIMARY KEY</column>
+        <column>current_version TEXT NOT NULL</column>
+        <column>name TEXT NOT NULL</column>
+        <column>source TEXT NOT NULL CHECK (source IN ('authored','forge'))</column>
+        <column>created_at TEXT NOT NULL</column>
+      </table>
+
+      <table name="skill_versions">
+        <column>id TEXT PRIMARY KEY</column>
+        <column>skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE</column>
+        <column>body_json TEXT NOT NULL</column>
+        <column>content_hash TEXT NOT NULL UNIQUE</column>
+        <column>derived_from_session_ids_json TEXT</column>
+        <column>approved_by TEXT REFERENCES user_profiles(id)</column>
+        <column>status TEXT NOT NULL CHECK (status IN ('proposal','active','rejected','superseded'))</column>
+        <column>created_at TEXT NOT NULL</column>
+      </table>
+
+      <table name="environments">
+        <column>id TEXT PRIMARY KEY</column>
+        <column>name TEXT NOT NULL UNIQUE</column>
+        <column>backend TEXT NOT NULL</column>
+        <column>config_json TEXT NOT NULL</column>
+        <column>workspace_path TEXT</column>
+        <column>env_passthrough_json TEXT NOT NULL DEFAULT '[]'</column>
+        <column>network_policy_json TEXT NOT NULL</column>
+        <column>caps_envelope_json TEXT NOT NULL</column>
+        <column>default_timeout_ms INTEGER NOT NULL DEFAULT 30000</column>
+        <column>created_at TEXT NOT NULL</column>
+      </table>
+
+      <table name="memory_stores">
+        <column>id TEXT PRIMARY KEY</column>
+        <column>name TEXT NOT NULL</column>
+        <column>scope TEXT NOT NULL CHECK (scope IN ('global','user','agent','project'))</column>
+        <column>backend TEXT NOT NULL</column>
+        <column>embedder_id TEXT</column>
+        <column>config_json TEXT NOT NULL</column>
+        <column>created_at TEXT NOT NULL</column>
+      </table>
+
+      <table name="memories">
+        <column>id TEXT PRIMARY KEY</column>
+        <column>store_id TEXT NOT NULL REFERENCES memory_stores(id) ON DELETE CASCADE</column>
+        <column>scope_owner_id TEXT</column>
+        <column>text TEXT NOT NULL</column>
+        <column>metadata_json TEXT NOT NULL DEFAULT '{}'</column>
+        <column>superseded_by TEXT REFERENCES memories(id)</column>
+        <column>created_at TEXT NOT NULL</column>
+        <column>updated_at TEXT NOT NULL</column>
+      </table>
+
+      <table name="vaults">
+        <column>id TEXT PRIMARY KEY</column>
+        <column>name TEXT NOT NULL UNIQUE</column>
+        <column>backend TEXT NOT NULL</column>
+        <column>config_json TEXT NOT NULL</column>
+        <column>created_at TEXT NOT NULL</column>
+      </table>
+
+      <table name="user_profiles">
+        <column>id TEXT PRIMARY KEY</column>
+        <column>display_name TEXT NOT NULL</column>
+        <column>is_primary INTEGER NOT NULL DEFAULT 0</column>
+        <column>capabilities_json TEXT NOT NULL DEFAULT '[]'</column>
+        <column>created_at TEXT NOT NULL</column>
+      </table>
+
+      <table name="channel_pairings">
+        <column>id TEXT PRIMARY KEY</column>
+        <column>channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE</column>
+        <column>user_profile_id TEXT NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE</column>
+        <column>remote_id TEXT NOT NULL</column>
+        <column>created_at TEXT NOT NULL</column>
+        <column>UNIQUE (channel_id, remote_id)</column>
+      </table>
+
+      <table name="channels">
+        <column>id TEXT PRIMARY KEY</column>
+        <column>kind TEXT NOT NULL</column>
+        <column>config_json TEXT NOT NULL</column>
+        <column>default_agent_id TEXT NOT NULL REFERENCES agents(id)</column>
+        <column>default_user_profile_id TEXT REFERENCES user_profiles(id)</column>
+        <column>inbound_policy TEXT NOT NULL CHECK (inbound_policy IN ('open','paired_only','quarantine'))</column>
+        <column>egress_policy TEXT NOT NULL CHECK (egress_policy IN ('enabled','disabled'))</column>
+        <column>created_at TEXT NOT NULL</column>
+      </table>
+
+      <table name="webhooks">
+        <column>id TEXT PRIMARY KEY</column>
+        <column>name TEXT NOT NULL</column>
+        <column>url TEXT NOT NULL</column>
+        <column>secret_ref TEXT NOT NULL</column>
+        <column>event_filter_json TEXT NOT NULL</column>
+        <column>max_retries INTEGER NOT NULL DEFAULT 5</column>
+        <column>backoff TEXT NOT NULL CHECK (backoff IN ('exponential','linear'))</column>
+        <column>created_at TEXT NOT NULL</column>
+      </table>
+
+      <table name="usage_rollups">
+        <column>session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE</column>
+        <column>hour TEXT NOT NULL</column>
+        <column>provider TEXT NOT NULL</column>
+        <column>model TEXT NOT NULL</column>
+        <column>input_tokens INTEGER NOT NULL DEFAULT 0</column>
+        <column>output_tokens INTEGER NOT NULL DEFAULT 0</column>
+        <column>cache_tokens INTEGER NOT NULL DEFAULT 0</column>
+        <column>dollars REAL NOT NULL DEFAULT 0</column>
+        <column>PRIMARY KEY (session_id, hour, provider, model)</column>
+      </table>
+
+      <table name="audit">
+        <column>seq INTEGER PRIMARY KEY AUTOINCREMENT</column>
+        <column>ts TEXT NOT NULL</column>
+        <column>kind TEXT NOT NULL</column>
+        <column>actor_id TEXT</column>
+        <column>resource_type TEXT</column>
+        <column>resource_id TEXT</column>
+        <column>details_json TEXT NOT NULL DEFAULT '{}'</column>
+        <column>signature TEXT</column>
+      </table>
+
+    </tables>
+  </database_schema>
+
+  <api_endpoints_summary>
+
+    <domain name="Agents">
+      POST   /v1/agents                           - Create Agent and first version
+      GET    /v1/agents                           - List Agents (paginated)
+      GET    /v1/agents/{id}                      - Get Agent current view
+      DELETE /v1/agents/{id}                      - Soft-delete Agent
+      GET    /v1/agents/{id}/versions             - List all versions
+      POST   /v1/agents/{id}/versions             - Create new content-addressed version
+      GET    /v1/agents/{id}/versions/{ver}       - Get specific version
+    </domain>
+
+    <domain name="Sessions">
+      POST   /v1/sessions                                 - Create Session (pins agent_version)
+      GET    /v1/sessions                                 - List Sessions (filter by phase/agent/user/channel/parent)
+      GET    /v1/sessions/{id}                            - Get Session with current phase
+      POST   /v1/sessions/{id}/cancel                     - Terminate Session with reason=cancelled
+      POST   /v1/sessions/{id}/wake                       - Explicit harness wake
+      GET    /v1/sessions/{id}/events                     - Full event log (NDJSON or JSON)
+      GET    /v1/sessions/{id}/events?stream=true         - Live SSE stream (resumable via Last-Event-ID)
+      GET    /v1/sessions/{id}/threads                    - List Threads
+      POST   /v1/sessions/{id}/threads                    - Fork a Thread at an event_seq
+      GET    /v1/sessions/{id}/messages                   - List Messages (paginated)
+      POST   /v1/sessions/{id}/messages                   - Append user/system Message
+      POST   /v1/sessions/{id}/submit_tool_results        - Resume waiting_for_tool with results
+    </domain>
+
+    <domain name="Skills">
+      POST   /v1/skills                                   - Create Skill (agentskills.io schema)
+      GET    /v1/skills                                   - List installed Skills
+      GET    /v1/skills/{id}                              - Get Skill current view
+      GET    /v1/skills/{id}/versions                     - List versions
+      POST   /v1/skills/{id}/versions                     - Create new content-addressed version
+      GET    /v1/skills/{id}/versions/{ver}               - Get specific version
+    </domain>
+
+    <domain name="Environments">
+      POST   /v1/environments                             - Create Environment with backend config
+      GET    /v1/environments                             - List Environments
+      GET    /v1/environments/{id}                        - Get Environment
+      PATCH  /v1/environments/{id}                        - Update Environment config
+      DELETE /v1/environments/{id}                        - Remove Environment
+    </domain>
+
+    <domain name="Memory Stores">
+      POST   /v1/memory_stores                            - Create MemoryStore (scope + backend)
+      GET    /v1/memory_stores                            - List MemoryStores
+      DELETE /v1/memory_stores/{id}                       - Remove MemoryStore
+      POST   /v1/memory_stores/{id}/write                 - Write a memory (Honcho-style dialectic reconciliation)
+      POST   /v1/memory_stores/{id}/query                 - Hybrid retrieval (BM25 + vector + scope filter, fused via RRF)
+    </domain>
+
+    <domain name="Vaults">
+      POST   /v1/vaults                                   - Create Vault (backend: os_keychain or encrypted_file)
+      GET    /v1/vaults                                   - List Vaults
+      DELETE /v1/vaults/{id}                              - Remove Vault
+      POST   /v1/vaults/{id}/secrets                      - Store a secret (key + value)
+      GET    /v1/vaults/{id}/secrets/{name}/meta          - Get metadata only (NEVER value)
+    </domain>
+
+    <domain name="User Profiles">
+      POST   /v1/user_profiles                            - Create UserProfile
+      GET    /v1/user_profiles                            - List UserProfiles
+      GET    /v1/user_profiles/{id}                       - Get UserProfile
+      PATCH  /v1/user_profiles/{id}                       - Update UserProfile
+      DELETE /v1/user_profiles/{id}                       - Remove UserProfile
+    </domain>
+
+    <domain name="Channels">
+      POST   /v1/channels                                 - Create Channel (kind + config)
+      GET    /v1/channels                                 - List Channels
+      GET    /v1/channels/{id}                            - Get Channel
+      PATCH  /v1/channels/{id}                            - Update Channel
+      DELETE /v1/channels/{id}                            - Remove Channel
+      POST   /v1/channels/{id}/pair                       - Issue out-of-band pairing token
+      POST   /v1/channels/{id}/inbound                    - Channel driver pushes inbound event
+    </domain>
+
+    <domain name="Files / Messages / Webhooks / Models">
+      POST   /v1/files                                    - Upload file
+      GET    /v1/files/{id}                               - Get file metadata
+      GET    /v1/files/{id}/content                       - Stream file bytes
+      POST   /v1/messages                                 - Single-shot inference (stateless)
+      POST   /v1/webhooks                                 - Create Webhook
+      GET    /v1/webhooks                                 - List Webhooks
+      DELETE /v1/webhooks/{id}                            - Remove Webhook
+      GET    /v1/models                                   - List available models across providers
+    </domain>
+
+    <domain name="Meridian Extensions (/v1/x)">
+      POST   /v1/x/config/reload                          - Validate-then-atomic-swap config reload
+      POST   /v1/x/sessions/{id}/checkpoint               - Mid-session checkpoint
+      POST   /v1/x/sessions/{id}/resume                   - Resume from latest checkpoint
+      POST   /v1/x/sessions/{id}/replay                   - Deterministic fixture-driven replay
+      POST   /v1/x/sessions/{id}/spawn                    - Explicit child Session spawn
+      GET    /v1/x/capabilities                           - List declared capabilities
+      POST   /v1/x/capabilities                           - Register new capability namespace
+      GET    /v1/x/hooks                                  - List registered hooks
+      POST   /v1/x/hooks                                  - Register a new hook binding
+      GET    /v1/x/acp                                    - List ACP exchanges
+      POST   /v1/x/acp/inbound                            - Receive ACP message from peer system
+      POST   /v1/x/acp/outbound                           - Send ACP message to peer system
+      GET    /v1/x/skill_forge/proposals                  - List quarantined Forge proposals
+      POST   /v1/x/skill_forge/proposals/{id}/approve     - Promote proposal to active Skill
+      POST   /v1/x/skill_forge/proposals/{id}/reject      - Reject proposal
+      GET    /v1/x/kb                                     - KB index status
+      POST   /v1/x/kb/query                               - Hybrid retrieval query
+      POST   /v1/x/kb/index                               - Trigger manual re-index
+      POST   /v1/x/cron                                   - Create Cron resource
+      GET    /v1/x/cron                                   - List Cron resources
+      DELETE /v1/x/cron/{id}                              - Remove Cron resource
+      GET    /v1/x/budgets/reports                        - Cost breakdown by Agent / Session / tool / provider
+    </domain>
+
+    <domain name="Observability">
+      GET    /metrics                                     - Prometheus metrics
+      GET    /healthz                                     - Liveness probe
+      GET    /readyz                                      - Readiness probe (storage + providers + plugins ready)
+    </domain>
+
+  </api_endpoints_summary>
+
+  <ui_layout>
+    <structure>
+      Root layout (apps/meridian-ui):
+        - Top bar: Meridian logo, environment indicator (local/team/cloud), user avatar with Settings/Logout, dark-mode toggle
+        - Left sidebar (desktop) / hamburger menu (mobile): Sessions, Agents, Skills, Channels, Memory, Vaults, Environments, Live Canvas, Settings
+        - Main content area
+        - Right rail (session-detail pages only): tool-call inspector, capability/budget panel, event log tail
+        - Toast notification portal (top-right)
+
+      Pages:
+        /                                — Redirect to /sessions if any active, else /agents
+        /sessions                        — List of Sessions with phase filters, agent/channel filters, full-text search
+        /sessions/:id                    — Session viewer: message timeline + tool-call inlining + Live Canvas panel + event tail
+        /sessions/:id/replay             — Replay UI: pick fixtures, run deterministic replay, divergence inspector
+        /agents                          — List of Agents
+        /agents/:id                      — Agent inspector: current version, version history with diff, model_routing, capabilities, hooks, budgets
+        /agents/:id/versions/:ver        — Read-only AgentVersion view
+        /skills                          — Skill registry: installed Skills, Forge proposals (quarantine), activation toggles
+        /skills/forge                    — Forge proposal review UI: trajectory provenance + A/B comparison + approve/reject
+        /channels                        — Channel list and configuration
+        /channels/:id                    — Channel detail: pairing tokens, inbound policy, egress policy, recent events
+        /memory                          — MemoryStore browser with scope filters and dialectic-write log
+        /vaults                          — Vault inspector (NEVER displays values)
+        /environments                    — Environment list and backend config
+        /settings                        — Daemon config view (read-only mirror of ~/.meridian/config.yml), schema export button, reload button
+    </structure>
+  </ui_layout>
+
+  <design_system>
+    <color_palette>
+      Primary:    #6366f1 (meridian indigo)  - buttons, links, active phase indicators
+      Secondary:  #14b8a6 (teal)             - secondary actions, ACP and channel accents
+      Success:    #22c55e (green)            - approved skills, healthy phase indicators
+      Danger:     #ef4444 (red)              - terminated sessions, budget hard-breach, capability denied
+      Warning:    #f59e0b (amber)            - budget soft-warning, untrusted channel inbound, plaintext-credential warning
+      Background: #ffffff (light) / #0b1220 (dark)
+      Surface:    #f8fafc (light) / #131c31 (dark)
+      Text:       #0b1220 (light) / #e2e8f0 (dark)
+      Accent muted (event log timestamps, secondary metadata): #64748b
+    </color_palette>
+    <typography>
+      Font family: Inter, system-ui, sans-serif
+      Code/event-log: JetBrains Mono, monospace
+      Headings:    font-semibold
+      Body:        font-normal, leading-relaxed
+      Phase pill:  font-medium uppercase tracking-wide text-xs
+    </typography>
+    <animations>
+      Transitions:    150-200ms ease
+      Loading:        skeleton screens (not spinners) for message timeline and agent inspector
+      Modals:         fade + scale-in
+      Toasts:         slide-in from top-right, fade-out on dismiss
+      SSE tokens:     fade-in on append; no layout shift
+      Canvas widgets: appear with subtle fade + slide-up on canvas_op emit
+    </animations>
+  </design_system>
+
+  <key_interactions>
+
+    <interaction number="1" name="Dev-loop: spawn a planner that fan-outs 3 workers">
+      1. User runs: meridian run --agent planner-v1 "refactor the auth module into per-flow files"
+      2. Planner Agent emits a tool_use for parallel_runs with 3 subtasks (capability subset: fs.read+fs.write on src/auth/**, exec.shell on lint/test commands only)
+      3. Harness spawns 3 child Sessions, each with parent_session_id pointing at planner, each with declared cap subset (verified subset of parent grants)
+      4. Children run in parallel, each emits its own event log; usage.delta events roll up to the parent
+      5. As each child completes, child_session.completed events fire; planner reads results via thread.list_messages and synthesizes a final PR description
+      6. User sees the multi-agent tree in the CLI TUI (or the Web UI's /sessions/:id page) with budget rollups per child
+    </interaction>
+
+    <interaction number="2" name="PA-gateway: Telegram → cross-channel followup via webhook">
+      1. User DMs the Meridian Telegram bot: "What's on my calendar today?"
+      2. Telegram driver receives update, posts to POST /v1/channels/{tg_chan_id}/inbound
+      3. Gateway resolves remote_id → primary UserProfile via existing pairing; creates or wakes a Session attached to assistant Agent
+      4. Harness wakes, calls calendar tool (HTTP backend, credential via in-harness proxy), composes reply
+      5. Reply emitted to the Session, fans out via egress to attached Telegram channel
+      6. User asks: "Tell me when my 2pm moves." → Agent registers a Cron + Webhook combination; on webhook fire, the Telegram driver posts the followup
+    </interaction>
+
+    <interaction number="3" name="Deterministic replay of last week's failed run">
+      1. User opens /sessions/:id/replay in the Web UI for a failed session from 7 days ago
+      2. UI fetches the recorded fixtures from $STORAGE_ROOT/fixtures/&lt;session_id&gt;.*.ndjson
+      3. User clicks "Run replay" → POST /v1/x/sessions/{id}/replay with into_session_id=sess_new
+      4. Harness runs with FakeModelAdapter + FakeSandboxAdapter; events stream live into the UI
+      5. Divergence detected at event seq 47 (agent picked tool exec instead of the recorded read); replay aborts with structured error
+      6. UI highlights the diverging event and links to the prompt change in the active Agent version that caused the divergence
+    </interaction>
+
+    <interaction number="4" name="Mid-session checkpoint and human handoff">
+      1. A 4-hour migration session is at event seq 1240, phase waiting_for_tool, pending tool call to apply DB migration
+      2. User clicks "Checkpoint" in the Web UI → POST /v1/x/sessions/{id}/checkpoint
+      3. SessionCheckpoint written atomically; session phase transitions to paused
+      4. User manually edits a config file and runs a manual smoke test
+      5. User clicks "Resume" → POST /v1/x/sessions/{id}/resume; harness loads latest checkpoint, re-dispatches the pending tool call, continues
+      6. Daemon SIGKILL between checkpoint and resume → next daemon start auto-resumes paused sessions on harness wake
+    </interaction>
+
+    <interaction number="5" name="Skill Forge proposes a reusable skill from yesterday's session">
+      1. Background Forge worker watches terminated sessions; finds a cluster of 4 sessions performing similar "audit-then-rotate-secret" sequences
+      2. Forge calls the Model Router to distill a general skill body in agentskills.io shape
+      3. Forge stores as PROPOSAL with derived_from_session_ids and (optionally) A/B comparison metrics on test cases
+      4. Primary user opens /skills/forge in the Web UI; reviews the trajectory provenance and the A/B summary
+      5. User clicks Approve → POST /v1/x/skill_forge/proposals/{id}/approve; SkillVersion promoted to active with audit-logged human approval
+      6. The Skill is now available to Agents that opt-in via explicit per-Agent activation
+    </interaction>
+
+    <interaction number="6" name="Anthropic provider mode switching mid-conversation">
+      1. Session is using anthropic-oauth (subscription billing) for a worker role
+      2. Worker needs to summarize a 250k-token document; Model Router rule fires: estimated_input_tokens.gt 100000 → anthropic-api:claude-opus-4-7
+      3. ModelCall switches provider for this call only; usage.delta records the provider and dollar cost
+      4. After summary returns, subsequent calls revert to anthropic-oauth per the role=worker rule
+      5. Budget tracker shows hybrid usage in the per-Session report: $0.41 across 1 api_key call + 19 oauth calls (oauth = $0)
+    </interaction>
+
+    <interaction number="7" name="Capability denial returns to model, not orchestrator crash">
+      1. Agent is granted fs.read[src/**] and exec.shell, no net.fetch
+      2. Agent emits a tool_use for fetch_url with a github.com argument
+      3. Sandbox.execute() runs the capability intersection check → required net.fetch[github.com] not satisfied
+      4. Synthetic tool_result with is_error: true and code=capability_denied returned to the model
+      5. Model reads the error and chooses a different approach (uses local files via fs.read or asks the user for help)
+      6. Audit log records the denied capability request with agent_id and tool_call_id
+    </interaction>
+
+    <interaction number="8" name="Hot reload after rotating an Anthropic API key">
+      1. Operator rotates the api_key in 1Password and pushes the new value into the OS keychain Vault
+      2. Operator runs: meridian config reload (or sends SIGHUP)
+      3. Daemon validates current config (no changes to YAML structure), atomic-swaps provider registry
+      4. anthropic-api provider's resolve(auth) is lazy — next call to api.anthropic.com uses the new key
+      5. In-flight model calls on the old key complete naturally; new calls hit the new key — zero downtime
+      6. Audit event records the config.reloaded action; provider count unchanged
+    </interaction>
+
+  </key_interactions>
+
+  <implementation_steps>
+
+    <phase name="E0 — Skeleton (2 wk)">
+      Initialize uv Python workspace and pnpm TypeScript workspace at repo root
+      Configure Biome (TS lint+format), ruff (Python lint+format), pyright strict, import-linter (cross-package layering)
+      Wire CI to run codegen drift check, all linters, pytest, and vitest on every PR
+      Build the daemon HTTP API skeleton (FastAPI app, /v1 base path, error envelope, idempotency middleware, cursor pagination, OpenAPI export)
+      Run migrations 0001-0003 against SQLite WAL and wire the Repository pattern
+      Implement Session event log (NDJSON per-session, fsync policy, projections indexer)
+      Implement Agents and Sessions CRUD with content-addressed versioning
+      Wire SSE streaming for /v1/sessions/{id}/events with Last-Event-ID resumption
+      Build the AnthropicApiKeyProvider plugin and a minimal Model Router with declarative rules
+      Land in_process Python tool handler kind end-to-end
+      Implement the YAML config loader with Pydantic v2 model + validate-then-atomic-swap reload + SIGHUP handler
+    </phase>
+
+    <phase name="E1 — Sandbox + Capabilities (2 wk)">
+      Implement Sandbox.execute() dispatch surface with in_process / subprocess / mcp / http / container kinds
+      Wire JSON Schema validation on tool input AND output (errors return as tool_result with is_error: true, never orchestrator crash)
+      Implement capability grammar, intersection check, and sub-session subsetting
+      Wire FS jail and default-deny network policy with per-Agent allowlists
+      Land built-in tools: exec, read, write, grep, kb_search, spawn, parallel_runs, canvas
+    </phase>
+
+    <phase name="E2 — Environments + Model Router (2 wk)">
+      Implement local Environment backend with warm subprocess pool
+      Implement docker Environment backend with on-demand provisioning at tool-call time
+      Implement ssh Environment backend
+      Implement Environment Manager lifecycle (provision, warm pool, reclaim)
+      Land the environment conformance suite and run it green for all three v1 backends
+      Build provider plugins: anthropic-oauth (Claude Code CLI bridge with 4 contracts), openai, openrouter, ollama
+      Wire Model Router routing rules, fallback policy, per-call routing logging
+    </phase>
+
+    <phase name="E3 — Multi-agent + Hooks + ACP (2 wk)">
+      Implement agent.spawn with declared capability subset enforcement (verified subset of parent grants)
+      Implement typed handoff with output_schema validation; one retry on schema fail
+      Wire parent ↔ child budget aggregation and cancellation propagation
+      Land the full lifecycle hook surface (session_start through on_channel_outbound) with continue/mutate/veto/fail verdicts
+      Sandbox hooks via the same dispatch surface as tools
+      Build the ACP adapter (inbound + outbound) and pass Hermes's reference compliance suite where one exists
+    </phase>
+
+    <phase name="E4 — Memory + KB + Vaults + UserProfiles (2 wk)">
+      Implement MemoryStore primitive with hybrid retrieval (BM25 via FTS5 + vector via sqlite-vec + scope filter, fused via RRF)
+      Implement Honcho-style dialectic write reconciliation pipeline
+      Wire prompt template expansion ({{ memory.user.preferences.commit_style }})
+      Build workspace indexer (fsevents/inotify + tree-sitter) and kb_search tool
+      Implement Vault backends: os_keychain + encrypted_file
+      Wire credential proxy: inline ref substitution for low-sensitivity, in-harness proxy for high-sensitivity (OAuth)
+      Implement UserProfiles with primary-user designation and channel pairing tokens
+      Land CI test asserting no plaintext from vault keys appears in any log, event log, or hook stdin
+    </phase>
+
+    <phase name="E5 — Gateway + Channels (2 wk)">
+      Build the Channel resource and Gateway service with pairing, untrusted-inbound quarantine, cross-channel session fan-out
+      Implement v1 channel drivers: CLI, Telegram, Slack, Discord, generic Webhook
+      Land the Channel Driver SDK (packages/sdk-channel) so third parties can ship channels without forking
+      Begin mandatory internal dogfooding (PRD Risk R11 mitigation): real coding + PA workflows; weekly demo gate
+    </phase>
+
+    <phase name="E6 — Skill Forge (2 wk)">
+      Implement agentskills.io-compatible Skill packaging with content-addressed versioning and registry CRUD
+      Build Forge background worker: watch terminated sessions → cluster trajectories → distill via Router → propose
+      Quarantine forge proposals; require explicit human approval to promote
+      Per-Agent skill activation explicit (installing ≠ activating)
+      Wire auto-suggest opt-in mode with audit-logged user approval per skill_suggestion event
+      Land Forge precision and efficacy metrics; assert ≥ 50% precision on dogfood corpus
+    </phase>
+
+    <phase name="E7 — Checkpoints + Replay + Observability + Budgets + Web UI + TUI (3 wk)">
+      Mid-session checkpoint API with atomic file rename to latest.json
+      Resume endpoint that loads checkpoint, re-dispatches missing tool results, transitions phase, wakes harness
+      Deterministic replay endpoint with FakeModelAdapter + FakeSandboxAdapter + fixture NDJSON
+      Divergence detection pinned to the first deviating event seq
+      OpenTelemetry traces with the full span hierarchy; Prometheus metrics endpoint
+      Hard and soft budgets per Agent / Session / Run-span across tokens, dollars, wall-clock
+      TTY CLI renderer with token streaming, tool-call inlining, collapsed thinking blocks
+      meridian tui multi-session navigation
+      Thin React Web UI: session viewer, agent inspector, skill registry, vault inspector, settings mirror
+      Basic Live Canvas with v1 widget set (text, markdown, simple form, code, image, table, progress)
+      UI bundled in daemon binary and served at /ui when enabled
+    </phase>
+
+    <phase name="E8 — Migration + Hardening (3 wk)">
+      Implement meridian import openclaw with channel + session + MEMORY.md → memory_stores mapping and audit log
+      Implement meridian import hermes with skills + environments + providers + sessions + Honcho profiles + cron + ACP registry mapping and audit log
+      Crash-recovery soak: 10k synthetic SIGKILLs; assert &gt; 99% auto-resume rate
+      Multi-day, multi-agent, multi-channel integration soak with regression replay of every recorded session from E5 onwards
+      Environment + channel conformance suites green for every shipped backend and driver
+      v1 docs: PRD-quote reference, ARCHITECTURE-aligned operator guide, plugin SDK reference, troubleshooting recipes
+      ≥ 1 internal team running v1 daily for ≥ 2 weeks (acceptance gate per PRD §8.1)
+    </phase>
+
+  </implementation_steps>
+
+  <success_criteria>
+
+    <functionality>
+      Every functional requirement in PRD §5 passes its acceptance tests (the "SOTA bar" — none deferred per PRD §9.1)
+      Mirrors Anthropic beta SDK resource shape for /v1/agents, /v1/sessions, /v1/skills, /v1/environments, /v1/memory_stores, /v1/vaults, /v1/user_profiles, /v1/files, /v1/webhooks, /v1/messages — application code is portable cloud↔local modulo /v1/x extensions
+      Anthropic provider supports both api_key and oauth modes; routing rules can pin a mode per call; subscription-billed dev-loop economics work
+      All five v1 channels (CLI, Telegram, Slack, Discord, Webhook) ship with full pairing + quarantine + cross-channel session fan-out
+      All three v1 environment backends (local, docker, ssh) pass the conformance suite
+      Capability-by-intersection enforcement: no upward escalation across spawn, ever; cap denial returns to model as is_error: true
+      Deterministic replay: ≥ 99% of recorded sessions replay identically given canned model + sandbox responses
+      Mid-session checkpoint and resume work across daemon restart; SIGKILL recovery rate &gt; 99% over 10k synthetic crashes
+      Skill Forge produces agentskills.io-compatible proposals; precision ≥ 50% at v1 release
+      Multi-channel session: same Session reachable concurrently from CLI + Telegram + Webhook with consistent state
+      Migration importers: meridian import openclaw and meridian import hermes complete transactionally with audit log
+    </functionality>
+
+    <ux>
+      meridian CLI streams events to terminal with token-by-token rendering, tool-call inlining, and collapsed thinking blocks
+      Web UI session viewer renders the live event stream with no layout shift on token append
+      Web UI vault inspector NEVER displays secret values — metadata only
+      Live Canvas v1 widget set covers text, markdown, simple form, code block, image, table, and progress bar
+      Dark mode supported across all UI pages and persisted via system preference + manual toggle
+      All destructive actions (delete agent, delete vault, reject forge proposal) require a confirmation dialog
+      Loading skeletons (not spinners) used throughout
+      Toast notifications for every user action (channel paired, skill approved, checkpoint created)
+      Mean time to root cause for a failed session &lt; 5 min using only Meridian artifacts (event log + trace + audit + replay)
+    </ux>
+
+    <technical_quality>
+      Pyright strict and Biome check pass with zero warnings in CI
+      Import-linter passes: claude_agent_sdk scoped to providers/anthropic_oauth/**; provider SDKs each scoped to providers/&lt;name&gt;/**; SQL clients scoped to storage/**
+      OpenAPI codegen drift check passes: packages/sdk-ts and packages/sdk-py never out of date with packages/schemas/openapi.yaml
+      Replay regression: every recorded fixture session replays identically across CI hosts
+      Performance targets met: harness wake p99 &lt; 100ms (no model call); sandbox dispatch overhead p99 &lt; 20ms in-process / &lt; 200ms subprocess / &lt; 500ms container (warm pool); KB query p95 &lt; 250ms on 50k-file workspace; channel inbound → harness wake p95 &lt; 1s
+      Budget overrun discipline: average overrun vs configured soft budget &lt; 5%; 100% of hard-budget transitions tagged with correct reason code
+      Local-first verified: single binary + SQLite + local FS runs end-to-end with zero external services (model API aside; Ollama covers offline)
+      No plaintext from any vault:// key appears in any log file, event log, hook stdin, or trace attribute in a soak run
+      Forge precision ≥ 50% on dogfood corpus at v1 release
+      Test coverage thresholds: ≥ 80% on harness, sandbox, capability intersection, phase machine; ≥ 70% overall
+      No secrets committed to source control; .env.example documents all required environment variables
+    </technical_quality>
+
+  </success_criteria>
+
+</project_specification>

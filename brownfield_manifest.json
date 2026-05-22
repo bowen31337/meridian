@@ -1,0 +1,5 @@
+{
+  "stack": "React 18 with Vite (apps/meridian-ui)",
+  "test_baseline": "153 features completed",
+  "conventions": "ruff, pytest, biome"
+}

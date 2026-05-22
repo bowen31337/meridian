@@ -1,0 +1,2 @@
+.claw-forge/state.db filter=lfs diff=lfs merge=lfs -text
+training-export/meridian-corpus.jsonl filter=lfs diff=lfs merge=lfs -text
