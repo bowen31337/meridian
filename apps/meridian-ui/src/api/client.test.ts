@@ -45,22 +45,39 @@ describe("createApiClient", () => {
   it("listSessions appends query params", async () => {
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ sessions: [], total: 0 }));
     await client.listSessions({ limit: 10, offset: 20 });
-    const url = vi.mocked(fetch).mock.calls[0]![0] as string;
+    const url = vi.mocked(fetch).mock.calls[0]?.[0] as string;
     expect(url).toContain("limit=10");
     expect(url).toContain("offset=20");
   });
 
   it("createSession sends POST with JSON body", async () => {
-    const session = { id: "s1", status: "active", provider: "anthropic", model: "claude-3", created_at: "", updated_at: "" } as const;
+    const session = {
+      id: "s1",
+      status: "active",
+      provider: "anthropic",
+      model: "claude-3",
+      created_at: "",
+      updated_at: "",
+    } as const;
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse(session, 201));
 
     const result = await client.createSession({ provider: "anthropic", model: "claude-3" });
-    expect(fetch).toHaveBeenCalledWith(`${BASE_URL}/sessions`, expect.objectContaining({ method: "POST" }));
+    expect(fetch).toHaveBeenCalledWith(
+      `${BASE_URL}/sessions`,
+      expect.objectContaining({ method: "POST" }),
+    );
     expect(result).toEqual(session);
   });
 
   it("getSession fetches GET /sessions/:id", async () => {
-    const session = { id: "s1", status: "active", provider: "anthropic", model: "claude-3", created_at: "", updated_at: "" } as const;
+    const session = {
+      id: "s1",
+      status: "active",
+      provider: "anthropic",
+      model: "claude-3",
+      created_at: "",
+      updated_at: "",
+    } as const;
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse(session));
 
     const result = await client.getSession("s1");
@@ -72,7 +89,10 @@ describe("createApiClient", () => {
     vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 204 }));
 
     const result = await client.closeSession("s1");
-    expect(fetch).toHaveBeenCalledWith(`${BASE_URL}/sessions/s1`, expect.objectContaining({ method: "DELETE" }));
+    expect(fetch).toHaveBeenCalledWith(
+      `${BASE_URL}/sessions/s1`,
+      expect.objectContaining({ method: "DELETE" }),
+    );
     expect(result).toBeUndefined();
   });
 
@@ -90,12 +110,17 @@ describe("createApiClient", () => {
     vi.mocked(fetch).mockResolvedValueOnce(jsonResponse(data));
 
     const result = await client.listSessionEvents("s1");
-    expect(fetch).toHaveBeenCalledWith(`${BASE_URL}/sessions/s1/events`, expect.objectContaining({}));
+    expect(fetch).toHaveBeenCalledWith(
+      `${BASE_URL}/sessions/s1/events`,
+      expect.objectContaining({}),
+    );
     expect(result).toEqual(data);
   });
 
   it("throws ApiError for non-OK response", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ code: "SERVER_ERROR", message: "oops" }, 500));
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse({ code: "SERVER_ERROR", message: "oops" }, 500),
+    );
     try {
       await client.listSessions();
       expect.fail("should have thrown");

@@ -713,7 +713,8 @@ class _PgUserProfileRepo(UserProfileRepository):
     async def get(self, user_id: str) -> UserProfile | None:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT id, username, display_name, email, metadata, is_primary, created_at, updated_at"
+                "SELECT id, username, display_name, email, metadata, is_primary,"
+                " created_at, updated_at"
                 " FROM user_profiles WHERE id = $1",
                 user_id,
             )
@@ -724,7 +725,8 @@ class _PgUserProfileRepo(UserProfileRepository):
             await conn.execute(
                 """
                 INSERT INTO user_profiles
-                    (id, username, display_name, email, metadata, is_primary, created_at, updated_at)
+                    (id, username, display_name, email, metadata, is_primary,
+                     created_at, updated_at)
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 ON CONFLICT (id) DO UPDATE SET
                     username     = EXCLUDED.username,
@@ -751,7 +753,8 @@ class _PgUserProfileRepo(UserProfileRepository):
     async def list(self, filter: UserProfileFilter) -> list[UserProfile]:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT id, username, display_name, email, metadata, is_primary, created_at, updated_at"
+                "SELECT id, username, display_name, email, metadata, is_primary,"
+                " created_at, updated_at"
                 " FROM user_profiles ORDER BY username ASC LIMIT $1 OFFSET $2",
                 filter.limit,
                 filter.offset,

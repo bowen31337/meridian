@@ -174,10 +174,10 @@ describe("AgentDetailPage — loading / error", () => {
     await waitFor(() =>
       expect(auditLog.entries.some((e) => e.event === "agent.inspector.load.failed")).toBe(true),
     );
-    const entry = auditLog.entries.find((e) => e.event === "agent.inspector.load.failed")!;
-    expect(entry.level).toBe("error");
-    expect(entry.detail?.agent_id).toBe("agent_001");
-    expect(entry.detail?.message).toContain("boom");
+    const entry = auditLog.entries.find((e) => e.event === "agent.inspector.load.failed");
+    expect(entry?.level).toBe("error");
+    expect(entry?.detail?.agent_id).toBe("agent_001");
+    expect(entry?.detail?.message).toContain("boom");
   });
 });
 
@@ -308,7 +308,9 @@ describe("AgentDetailPage — version history", () => {
       .mockResolvedValueOnce(jsonResponse(AGENT_DETAIL))
       .mockResolvedValueOnce(jsonResponse(VERSION_LIST));
     render(<AgentDetailPage />, { wrapper: createWrapper() });
-    await waitFor(() => expect(screen.getByTestId(`current-badge-${CURRENT_VERSION.id}`)).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByTestId(`current-badge-${CURRENT_VERSION.id}`)).toBeTruthy(),
+    );
   });
 
   it("shows empty state when no versions exist", async () => {
@@ -335,15 +337,13 @@ describe("AgentDetailPage — version history", () => {
     const auditLog = makeAuditLog();
     render(<AgentDetailPage />, { wrapper: createWrapper({ auditLog }) });
     await waitFor(() =>
-      expect(
-        auditLog.entries.some((e) => e.event === "agent.inspector.versions.load.failed"),
-      ).toBe(true),
+      expect(auditLog.entries.some((e) => e.event === "agent.inspector.versions.load.failed")).toBe(
+        true,
+      ),
     );
-    const entry = auditLog.entries.find(
-      (e) => e.event === "agent.inspector.versions.load.failed",
-    )!;
-    expect(entry.level).toBe("error");
-    expect(entry.detail?.agent_id).toBe("agent_001");
+    const entry = auditLog.entries.find((e) => e.event === "agent.inspector.versions.load.failed");
+    expect(entry?.level).toBe("error");
+    expect(entry?.detail?.agent_id).toBe("agent_001");
   });
 });
 
@@ -384,12 +384,12 @@ describe("AgentDetailPage — version diff", () => {
     await waitFor(() => expect(screen.getByTestId("versions-table")).toBeTruthy());
     fireEvent.click(screen.getByTestId(`version-select-${HISTORICAL_VERSION.id}`));
     await waitFor(() => expect(screen.getByTestId("diff-row-model_routing")).toBeTruthy());
-    expect(
-      screen.getByTestId("diff-row-model_routing").getAttribute("aria-label"),
-    ).toBe("model_routing changed");
-    expect(
-      screen.getByTestId("diff-row-instructions").getAttribute("aria-label"),
-    ).toBe("instructions unchanged");
+    expect(screen.getByTestId("diff-row-model_routing").getAttribute("aria-label")).toBe(
+      "model_routing changed",
+    );
+    expect(screen.getByTestId("diff-row-instructions").getAttribute("aria-label")).toBe(
+      "instructions unchanged",
+    );
   });
 
   it("hides diff panel when same version is clicked again to deselect", async () => {
@@ -402,9 +402,7 @@ describe("AgentDetailPage — version diff", () => {
     fireEvent.click(btn);
     await waitFor(() => expect(screen.getByTestId("version-diff-panel")).toBeTruthy());
     fireEvent.click(btn);
-    await waitFor(() =>
-      expect(screen.queryByTestId("version-diff-panel")).toBeNull(),
-    );
+    await waitFor(() => expect(screen.queryByTestId("version-diff-panel")).toBeNull());
   });
 
   it("does not show diff panel when the current version is selected", async () => {

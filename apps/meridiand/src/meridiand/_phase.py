@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 
 from core_errors import (
@@ -145,7 +145,7 @@ def make_phase_router(
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(
             content={

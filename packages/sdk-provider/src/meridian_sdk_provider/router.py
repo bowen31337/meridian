@@ -406,9 +406,7 @@ class ModelRouter:
                     raise
 
                 # Log the failover decision before attempting the fallback.
-                self._write_audit_failover(
-                    primary_exc, provider.name, model_id, fb_rule, cat, opts
-                )
+                self._write_audit_failover(primary_exc, provider.name, model_id, fb_rule, cat, opts)
 
                 # Attempt the fallback provider.
                 fb_provider, fb_model_id, _slot = self._resolve(fb_rule.model)
@@ -467,7 +465,8 @@ class ModelRouter:
         Falls back to a character-based estimate when no such provider is registered.
         """
         all_providers = (
-            self._registry.providers() if self._registry is not None
+            self._registry.providers()
+            if self._registry is not None
             else list(self._providers.values())
         )
         for provider in all_providers:
@@ -488,7 +487,8 @@ class ModelRouter:
     def list_models(self) -> list[ModelEntry]:
         """Aggregate model listings from all registered providers."""
         all_providers = (
-            self._registry.providers() if self._registry is not None
+            self._registry.providers()
+            if self._registry is not None
             else list(self._providers.values())
         )
         result: list[ModelEntry] = []

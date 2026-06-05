@@ -107,9 +107,7 @@ def _convert_message(msg: Any) -> dict[str, Any]:
         return {"role": "tool", "tool_call_id": tool_result[0], "content": tool_result[1]}
 
     if tool_calls:
-        text_content: str | None = (
-            "".join(p["text"] for p in text_parts) if text_parts else None
-        )
+        text_content: str | None = "".join(p["text"] for p in text_parts) if text_parts else None
         return {"role": "assistant", "content": text_content, "tool_calls": tool_calls}
 
     if has_cache_control:

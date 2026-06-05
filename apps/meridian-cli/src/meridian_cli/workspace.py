@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass, field
 import datetime
 import json
+from pathlib import Path
 import subprocess
 import sys
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Callable
 
-from opentelemetry.trace import Span, Status, StatusCode
+from opentelemetry.trace import Span
 
 from ._telemetry import get_tracer, record_failure, record_invocation_event
 
@@ -94,7 +94,11 @@ class UvWorkspaceInitializer:
                 self._run_uv_sync(span)
             except WorkspaceError as exc:
                 record_failure(span, exc.code, exc.message)
-                _audit("error", "workspace.init.failed", {"code": exc.code, "message": exc.message, **exc.detail})
+                _audit(
+                    "error",
+                    "workspace.init.failed",
+                    {"code": exc.code, "message": exc.message, **exc.detail},
+                )
                 if self._on_error:
                     self._on_error(exc)
                 print(f"error: {exc}", file=sys.stderr)

@@ -337,5 +337,5 @@ class MemoryVecSearchFilter:
 class MemoryVecSearchResult:
     """A single result from a vec_search() ANN query."""
 
-    entry: "MemoryEntry"
+    entry: MemoryEntry
     distance: float

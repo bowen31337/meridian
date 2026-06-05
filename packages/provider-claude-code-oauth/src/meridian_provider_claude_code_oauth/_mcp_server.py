@@ -23,7 +23,6 @@ from typing import Any
 
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
-
 from sdk_sandbox._audit import AuditLog, NoopAuditLog
 from sdk_sandbox._runtime import RuntimeOptions, Sandbox
 from sdk_sandbox._types import AuditLogEntry, ExecutionContext, SandboxFailure
@@ -244,7 +243,9 @@ class SdkMcpServer:
 
             if not proxied_tool:
                 return self._fail(
-                    span, now, proxied_tool,
+                    span,
+                    now,
+                    proxied_tool,
                     'meridian_tool_proxy requires a non-empty "tool_name"',
                 )
 
@@ -262,11 +263,7 @@ class SdkMcpServer:
                 msg = result.error_message or str(result.content)
                 return self._fail(span, now, proxied_tool, msg)
 
-            content = (
-                result.content
-                if isinstance(result.content, str)
-                else str(result.content)
-            )
+            content = result.content if isinstance(result.content, str) else str(result.content)
             return _tool_result(content, is_error=False)
 
     def _fail(

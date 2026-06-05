@@ -56,8 +56,7 @@ def read_lock(lock_path: Path) -> CliLockEntry:
     """
     if not lock_path.exists():
         raise LockFileNotFoundError(
-            f"meridian.lock not found at {lock_path}; "
-            "run 'meridian lock' to generate it"
+            f"meridian.lock not found at {lock_path}; run 'meridian lock' to generate it"
         )
 
     try:
@@ -70,8 +69,7 @@ def read_lock(lock_path: Path) -> CliLockEntry:
 
     if data.get("version") != _LOCK_VERSION:
         raise LockFileFormatError(
-            f"Unsupported meridian.lock version {data.get('version')!r}; "
-            f"expected {_LOCK_VERSION}"
+            f"Unsupported meridian.lock version {data.get('version')!r}; expected {_LOCK_VERSION}"
         )
 
     pins = data.get("pins", {})

@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
+import json
 from typing import Any
 
 from core_errors import AuditLog, AuditLogEntry
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from ._pagination import MAX_PAGE_SIZE, DEFAULT_PAGE_SIZE, build_link_header
+from ._pagination import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE, build_link_header
 
 
 def _now() -> str:

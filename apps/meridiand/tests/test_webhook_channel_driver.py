@@ -11,16 +11,12 @@ Covers:
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock
 
-import httpx
-import pytest
 from fastapi.testclient import TestClient
+import httpx
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from meridiand._webhook_channel_driver import (
@@ -29,6 +25,7 @@ from meridiand._webhook_channel_driver import (
     _sign_payload,
 )
 from opentelemetry.trace import StatusCode
+import pytest
 from sdk_channel import (
     ChannelCapabilities,
     ChannelFailure,
@@ -39,7 +36,6 @@ from sdk_channel import (
 )
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -170,8 +166,11 @@ class TestDriverCapabilities:
 
         import asyncio
 
-        asyncio.get_event_loop().run_until_complete(driver.start(req))
-        asyncio.get_event_loop().run_until_complete(driver.stop(stop_req))
+        async def _run() -> None:
+            await driver.start(req)
+            await driver.stop(stop_req)
+
+        asyncio.run(_run())
 
 
 # ---------------------------------------------------------------------------
@@ -384,7 +383,6 @@ class TestDriverSendFailures:
         assert exc_info.value.code == "CHAN_SEND_FAILED"
 
     async def test_http_error_writes_audit_log(self, storage_root: Path) -> None:
-        from core_errors import NoopAuditLog
 
         class CapturingAuditLog:
             def __init__(self) -> None:
@@ -602,9 +600,7 @@ class TestInboundHmacVerification:
             },
         )
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "channel.inbound.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "channel.inbound.failed"
         )
         assert record["level"] == "error"
 
@@ -753,9 +749,7 @@ class TestInboundHmacVerification:
 
 
 class TestWebhookRoundTrip:
-    def test_outbound_route_delivers_and_returns_delivered_true(
-        self, storage_root: Path
-    ) -> None:
+    def test_outbound_route_delivers_and_returns_delivered_true(self, storage_root: Path) -> None:
         captured: list[httpx.Request] = []
 
         async def _handler(request: httpx.Request) -> httpx.Response:
@@ -763,15 +757,10 @@ class TestWebhookRoundTrip:
             return httpx.Response(200)
 
         transport = httpx.MockTransport(_handler)
-        client_http = httpx.Client(transport=transport)
+        httpx.Client(transport=transport)
 
         # We need an async http_client; use httpx.AsyncClient with the same transport.
-        import asyncio
-
-        async def _get_async_client() -> httpx.AsyncClient:
-            return httpx.AsyncClient(transport=httpx.MockTransport(_handler))
-
-        _async_client = asyncio.get_event_loop().run_until_complete(_get_async_client())
+        _async_client = httpx.AsyncClient(transport=httpx.MockTransport(_handler))
 
         channel_id = _make_channel_file(storage_root, channel_id="ch_rt")
         driver = WebhookChannelDriver(

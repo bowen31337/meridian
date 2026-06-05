@@ -50,13 +50,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -87,7 +85,9 @@ def _create_skill(client: TestClient, **overrides) -> dict:
     return resp.json()
 
 
-def _create_agent(client: TestClient, *, skill_activation_mode: str | None = "auto_suggest") -> dict:
+def _create_agent(
+    client: TestClient, *, skill_activation_mode: str | None = "auto_suggest"
+) -> dict:
     config: dict = {}
     if skill_activation_mode is not None:
         config["skill_activation_mode"] = skill_activation_mode
@@ -465,8 +465,7 @@ class TestEmitSuggestionAudit:
         skill = _create_skill(client)
         _emit_suggestion(client, agent["id"], skill["id"])
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill.suggestion.emitted"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.suggestion.emitted"
         )
         assert record["level"] == "info"
 
@@ -476,8 +475,7 @@ class TestEmitSuggestionAudit:
         skill = _create_skill(client)
         suggestion = _emit_suggestion(client, agent["id"], skill["id"])
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill.suggestion.emitted"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.suggestion.emitted"
         )
         assert record["detail"]["suggestion_id"] == suggestion["id"]
 
@@ -487,8 +485,7 @@ class TestEmitSuggestionAudit:
         skill = _create_skill(client)
         _emit_suggestion(client, agent["id"], skill["id"])
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill.suggestion.emitted"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.suggestion.emitted"
         )
         assert record["detail"]["agent_id"] == agent["id"]
 
@@ -498,8 +495,7 @@ class TestEmitSuggestionAudit:
         skill = _create_skill(client)
         _emit_suggestion(client, agent["id"], skill["id"])
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill.suggestion.emitted"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.suggestion.emitted"
         )
         assert record["detail"]["skill_id"] == skill["id"]
 
@@ -521,7 +517,8 @@ class TestEmitSuggestionAudit:
             json={"skill_id": "skill_missing"},
         )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill.suggestion.emit.failed"
         )
         assert record["level"] == "error"
@@ -534,7 +531,8 @@ class TestEmitSuggestionAudit:
             json={"skill_id": "skill_missing"},
         )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill.suggestion.emit.failed"
         )
         assert record["detail"]["agent_id"] == agent["id"]
@@ -547,7 +545,8 @@ class TestEmitSuggestionAudit:
             json={"skill_id": "skill_missing"},
         )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill.suggestion.emit.failed"
         )
         assert record["detail"]["skill_id"] == "skill_missing"
@@ -560,7 +559,8 @@ class TestEmitSuggestionAudit:
             json={"skill_id": "skill_missing"},
         )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill.suggestion.emit.failed"
         )
         assert "message" in record["detail"]
@@ -673,9 +673,7 @@ class TestApproveSuggestionSuccess:
         agent = _create_agent(client)
         skill = _create_skill(client)
         _emit_suggestion(client, agent["id"], skill["id"])
-        resp = client.post(
-            f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve"
-        )
+        resp = client.post(f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve")
         assert resp.status_code == 200
 
     def test_status_becomes_approved(self, storage_root: Path) -> None:
@@ -714,9 +712,7 @@ class TestApproveSuggestionSuccess:
         agent = _create_agent(client)
         skill = _create_skill(client)
         suggestion = _emit_suggestion(client, agent["id"], skill["id"])
-        client.post(
-            f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve"
-        )
+        client.post(f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve")
         path = storage_root / "skill_suggestions" / f"{suggestion['id']}.json"
         persisted = json.loads(path.read_text())
         assert persisted["status"] == "approved"
@@ -727,9 +723,7 @@ class TestApproveSuggestionSuccess:
         agent = _create_agent(client)
         skill = _create_skill(client)
         _emit_suggestion(client, agent["id"], skill["id"])
-        client.post(
-            f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve"
-        )
+        client.post(f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve")
         activations = list((storage_root / "skill_activations").glob("*.json"))
         assert len(activations) == 1
 
@@ -738,12 +732,8 @@ class TestApproveSuggestionSuccess:
         agent = _create_agent(client)
         skill = _create_skill(client)
         _emit_suggestion(client, agent["id"], skill["id"])
-        client.post(
-            f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve"
-        )
-        activation_path = next(
-            (storage_root / "skill_activations").glob("*.json")
-        )
+        client.post(f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve")
+        activation_path = next((storage_root / "skill_activations").glob("*.json"))
         activation = json.loads(activation_path.read_text())
         assert activation["status"] == "active"
 
@@ -752,12 +742,8 @@ class TestApproveSuggestionSuccess:
         agent = _create_agent(client)
         skill = _create_skill(client)
         _emit_suggestion(client, agent["id"], skill["id"])
-        client.post(
-            f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve"
-        )
-        activation_path = next(
-            (storage_root / "skill_activations").glob("*.json")
-        )
+        client.post(f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve")
+        activation_path = next((storage_root / "skill_activations").glob("*.json"))
         activation = json.loads(activation_path.read_text())
         assert activation["agent_id"] == agent["id"]
 
@@ -766,12 +752,8 @@ class TestApproveSuggestionSuccess:
         agent = _create_agent(client)
         skill = _create_skill(client)
         _emit_suggestion(client, agent["id"], skill["id"])
-        client.post(
-            f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve"
-        )
-        activation_path = next(
-            (storage_root / "skill_activations").glob("*.json")
-        )
+        client.post(f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve")
+        activation_path = next((storage_root / "skill_activations").glob("*.json"))
         activation = json.loads(activation_path.read_text())
         assert activation["skill_id"] == skill["id"]
 
@@ -780,12 +762,8 @@ class TestApproveSuggestionSuccess:
         agent = _create_agent(client)
         skill = _create_skill(client)
         _emit_suggestion(client, agent["id"], skill["id"])
-        client.post(
-            f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve"
-        )
-        activation_path = next(
-            (storage_root / "skill_activations").glob("*.json")
-        )
+        client.post(f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve")
+        activation_path = next((storage_root / "skill_activations").glob("*.json"))
         activation = json.loads(activation_path.read_text())
         assert activation["skill_version_id"] == skill["version"]["id"]
 
@@ -794,12 +772,8 @@ class TestApproveSuggestionSuccess:
         agent = _create_agent(client)
         skill = _create_skill(client)
         _emit_suggestion(client, agent["id"], skill["id"])
-        client.post(
-            f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve"
-        )
-        activation_path = next(
-            (storage_root / "skill_activations").glob("*.json")
-        )
+        client.post(f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve")
+        activation_path = next((storage_root / "skill_activations").glob("*.json"))
         activation = json.loads(activation_path.read_text())
         assert activation["approved_at"] is not None
 
@@ -812,16 +786,12 @@ class TestApproveSuggestionSuccess:
 class TestApproveSuggestionErrors:
     def test_no_suggestion_returns_404(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        resp = client.post(
-            f"/v1/agents/{_AGENT_ID}/skill_suggestions/skill_missing/approve"
-        )
+        resp = client.post(f"/v1/agents/{_AGENT_ID}/skill_suggestions/skill_missing/approve")
         assert resp.status_code == 404
 
     def test_no_suggestion_error_code(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.post(
-            f"/v1/agents/{_AGENT_ID}/skill_suggestions/skill_missing/approve"
-        ).json()
+        body = client.post(f"/v1/agents/{_AGENT_ID}/skill_suggestions/skill_missing/approve").json()
         assert body["error"]["code"] == "skill_suggestion_not_found"
 
     def test_already_approved_returns_409(self, storage_root: Path) -> None:
@@ -830,9 +800,7 @@ class TestApproveSuggestionErrors:
         skill = _create_skill(client)
         _emit_suggestion(client, agent["id"], skill["id"])
         _approve_suggestion(client, agent["id"], skill["id"])
-        resp = client.post(
-            f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve"
-        )
+        resp = client.post(f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve")
         assert resp.status_code == 409
 
     def test_already_approved_error_code(self, storage_root: Path) -> None:
@@ -858,9 +826,7 @@ class TestApproveSuggestionAudit:
         agent = _create_agent(client)
         skill = _create_skill(client)
         _emit_suggestion(client, agent["id"], skill["id"])
-        client.post(
-            f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve"
-        )
+        client.post(f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve")
         records = _audit_records(storage_root)
         assert any(r.get("event") == "skill.suggestion.approved" for r in records)
 
@@ -869,12 +835,9 @@ class TestApproveSuggestionAudit:
         agent = _create_agent(client)
         skill = _create_skill(client)
         _emit_suggestion(client, agent["id"], skill["id"])
-        client.post(
-            f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve"
-        )
+        client.post(f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill.suggestion.approved"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.suggestion.approved"
         )
         assert record["level"] == "info"
 
@@ -883,12 +846,9 @@ class TestApproveSuggestionAudit:
         agent = _create_agent(client)
         skill = _create_skill(client)
         suggestion = _emit_suggestion(client, agent["id"], skill["id"])
-        client.post(
-            f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve"
-        )
+        client.post(f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill.suggestion.approved"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.suggestion.approved"
         )
         assert record["detail"]["suggestion_id"] == suggestion["id"]
 
@@ -897,12 +857,9 @@ class TestApproveSuggestionAudit:
         agent = _create_agent(client)
         skill = _create_skill(client)
         _emit_suggestion(client, agent["id"], skill["id"])
-        client.post(
-            f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve"
-        )
+        client.post(f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill.suggestion.approved"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.suggestion.approved"
         )
         assert record["detail"]["activation_id"].startswith("skillact_")
 
@@ -911,12 +868,9 @@ class TestApproveSuggestionAudit:
         agent = _create_agent(client)
         skill = _create_skill(client)
         _emit_suggestion(client, agent["id"], skill["id"])
-        client.post(
-            f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve"
-        )
+        client.post(f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill.suggestion.approved"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.suggestion.approved"
         )
         assert record["detail"]["agent_id"] == agent["id"]
 
@@ -925,30 +879,24 @@ class TestApproveSuggestionAudit:
         agent = _create_agent(client)
         skill = _create_skill(client)
         _emit_suggestion(client, agent["id"], skill["id"])
-        client.post(
-            f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve"
-        )
+        client.post(f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill.suggestion.approved"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.suggestion.approved"
         )
         assert record["detail"]["skill_id"] == skill["id"]
 
     def test_failure_writes_approve_failed_event(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        client.post(
-            f"/v1/agents/{_AGENT_ID}/skill_suggestions/skill_missing/approve"
-        )
+        client.post(f"/v1/agents/{_AGENT_ID}/skill_suggestions/skill_missing/approve")
         records = _audit_records(storage_root)
         assert any(r.get("event") == "skill.suggestion.approve.failed" for r in records)
 
     def test_failure_audit_level_is_error(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        client.post(
-            f"/v1/agents/{_AGENT_ID}/skill_suggestions/skill_missing/approve"
-        )
+        client.post(f"/v1/agents/{_AGENT_ID}/skill_suggestions/skill_missing/approve")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill.suggestion.approve.failed"
         )
         assert record["level"] == "error"
@@ -973,18 +921,14 @@ class TestApproveSuggestionOtel:
         skill = _create_skill(client)
         _emit_suggestion(client, agent["id"], skill["id"])
         _otel_exporter.clear()
-        client.post(
-            f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve"
-        )
+        client.post(f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve")
         names = [s.name for s in _otel_exporter.get_finished_spans()]
         assert "skill.suggestion.approve" in names
 
     def test_failure_emits_span(self, storage_root: Path) -> None:
         client = self._client(storage_root)
         _otel_exporter.clear()
-        client.post(
-            f"/v1/agents/{_AGENT_ID}/skill_suggestions/skill_missing/approve"
-        )
+        client.post(f"/v1/agents/{_AGENT_ID}/skill_suggestions/skill_missing/approve")
         names = [s.name for s in _otel_exporter.get_finished_spans()]
         assert "skill.suggestion.approve" in names
 
@@ -993,9 +937,7 @@ class TestApproveSuggestionOtel:
 
         client = self._client(storage_root)
         _otel_exporter.clear()
-        client.post(
-            f"/v1/agents/{_AGENT_ID}/skill_suggestions/skill_missing/approve"
-        )
+        client.post(f"/v1/agents/{_AGENT_ID}/skill_suggestions/skill_missing/approve")
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
         span = spans.get("skill.suggestion.approve")
         assert span is not None
@@ -1007,9 +949,7 @@ class TestApproveSuggestionOtel:
         skill = _create_skill(client)
         suggestion = _emit_suggestion(client, agent["id"], skill["id"])
         _otel_exporter.clear()
-        client.post(
-            f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve"
-        )
+        client.post(f"/v1/agents/{agent['id']}/skill_suggestions/{skill['id']}/approve")
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
         span = spans.get("skill.suggestion.approve")
         assert span is not None

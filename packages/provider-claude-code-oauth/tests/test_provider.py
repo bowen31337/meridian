@@ -34,10 +34,17 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from opentelemetry.trace import StatusCode
+from meridian_sdk_provider.audit import AuditLogEntry
+from meridian_sdk_provider.errors import ProviderCallError
+from meridian_sdk_provider.types import (
+    Message,
+    MessageStartEvent,
+    MessageStopEvent,
+    ModelCallOpts,
+    TextDeltaEvent,
+)
 
 from meridian_provider_claude_code_oauth._lock import (
     CliLockEntry,
@@ -51,9 +58,6 @@ from meridian_provider_claude_code_oauth._subprocess import (
     CliSubprocessManager,
 )
 from meridian_provider_claude_code_oauth.provider import SystemOAuthProvider
-from meridian_sdk_provider.audit import AuditLogEntry
-from meridian_sdk_provider.errors import ProviderCallError
-from meridian_sdk_provider.types import Message, MessageStartEvent, MessageStopEvent, ModelCallOpts, TextDeltaEvent
 
 # Path to the real CLI stub script used for integration-style subprocess tests.
 _STUB = str(Path(__file__).parent / "_cli_stub.py")
@@ -130,10 +134,14 @@ class _CapturingAuditLog:
 class TestLockFile:
     def test_valid_lock_returns_entry(self, tmp_path: Path) -> None:
         lock = tmp_path / "meridian.lock"
-        lock.write_text(json.dumps({
-            "version": 1,
-            "pins": {"claude-code": {"version": "1.2.3", "channel": "stable"}},
-        }))
+        lock.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "pins": {"claude-code": {"version": "1.2.3", "channel": "stable"}},
+                }
+            )
+        )
         entry = read_lock(lock)
         assert isinstance(entry, CliLockEntry)
         assert entry.cli_version == "1.2.3"
@@ -141,10 +149,14 @@ class TestLockFile:
 
     def test_default_channel_is_stable(self, tmp_path: Path) -> None:
         lock = tmp_path / "meridian.lock"
-        lock.write_text(json.dumps({
-            "version": 1,
-            "pins": {"claude-code": {"version": "2.0.0"}},
-        }))
+        lock.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "pins": {"claude-code": {"version": "2.0.0"}},
+                }
+            )
+        )
         entry = read_lock(lock)
         assert entry.channel == "stable"
 
@@ -178,19 +190,27 @@ class TestLockFile:
 
     def test_empty_version_string_raises(self, tmp_path: Path) -> None:
         lock = tmp_path / "meridian.lock"
-        lock.write_text(json.dumps({
-            "version": 1,
-            "pins": {"claude-code": {"version": "   "}},
-        }))
+        lock.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "pins": {"claude-code": {"version": "   "}},
+                }
+            )
+        )
         with pytest.raises(LockFileFormatError):
             read_lock(lock)
 
     def test_missing_version_field_raises(self, tmp_path: Path) -> None:
         lock = tmp_path / "meridian.lock"
-        lock.write_text(json.dumps({
-            "version": 1,
-            "pins": {"claude-code": {"channel": "stable"}},
-        }))
+        lock.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "pins": {"claude-code": {"channel": "stable"}},
+                }
+            )
+        )
         with pytest.raises(LockFileFormatError):
             read_lock(lock)
 
@@ -206,7 +226,8 @@ class TestCliSubprocessManagerSpawn:
 
         mgr = CliSubprocessManager(sys.executable, "1.0.0", health_interval_s=9999)
         mgr._proc = await asyncio.create_subprocess_exec(
-            sys.executable, _STUB,
+            sys.executable,
+            _STUB,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -221,7 +242,8 @@ class TestCliSubprocessManagerSpawn:
 
         mgr = CliSubprocessManager(sys.executable, "1.0.0", health_interval_s=9999)
         mgr._proc = await asyncio.create_subprocess_exec(
-            sys.executable, _STUB,
+            sys.executable,
+            _STUB,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -232,7 +254,6 @@ class TestCliSubprocessManagerSpawn:
 
 class TestCliSubprocessManagerCall:
     def _make_manager(self, *, env: dict | None = None) -> CliSubprocessManager:
-        import asyncio
         import os
 
         mgr = CliSubprocessManager(
@@ -246,8 +267,10 @@ class TestCliSubprocessManagerCall:
 
         async def _stub_spawn() -> None:
             import asyncio as _asyncio
+
             mgr._proc = await _asyncio.create_subprocess_exec(
-                sys.executable, _STUB,
+                sys.executable,
+                _STUB,
                 stdin=_asyncio.subprocess.PIPE,
                 stdout=_asyncio.subprocess.PIPE,
                 stderr=_asyncio.subprocess.PIPE,
@@ -328,7 +351,8 @@ class TestCliSubprocessManagerCall:
 
         async def _clean_spawn() -> None:
             mgr._proc = await asyncio.create_subprocess_exec(
-                sys.executable, _STUB,
+                sys.executable,
+                _STUB,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
@@ -359,7 +383,8 @@ class TestCliSubprocessManagerHealthCheck:
 
         mgr = CliSubprocessManager(sys.executable, "1.0.0", health_interval_s=9999)
         mgr._proc = await asyncio.create_subprocess_exec(
-            sys.executable, _STUB,
+            sys.executable,
+            _STUB,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -381,7 +406,8 @@ class TestCliSubprocessManagerHealthCheck:
         # Spawn stub in no-pong mode so health check times out.
         env = {**os.environ, "CLI_STUB_NO_PONG": "1"}
         mgr._proc = await asyncio.create_subprocess_exec(
-            sys.executable, _STUB,
+            sys.executable,
+            _STUB,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -394,8 +420,10 @@ class TestCliSubprocessManagerHealthCheck:
 
         async def _spawn() -> None:
             import asyncio as _asyncio
+
             mgr._proc = await _asyncio.create_subprocess_exec(
-                sys.executable, _STUB,
+                sys.executable,
+                _STUB,
                 stdin=_asyncio.subprocess.PIPE,
                 stdout=_asyncio.subprocess.PIPE,
                 stderr=_asyncio.subprocess.PIPE,
@@ -411,15 +439,16 @@ class TestCliSubprocessManagerHealthCheck:
         await mgr._proc.wait()
 
     async def test_health_check_on_dead_process_respawns(self) -> None:
-        import asyncio
 
         mgr = CliSubprocessManager(sys.executable, "1.0.0", health_interval_s=9999)
         spawned: list[int] = []
 
         async def _spawn() -> None:
             import asyncio as _asyncio
+
             mgr._proc = await _asyncio.create_subprocess_exec(
-                sys.executable, _STUB,
+                sys.executable,
+                _STUB,
                 stdin=_asyncio.subprocess.PIPE,
                 stdout=_asyncio.subprocess.PIPE,
                 stderr=_asyncio.subprocess.PIPE,
@@ -466,10 +495,13 @@ class _FakeManager:
             self.call_active = False
 
 
-def _make_provider(*, manager: _FakeManager, tracer: _MockTracer | None = None) -> SystemOAuthProvider:
+def _make_provider(
+    *, manager: _FakeManager, tracer: _MockTracer | None = None
+) -> SystemOAuthProvider:
     p = SystemOAuthProvider(_manager=manager)
     if tracer is not None:
         import meridian_provider_claude_code_oauth.provider as _mod
+
         _mod.get_tracer = lambda: tracer  # type: ignore[assignment]
     return p
 
@@ -543,6 +575,7 @@ class TestSystemOAuthProviderCall:
     async def test_call_emits_otel_span(self, monkeypatch: pytest.MonkeyPatch) -> None:
         tracer = _MockTracer()
         import meridian_provider_claude_code_oauth.provider as _mod
+
         monkeypatch.setattr(_mod, "get_tracer", lambda: tracer)
 
         mgr = _FakeManager()
@@ -553,11 +586,10 @@ class TestSystemOAuthProviderCall:
 
         assert tracer.span.name == "claude_code_oauth.model.call"
 
-    async def test_span_has_provider_name_attribute(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_span_has_provider_name_attribute(self, monkeypatch: pytest.MonkeyPatch) -> None:
         tracer = _MockTracer()
         import meridian_provider_claude_code_oauth.provider as _mod
+
         monkeypatch.setattr(_mod, "get_tracer", lambda: tracer)
 
         mgr = _FakeManager()
@@ -570,6 +602,7 @@ class TestSystemOAuthProviderCall:
     async def test_span_has_model_attribute(self, monkeypatch: pytest.MonkeyPatch) -> None:
         tracer = _MockTracer()
         import meridian_provider_claude_code_oauth.provider as _mod
+
         monkeypatch.setattr(_mod, "get_tracer", lambda: tracer)
 
         mgr = _FakeManager()
@@ -582,6 +615,7 @@ class TestSystemOAuthProviderCall:
     async def test_span_has_invocation_event(self, monkeypatch: pytest.MonkeyPatch) -> None:
         tracer = _MockTracer()
         import meridian_provider_claude_code_oauth.provider as _mod
+
         monkeypatch.setattr(_mod, "get_tracer", lambda: tracer)
 
         mgr = _FakeManager()
@@ -597,6 +631,7 @@ class TestSystemOAuthProviderCall:
 
         tracer = _MockTracer()
         import meridian_provider_claude_code_oauth.provider as _mod
+
         monkeypatch.setattr(_mod, "get_tracer", lambda: tracer)
 
         mgr = _FakeManager()
@@ -662,10 +697,14 @@ class TestSystemOAuthProviderLifecycle:
 class TestSystemOAuthProviderLockIntegration:
     def test_provider_reads_lock_file(self, tmp_path: Path) -> None:
         lock = tmp_path / "meridian.lock"
-        lock.write_text(json.dumps({
-            "version": 1,
-            "pins": {"claude-code": {"version": "9.9.9"}},
-        }))
+        lock.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "pins": {"claude-code": {"version": "9.9.9"}},
+                }
+            )
+        )
         # Build without injected manager so SystemOAuthProvider creates a real
         # CliSubprocessManager and reads the lock into it.
         provider = SystemOAuthProvider(

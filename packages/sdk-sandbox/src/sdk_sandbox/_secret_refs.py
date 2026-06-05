@@ -12,10 +12,10 @@ after writing the audit log entry; callers convert this to a
 
 from __future__ import annotations
 
-import json
-import re
 from datetime import UTC, datetime
+import json
 from pathlib import Path
+import re
 from typing import Any
 
 from opentelemetry.trace import Status, StatusCode

@@ -31,13 +31,10 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
-
 from sdk_environment import (
-    AuditLogEntry,
     CapabilityEnvelope,
     EnvironmentDriver,
     EnvironmentFailure,
@@ -52,8 +49,6 @@ from sdk_environment import (
     RuntimeOptions,
     WorkerPool,
 )
-from sdk_environment._audit import AuditLog
-from sdk_environment._pool import _WorkerEntry
 
 from .conftest import CapturingAuditLog
 

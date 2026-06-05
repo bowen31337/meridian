@@ -16,10 +16,10 @@ SQLite >= 3.24 (Python 3.11 ships with SQLite >= 3.39).  Placeholders are `?`.
 
 from __future__ import annotations
 
-import json
-import sqlite3
 from datetime import UTC, datetime
+import json
 from pathlib import Path
+import sqlite3
 from typing import Any
 
 import aiosqlite
@@ -681,9 +681,7 @@ class _SqliteMemoryRepo(MemoryRepository):
         ) as cur:
             row = await cur.fetchone()
         if row is not None:
-            await self._conn.execute(
-                "DELETE FROM memory_entries_vec WHERE rowid = ?", (row[0],)
-            )
+            await self._conn.execute("DELETE FROM memory_entries_vec WHERE rowid = ?", (row[0],))
         await self._conn.execute("DELETE FROM memory_entries WHERE id = ?", (entry_id,))
         await self._conn.commit()
 
@@ -708,7 +706,11 @@ class _SqliteMemoryRepo(MemoryRepository):
 
         with tracer.start_as_current_span(
             "repo.memory.save_embedding",
-            attributes={"entity.type": "memory", "entity.id": entry_id, "repo.operation": "save_embedding"},
+            attributes={
+                "entity.type": "memory",
+                "entity.id": entry_id,
+                "repo.operation": "save_embedding",
+            },
         ) as span:
             record_invocation_event(
                 span,
@@ -1133,7 +1135,8 @@ class _SqliteAuditLogEntryRepo(AuditLogEntryRepository):
         where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
         params.extend([filter.limit, filter.offset])
         async with self._conn.execute(
-            f"SELECT id, level, event, entity_type, entity_id, operation, timestamp, detail, signature"
+            "SELECT id, level, event, entity_type, entity_id, operation,"
+            " timestamp, detail, signature"
             f" FROM audit_log_entries {where} ORDER BY timestamp ASC LIMIT ? OFFSET ?",
             params,
         ) as cur:
@@ -1351,9 +1354,7 @@ class SqliteRepositoryDriver(RepositoryDriver):
                     )
 
                 pending = [
-                    (v, fname, sql)
-                    for v, fname, sql in load_migration_files()
-                    if v > db_version
+                    (v, fname, sql) for v, fname, sql in load_migration_files() if v > db_version
                 ]
                 for version, filename, sql in pending:
                     stmts = [s.strip() for s in sql.split(";") if s.strip()]

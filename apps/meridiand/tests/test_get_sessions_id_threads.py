@@ -10,7 +10,8 @@ Tests cover:
   - items are sorted by created_at descending (most recent first).
   - Returns empty items list when the session threads directory does not exist.
   - cursor pagination: limit query param controls page size.
-  - next_cursor is present in response body and Link header is set when more pages exist (middleware converts X-Next-Cursor).
+  - next_cursor is present in response body and Link header is set when more pages
+    exist (middleware converts X-Next-Cursor).
   - next_cursor is null when all items fit on one page.
   - cursor param advances to the next page.
   - Invalid cursor returns 400 with code "cursor_invalid".
@@ -32,14 +33,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from storage_event_log import EventLogWriter, LocalEventLogWriter
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers

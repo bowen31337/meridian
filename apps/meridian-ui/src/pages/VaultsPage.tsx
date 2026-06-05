@@ -1,5 +1,5 @@
-import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import type { SecretMeta, Vault } from "../api/client.js";
 import { createApiClient } from "../api/client.js";
 import { useMeridianApi } from "../api/context.js";
@@ -17,7 +17,7 @@ function useListVaultSecrets(vaultId: string | null) {
   const { baseUrl } = useMeridianApi();
   return useQuery({
     queryKey: queryKeys.vaults.secrets(vaultId ?? ""),
-    queryFn: () => createApiClient(baseUrl).listVaultSecrets(vaultId!),
+    queryFn: () => createApiClient(baseUrl).listVaultSecrets(vaultId ?? ""),
     enabled: vaultId !== null,
   });
 }
@@ -26,8 +26,7 @@ function useDeleteVaultSecret(vaultId: string | null) {
   const { baseUrl } = useMeridianApi();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (name: string) =>
-      createApiClient(baseUrl).deleteVaultSecret(vaultId!, name),
+    mutationFn: (name: string) => createApiClient(baseUrl).deleteVaultSecret(vaultId ?? "", name),
     onSuccess: () => {
       if (vaultId) {
         queryClient.invalidateQueries({ queryKey: queryKeys.vaults.secrets(vaultId) });
@@ -70,13 +69,19 @@ function SecretRow({
         {confirming ? (
           <span>
             Delete &quot;{secret.key}&quot;?{" "}
-            <button onClick={handleConfirm} data-testid={`confirm-delete-${secret.key}`}>
+            <button
+              type="button"
+              onClick={handleConfirm}
+              data-testid={`confirm-delete-${secret.key}`}
+            >
               Confirm
             </button>{" "}
-            <button onClick={handleCancel}>Cancel</button>
+            <button type="button" onClick={handleCancel}>
+              Cancel
+            </button>
           </span>
         ) : (
-          <button onClick={handleDeleteClick} data-testid={`delete-${secret.key}`}>
+          <button type="button" onClick={handleDeleteClick} data-testid={`delete-${secret.key}`}>
             Delete
           </button>
         )}
@@ -108,9 +113,7 @@ function SecretsPanel({ vault }: { vault: Vault }) {
     <div data-testid="secrets-panel">
       {deleteMutation.isError && (
         <p role="alert" data-testid="delete-error">
-          {deleteMutation.error instanceof Error
-            ? deleteMutation.error.message
-            : "Delete failed"}
+          {deleteMutation.error instanceof Error ? deleteMutation.error.message : "Delete failed"}
         </p>
       )}
       {items.length === 0 ? (
@@ -171,9 +174,8 @@ export function VaultsPage() {
           {vaults.map((vault) => (
             <li key={vault.id}>
               <button
-                onClick={() =>
-                  setSelectedVaultId(vault.id === selectedVaultId ? null : vault.id)
-                }
+                type="button"
+                onClick={() => setSelectedVaultId(vault.id === selectedVaultId ? null : vault.id)}
                 aria-pressed={vault.id === selectedVaultId}
                 data-testid={`vault-item-${vault.id}`}
               >

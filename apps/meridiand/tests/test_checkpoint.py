@@ -22,16 +22,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -208,11 +203,7 @@ class TestCheckpointEndpoint:
         client.post("/v1/x/sessions/audit-fail-sess/checkpoint", json=_make_body())
         audit_path = storage_root / "audit.ndjson"
         assert audit_path.exists()
-        records = [
-            json.loads(line)
-            for line in audit_path.read_text().splitlines()
-            if line.strip()
-        ]
+        records = [json.loads(line) for line in audit_path.read_text().splitlines() if line.strip()]
         assert any(r.get("event") == "checkpoint.create.failed" for r in records)
 
     def test_failure_audit_detail_has_session_id(self, storage_root: Path) -> None:
@@ -223,11 +214,7 @@ class TestCheckpointEndpoint:
         client = _make_client(storage_root, audit)
         client.post("/v1/x/sessions/detail-fail-sess/checkpoint", json=_make_body(seq=9))
         audit_path = storage_root / "audit.ndjson"
-        records = [
-            json.loads(line)
-            for line in audit_path.read_text().splitlines()
-            if line.strip()
-        ]
+        records = [json.loads(line) for line in audit_path.read_text().splitlines() if line.strip()]
         record = next(r for r in records if r.get("event") == "checkpoint.create.failed")
         assert record["detail"]["session_id"] == "detail-fail-sess"
         assert record["detail"]["seq"] == 9

@@ -24,6 +24,8 @@ from core_errors import (
     record_error,
     record_invocation_event,
 )
+from meridian_provider_anthropic_apikey import AnthropicApiKeyProvider
+from meridian_provider_claude_code_oauth import SystemOAuthProvider
 from meridian_sdk_provider import (
     FallbackRule,
     ModelProvider,
@@ -37,8 +39,6 @@ from meridian_sdk_provider import (
     RoutingCondition,
     TokenRange,
 )
-from meridian_provider_anthropic_apikey import AnthropicApiKeyProvider
-from meridian_provider_claude_code_oauth import SystemOAuthProvider
 
 from ._config import MeridianConfig, ProviderConfig, RoutingConfig
 from ._secret_ref import SecretRefResolver
@@ -178,8 +178,7 @@ def build_provider_registry(
                 except Exception as exc:
                     raise ProviderFactoryError(
                         message=(
-                            f"Failed to build provider {cfg.name!r} "
-                            f"(kind={cfg.kind!r}): {exc}"
+                            f"Failed to build provider {cfg.name!r} (kind={cfg.kind!r}): {exc}"
                         ),
                         timestamp=_now(),
                         cause=exc,

@@ -15,15 +15,14 @@ to the audit log before re-raising.
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 import hashlib
 import hmac
 import json
-import uuid
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
+import uuid
 
-import httpx
 from core_errors import (
     AuditLog,
     AuditLogEntry,
@@ -33,6 +32,7 @@ from core_errors import (
     record_error,
     record_invocation_event,
 )
+import httpx
 from storage_event_log import SessionEvent
 from storage_reposit import LocalEventLogReader
 
@@ -50,8 +50,7 @@ def _now() -> str:
 class SecretResolver(Protocol):
     """Resolves a secret_ref string to the raw secret value, or None if unavailable."""
 
-    def resolve(self, secret_ref: str) -> str | None:
-        ...
+    def resolve(self, secret_ref: str) -> str | None: ...
 
 
 class NoopSecretResolver:
@@ -332,7 +331,7 @@ async def deliver_webhook_event(
                     },
                 )
             )
-            raise err2
+            raise err2 from exc
 
 
 # ---------------------------------------------------------------------------
@@ -361,7 +360,9 @@ async def run_webhook_sender_loop(
     Dead-letter queue entries are written to:
         storage_root/webhooks/dlq/{webhook_id}/{delivery_id}.json
     """
-    _resolver: SecretResolver = secret_resolver if secret_resolver is not None else NoopSecretResolver()
+    _resolver: SecretResolver = (
+        secret_resolver if secret_resolver is not None else NoopSecretResolver()
+    )
     webhooks_dir = storage_root / "webhooks"
     watermarks_dir = webhooks_dir / "watermarks"
     dlq_dir = webhooks_dir / "dlq"

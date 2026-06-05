@@ -9,10 +9,10 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+from pathlib import Path
 import subprocess
 import sys
 import time
-from pathlib import Path
 
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
@@ -71,7 +71,7 @@ _LINT_STEPS: list[_Step] = [
     ),
     (
         "lint:biome",
-        ["packages/sdk-widget/node_modules/.bin/biome", "check", "."],
+        ["node_modules/.bin/biome", "check", "."],
         None,
         "run 'biome check --write .' to auto-fix",
     ),
@@ -83,13 +83,35 @@ _LINT_STEPS: list[_Step] = [
     ),
 ]
 
+
+def _pytest_steps() -> list[_Step]:
+    """One pytest invocation per workspace member that has a tests/ dir.
+
+    Each member's tests/ is its own top-level ``tests`` package (and meridiand's
+    tests import ``tests._otel_shared``), so two members cannot be collected in a
+    single pytest process — their ``tests`` packages collide. We therefore run
+    pytest once per member, each with the member dir as cwd so its local
+    pyproject pytest config (testpaths, pythonpath) applies.
+    """
+    repo_root = Path(__file__).parent.parent
+    steps: list[_Step] = []
+    for parent in ("apps", "packages"):
+        for member in sorted((repo_root / parent).glob("*")):
+            if (member / "tests").is_dir():
+                rel = f"{parent}/{member.name}"
+                steps.append(
+                    (
+                        f"test:pytest:{member.name}",
+                        ["uv", "run", "pytest"],
+                        rel,
+                        "fix failing tests shown above",
+                    )
+                )
+    return steps
+
+
 _TEST_STEPS: list[_Step] = [
-    (
-        "test:pytest",
-        ["uv", "run", "pytest"],
-        None,
-        "fix failing tests shown above",
-    ),
+    *_pytest_steps(),
     (
         "test:vitest",
         ["npm", "test"],

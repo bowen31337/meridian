@@ -35,9 +35,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
-
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from meridiand._pagination import (
@@ -48,7 +46,7 @@ from meridiand._pagination import (
     encode_cursor,
     make_cursor_page,
 )
-
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -109,6 +107,7 @@ class TestEncodeDecode:
 
     def test_valid_base64_bad_payload_raises(self) -> None:
         import base64
+
         bad = base64.urlsafe_b64encode(b'{"x":1}').decode()
         with pytest.raises(CursorDecodeError):
             decode_cursor(bad, timestamp="t")
@@ -176,7 +175,11 @@ class TestMakeCursorPage:
         assert next_cursor is not None
 
     def test_next_cursor_encodes_last_page_item(self) -> None:
-        items = [self._item("2024-03-01", "c"), self._item("2024-02-01", "b"), self._item("2024-01-01", "a")]
+        items = [
+            self._item("2024-03-01", "c"),
+            self._item("2024-02-01", "b"),
+            self._item("2024-01-01", "a"),
+        ]
         page, next_cursor = make_cursor_page(items, limit=2)
         assert next_cursor is not None
         created_at, record_id = decode_cursor(next_cursor, timestamp="t")

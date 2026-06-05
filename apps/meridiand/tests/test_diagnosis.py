@@ -52,14 +52,12 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from storage_event_log import LocalEventLogWriter
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -357,13 +355,17 @@ class TestAuditEntries:
         client = _make_client(storage_root)
         body = client.get("/v1/sessions/audit-sess/diagnosis").json()
         assert len(body["audit_entries"]) >= 1
-        assert any(e.get("detail", {}).get("session_id") == "audit-sess" for e in body["audit_entries"])
+        assert any(
+            e.get("detail", {}).get("session_id") == "audit-sess" for e in body["audit_entries"]
+        )
 
     def test_audit_entries_for_other_session_excluded(self, storage_root: Path) -> None:
         _write_audit_entry(storage_root, "other-sess", event="harness.run_loop.failed")
         client = _make_client(storage_root)
         body = client.get("/v1/sessions/my-sess/diagnosis").json()
-        assert all(e.get("detail", {}).get("session_id") != "other-sess" for e in body["audit_entries"])
+        assert all(
+            e.get("detail", {}).get("session_id") != "other-sess" for e in body["audit_entries"]
+        )
 
     def test_audit_entries_empty_when_none_for_session(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
@@ -527,7 +529,9 @@ class TestOtel:
         # the StructuredEvent name is carried as an attribute.
         event_names = [e.name for e in diag_spans[-1].events]
         assert "meridian.error.invocation" in event_names
-        invocation_event = next(e for e in diag_spans[-1].events if e.name == "meridian.error.invocation")
+        invocation_event = next(
+            e for e in diag_spans[-1].events if e.name == "meridian.error.invocation"
+        )
         assert invocation_event.attributes.get("name") == "session.diagnosis.invocation"
 
     def test_otel_span_error_status_on_failure(self, storage_root: Path) -> None:

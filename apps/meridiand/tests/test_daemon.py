@@ -23,13 +23,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
+from opentelemetry.trace import StatusCode
 import uvicorn
 import yaml
-from opentelemetry.trace import StatusCode
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers

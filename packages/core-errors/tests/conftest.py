@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 from core_errors._audit import AuditLog
 from core_errors._types import AuditLogEntry
+import pytest
 
 # ---------------------------------------------------------------------------
 # OTel mock

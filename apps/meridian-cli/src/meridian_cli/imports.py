@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
+import sys
 
 import click
 
@@ -41,14 +41,18 @@ def _read_json_file(path: Path, span: object, event_prefix: str) -> dict | None:
         raw = path.read_text()
     except OSError as exc:
         record_failure(span, "import_read_failed", str(exc))  # type: ignore[arg-type]
-        write_audit("error", f"{event_prefix}.failed", {"code": "import_read_failed", "message": str(exc)})
+        write_audit(
+            "error", f"{event_prefix}.failed", {"code": "import_read_failed", "message": str(exc)}
+        )
         click.echo(f"error: [import_read_failed] {exc}", err=True)
         sys.exit(1)
     try:
         return json.loads(raw)  # type: ignore[return-value]
     except json.JSONDecodeError as exc:
         record_failure(span, "import_invalid_json", str(exc))  # type: ignore[arg-type]
-        write_audit("error", f"{event_prefix}.failed", {"code": "import_invalid_json", "message": str(exc)})
+        write_audit(
+            "error", f"{event_prefix}.failed", {"code": "import_invalid_json", "message": str(exc)}
+        )
         click.echo(f"error: [import_invalid_json] {exc}", err=True)
         sys.exit(1)
 
@@ -89,7 +93,11 @@ def _import_openclaw_file(ctx: click.Context, file: Path, tracer: object) -> Non
     ) as span:
         record_invocation_event(
             span,
-            {"event.name": "import.openclaw.invocation", "import.source": "openclaw", "import.file": str(file)},
+            {
+                "event.name": "import.openclaw.invocation",
+                "import.source": "openclaw",
+                "import.file": str(file),
+            },
         )
         write_audit("info", "import.openclaw.invoked", {"file": str(file)})
 
@@ -99,7 +107,9 @@ def _import_openclaw_file(ctx: click.Context, file: Path, tracer: object) -> Non
             result = _client(ctx).request("POST", "/v1/x/imports/openclaw", json_body=body)
         except DaemonError as exc:
             record_failure(span, exc.code, exc.message)
-            write_audit("error", "import.openclaw.failed", {"code": exc.code, "message": exc.message})
+            write_audit(
+                "error", "import.openclaw.failed", {"code": exc.code, "message": exc.message}
+            )
             click.echo(f"error: [{exc.code}] {exc.message}", err=True)
             sys.exit(1)
 
@@ -222,7 +232,11 @@ def _import_hermes_file(ctx: click.Context, file: Path, tracer: object) -> None:
     ) as span:
         record_invocation_event(
             span,
-            {"event.name": "import.hermes.invocation", "import.source": "hermes", "import.file": str(file)},
+            {
+                "event.name": "import.hermes.invocation",
+                "import.source": "hermes",
+                "import.file": str(file),
+            },
         )
         write_audit("info", "import.hermes.invoked", {"file": str(file)})
 

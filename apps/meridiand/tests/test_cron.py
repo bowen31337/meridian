@@ -42,13 +42,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -230,9 +228,7 @@ class TestCronCreateResponse:
 
     def test_days_before_field_in_response(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.post(
-            "/v1/x/cron", json=_body("memory_anniversary", days_before=7)
-        ).json()
+        body = client.post("/v1/x/cron", json=_body("memory_anniversary", days_before=7)).json()
         assert body["days_before"] == 7
 
 
@@ -254,44 +250,32 @@ class TestCronCreateValidation:
 
     def test_invalid_trigger_type_returns_422(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        resp = client.post(
-            "/v1/x/cron", json={"trigger_type": "crontab", "session_id": "s1"}
-        )
+        resp = client.post("/v1/x/cron", json={"trigger_type": "crontab", "session_id": "s1"})
         assert resp.status_code == 422
 
     def test_interval_without_interval_field_returns_422(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        resp = client.post(
-            "/v1/x/cron", json={"trigger_type": "interval", "session_id": "s1"}
-        )
+        resp = client.post("/v1/x/cron", json={"trigger_type": "interval", "session_id": "s1"})
         assert resp.status_code == 422
 
     def test_timestamp_without_timestamp_field_returns_422(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        resp = client.post(
-            "/v1/x/cron", json={"trigger_type": "timestamp", "session_id": "s1"}
-        )
+        resp = client.post("/v1/x/cron", json={"trigger_type": "timestamp", "session_id": "s1"})
         assert resp.status_code == 422
 
     def test_channel_event_without_channel_id_returns_422(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        resp = client.post(
-            "/v1/x/cron", json={"trigger_type": "channel_event", "session_id": "s1"}
-        )
+        resp = client.post("/v1/x/cron", json={"trigger_type": "channel_event", "session_id": "s1"})
         assert resp.status_code == 422
 
     def test_file_change_without_path_returns_422(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        resp = client.post(
-            "/v1/x/cron", json={"trigger_type": "file_change", "session_id": "s1"}
-        )
+        resp = client.post("/v1/x/cron", json={"trigger_type": "file_change", "session_id": "s1"})
         assert resp.status_code == 422
 
     def test_webhook_without_webhook_id_returns_422(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        resp = client.post(
-            "/v1/x/cron", json={"trigger_type": "webhook", "session_id": "s1"}
-        )
+        resp = client.post("/v1/x/cron", json={"trigger_type": "webhook", "session_id": "s1"})
         assert resp.status_code == 422
 
     def test_memory_anniversary_without_memory_key_returns_422(self, storage_root: Path) -> None:
@@ -305,7 +289,11 @@ class TestCronCreateValidation:
         client = _make_client(storage_root)
         resp = client.post(
             "/v1/x/cron",
-            json={"trigger_type": "memory_anniversary", "session_id": "s1", "memory_key": "user.birthday"},
+            json={
+                "trigger_type": "memory_anniversary",
+                "session_id": "s1",
+                "memory_key": "user.birthday",
+            },
         )
         assert resp.status_code == 422
 
@@ -313,7 +301,11 @@ class TestCronCreateValidation:
         client = _make_client(storage_root)
         body = client.post(
             "/v1/x/cron",
-            json={"trigger_type": "memory_anniversary", "session_id": "s1", "memory_key": "user.birthday"},
+            json={
+                "trigger_type": "memory_anniversary",
+                "session_id": "s1",
+                "memory_key": "user.birthday",
+            },
         ).json()
         assert body["error"]["code"] == "cron_invalid_request"
 
@@ -321,7 +313,11 @@ class TestCronCreateValidation:
         client = _make_client(storage_root)
         body = client.post(
             "/v1/x/cron",
-            json={"trigger_type": "memory_anniversary", "session_id": "s1", "memory_key": "user.birthday"},
+            json={
+                "trigger_type": "memory_anniversary",
+                "session_id": "s1",
+                "memory_key": "user.birthday",
+            },
         ).json()
         assert "days_before" in body["error"]["message"]
 
@@ -377,9 +373,9 @@ class TestCronPersistence:
 
     def test_persisted_webhook_id(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        cron_id = client.post(
-            "/v1/x/cron", json=_body("webhook", webhook_id="wh-persist")
-        ).json()["id"]
+        cron_id = client.post("/v1/x/cron", json=_body("webhook", webhook_id="wh-persist")).json()[
+            "id"
+        ]
         resource = _cron_resource(storage_root, cron_id)
         assert resource["webhook_id"] == "wh-persist"
 
@@ -422,37 +418,49 @@ class TestCronAuditLog:
     def test_failure_audit_level_is_error(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         client.post("/v1/x/cron", json={"trigger_type": "webhook", "session_id": "s1"})
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "cron.create.failed")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "cron.create.failed"
+        )
         assert record["level"] == "error"
 
     def test_failure_audit_code_is_cron_invalid_request(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         client.post("/v1/x/cron", json={"trigger_type": "file_change", "session_id": "s1"})
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "cron.create.failed")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "cron.create.failed"
+        )
         assert record["code"] == "cron_invalid_request"
 
     def test_failure_audit_detail_has_trigger_type(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         client.post("/v1/x/cron", json={"trigger_type": "channel_event", "session_id": "s1"})
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "cron.create.failed")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "cron.create.failed"
+        )
         assert record["detail"]["trigger_type"] == "channel_event"
 
     def test_failure_audit_detail_has_session_id(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         client.post("/v1/x/cron", json={"trigger_type": "interval", "session_id": "audit-sess"})
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "cron.create.failed")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "cron.create.failed"
+        )
         assert record["detail"]["session_id"] == "audit-sess"
 
     def test_failure_audit_detail_has_cron_id(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         client.post("/v1/x/cron", json={"trigger_type": "timestamp", "session_id": "s1"})
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "cron.create.failed")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "cron.create.failed"
+        )
         assert record["detail"]["cron_id"].startswith("cron_")
 
     def test_failure_audit_detail_has_message(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         client.post("/v1/x/cron", json={"trigger_type": "memory_anniversary", "session_id": "s1"})
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "cron.create.failed")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "cron.create.failed"
+        )
         assert "message" in record["detail"]
         assert len(record["detail"]["message"]) > 0
 
@@ -722,6 +730,7 @@ class TestCronNextFireAt:
 
     def test_interval_next_fire_at_is_iso8601(self, storage_root: Path) -> None:
         from datetime import datetime
+
         client = _make_client(storage_root)
         body = client.post("/v1/x/cron", json=_body("interval", interval="5m")).json()
         # Should parse as ISO-8601 without raising.
@@ -730,6 +739,7 @@ class TestCronNextFireAt:
 
     def test_interval_next_fire_at_is_in_future(self, storage_root: Path) -> None:
         from datetime import UTC, datetime
+
         client = _make_client(storage_root)
         body = client.post("/v1/x/cron", json=_body("interval", interval="5m")).json()
         dt = datetime.fromisoformat(body["next_fire_at"])
@@ -791,23 +801,17 @@ class TestCronMissedFiresPolicy:
 
     def test_catch_up_policy_stored(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.post(
-            "/v1/x/cron", json=_body(missed_fires_policy="catch_up")
-        ).json()
+        body = client.post("/v1/x/cron", json=_body(missed_fires_policy="catch_up")).json()
         assert body["missed_fires_policy"] == "catch_up"
 
     def test_skip_policy_stored(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.post(
-            "/v1/x/cron", json=_body(missed_fires_policy="skip")
-        ).json()
+        body = client.post("/v1/x/cron", json=_body(missed_fires_policy="skip")).json()
         assert body["missed_fires_policy"] == "skip"
 
     def test_missed_fires_policy_persisted(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        cron_id = client.post(
-            "/v1/x/cron", json=_body(missed_fires_policy="catch_up")
-        ).json()["id"]
+        cron_id = client.post("/v1/x/cron", json=_body(missed_fires_policy="catch_up")).json()["id"]
         resource = _cron_resource(storage_root, cron_id)
         assert resource["missed_fires_policy"] == "catch_up"
 

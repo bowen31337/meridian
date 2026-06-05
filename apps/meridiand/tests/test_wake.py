@@ -41,13 +41,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -564,18 +562,20 @@ class TestWakeOtel:
     def test_harness_wake_continues_session_trace(self, storage_root: Path) -> None:
         # harness.wake should share the trace_id from the session's stored traceparent.
         fake_trace_id = "aa" * 16  # 32 hex chars
-        fake_span_id = "bb" * 8   # 16 hex chars
+        fake_span_id = "bb" * 8  # 16 hex chars
         fake_traceparent = f"00-{fake_trace_id}-{fake_span_id}-01"
 
         session_id = "otel-trace-wake"
         session_dir = storage_root / "sessions" / session_id
         session_dir.mkdir(parents=True, exist_ok=True)
         (session_dir / "manifest.json").write_text(
-            json.dumps({
-                "session_id": session_id,
-                "status": "active",
-                "traceparent": fake_traceparent,
-            })
+            json.dumps(
+                {
+                    "session_id": session_id,
+                    "status": "active",
+                    "traceparent": fake_traceparent,
+                }
+            )
         )
 
         client = self._make_client(storage_root)
@@ -649,9 +649,7 @@ class TestTemplateExpansionInAgentConfig:
             "name": "Template Agent",
             "version": {
                 "config": {
-                    "system_prompt": (
-                        "Use {{ memory.user.preferences.commit_style }} for commits."
-                    )
+                    "system_prompt": ("Use {{ memory.user.preferences.commit_style }} for commits.")
                 }
             },
         }
@@ -689,9 +687,7 @@ class TestTemplateExpansionInAgentConfig:
         agent_data = {
             "id": "agent-tpl-3",
             "name": "Bad Agent",
-            "version": {
-                "config": {"system_prompt": "{{ memory.user.no_such_key }}"}
-            },
+            "version": {"config": {"system_prompt": "{{ memory.user.no_such_key }}"}},
         }
         _write_agent(storage_root, "agent-tpl-3", agent_data)
         _write_session(
@@ -777,9 +773,7 @@ class TestTemplateExpansionInSkillInstructions:
         assert len(skills) == 1
         assert skills[0]["skill_version"]["instructions"] == "Make HTTP requests."
 
-    def test_missing_memory_in_skill_instructions_returns_error(
-        self, storage_root: Path
-    ) -> None:
+    def test_missing_memory_in_skill_instructions_returns_error(self, storage_root: Path) -> None:
         _write_skill_version(
             storage_root,
             "skillver_003",

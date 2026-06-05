@@ -1,23 +1,21 @@
 """Shared fixtures: MockTracer/MockSpan for OTel, CapturingAuditLog, and app factory."""
+
 from __future__ import annotations
 
 from typing import Any
-
-import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
-from core_errors import install_error_handler
 
 from api_capabilities._audit import AuditLog
 from api_capabilities._registry import CapabilityRegistry
 from api_capabilities._routes import make_router
 from api_capabilities._types import AuditLogEntry
-
+from core_errors import install_error_handler
+from fastapi import FastAPI
+import pytest
 
 # ---------------------------------------------------------------------------
 # OTel mock
 # ---------------------------------------------------------------------------
+
 
 class MockSpan:
     def __init__(self, name: str = "", attributes: dict[str, Any] | None = None) -> None:
@@ -37,7 +35,7 @@ class MockSpan:
     def record_exception(self, exc: BaseException, **_: Any) -> None:
         self.recorded_exceptions.append(exc)
 
-    def __enter__(self) -> "MockSpan":
+    def __enter__(self) -> MockSpan:
         return self
 
     def __exit__(self, *_: Any) -> bool:
@@ -78,6 +76,7 @@ def mock_span(mock_tracer: MockTracer) -> MockSpan:
 # Audit log capture
 # ---------------------------------------------------------------------------
 
+
 class CapturingAuditLog(AuditLog):
     def __init__(self) -> None:
         self.entries: list[AuditLogEntry] = []
@@ -94,6 +93,7 @@ def audit_log() -> CapturingAuditLog:
 # ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
+
 
 def make_app(
     audit_log: AuditLog | None = None,

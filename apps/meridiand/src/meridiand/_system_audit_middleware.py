@@ -18,10 +18,11 @@ system_audit.write.failed entry to the audit log.
 
 from __future__ import annotations
 
-import json
-import re
+import contextlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import json
+import re
 from typing import Any
 
 from core_errors import AuditLog, AuditLogEntry
@@ -228,7 +229,7 @@ class SystemAuditMiddleware:
             self._write_audit_failure(event, audit_exc)
 
     def _write_audit_failure(self, original_event: str, exc: Exception) -> None:
-        try:
+        with contextlib.suppress(Exception):
             self._audit_log.write(
                 AuditLogEntry(
                     level="error",
@@ -238,8 +239,6 @@ class SystemAuditMiddleware:
                     detail={"error": str(exc), "original_event": original_event},
                 )
             )
-        except Exception:
-            pass
 
     async def _send_error(
         self,

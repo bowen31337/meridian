@@ -25,8 +25,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import pytest
 from opentelemetry.trace import StatusCode
+import pytest
 from sdk_environment import (
     AgentFilesystemPolicy,
     AuditLogEntry,

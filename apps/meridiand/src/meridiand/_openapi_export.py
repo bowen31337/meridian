@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-import yaml
 from core_errors import (
     AuditLog,
     AuditLogEntry,
@@ -15,6 +14,7 @@ from core_errors import (
 )
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
+import yaml
 
 
 def _now() -> str:
@@ -93,6 +93,6 @@ def make_openapi_export_router(
                         detail={"message": err.message},
                     )
                 )
-                raise err
+                raise err from exc
 
     return router

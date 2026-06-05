@@ -39,10 +39,10 @@ mcp/stdio (JSON-RPC 2.0 over newline-delimited stdin/stdout):
 from __future__ import annotations
 
 import asyncio
-import json
-import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+import json
+import time
 from typing import Any
 
 from opentelemetry.trace import Span, Status, StatusCode
@@ -240,8 +240,7 @@ class InProcessDispatcher(ToolDispatcher):
                     event="dispatch.overhead.target_breached",
                     code="dispatch_overhead_target_breached",
                     message=(
-                        f"in_process dispatch overhead {overhead_ms:.1f}ms "
-                        f"exceeded target 20.0ms"
+                        f"in_process dispatch overhead {overhead_ms:.1f}ms exceeded target 20.0ms"
                     ),
                     tool_name=tool.name,
                     session_id=context.session_id,
@@ -333,7 +332,7 @@ class SubprocessDispatcher(ToolDispatcher):
                     self._audit_log,
                     audit_event="subprocess.binary.not_found",
                     code="subprocess_binary_not_found",
-                    message=f'Subprocess binary not found: {handler.path!r}',
+                    message=f"Subprocess binary not found: {handler.path!r}",
                     tool_name=tool.name,
                     session_id=context.session_id,
                     now=now,
@@ -355,7 +354,7 @@ class SubprocessDispatcher(ToolDispatcher):
                     audit_event="subprocess.nonzero_exit",
                     code="subprocess_nonzero_exit",
                     message=(
-                        f'Subprocess exited with code {proc.returncode}. stderr: {stderr_text}'
+                        f"Subprocess exited with code {proc.returncode}. stderr: {stderr_text}"
                     ),
                     tool_name=tool.name,
                     session_id=context.session_id,
@@ -372,7 +371,7 @@ class SubprocessDispatcher(ToolDispatcher):
                     self._audit_log,
                     audit_event="subprocess.invalid_json",
                     code="subprocess_invalid_json",
-                    message=f'Subprocess produced invalid JSON: {exc}. stderr: {stderr_text}',
+                    message=f"Subprocess produced invalid JSON: {exc}. stderr: {stderr_text}",
                     tool_name=tool.name,
                     session_id=context.session_id,
                     now=now,
@@ -402,8 +401,7 @@ class SubprocessDispatcher(ToolDispatcher):
                     event="dispatch.overhead.target_breached",
                     code="dispatch_overhead_target_breached",
                     message=(
-                        f"subprocess dispatch overhead {overhead_ms:.1f}ms "
-                        f"exceeded target 200.0ms"
+                        f"subprocess dispatch overhead {overhead_ms:.1f}ms exceeded target 200.0ms"
                     ),
                     tool_name=tool.name,
                     session_id=context.session_id,
@@ -479,9 +477,7 @@ class McpDispatcher(ToolDispatcher):
         result: dict[str, Any] = data.get("result", {})
         is_error = result.get("isError", False)
         content_blocks: list[dict[str, Any]] = result.get("content", [])
-        text = "\n".join(
-            b.get("text", "") for b in content_blocks if b.get("type") == "text"
-        )
+        text = "\n".join(b.get("text", "") for b in content_blocks if b.get("type") == "text")
         content: Any = text if text else result
 
         if is_error:
@@ -644,9 +640,7 @@ class McpDispatcher(ToolDispatcher):
                     detail={"server_url": handler.server_url},
                 )
 
-            return self._normalize_mcp_result(
-                span, data, tool.name, context.session_id, now, start
-            )
+            return self._normalize_mcp_result(span, data, tool.name, context.session_id, now, start)
 
 
 # ---------------------------------------------------------------------------
@@ -865,7 +859,7 @@ class ContainerDispatcher(ToolDispatcher):
                     self._audit_log,
                     audit_event="container.docker.not_found",
                     code="container_docker_not_found",
-                    message=f'Docker executable not found: {self._docker!r}',
+                    message=f"Docker executable not found: {self._docker!r}",
                     tool_name=tool.name,
                     session_id=context.session_id,
                     now=now,
@@ -887,7 +881,7 @@ class ContainerDispatcher(ToolDispatcher):
                     audit_event="container.nonzero_exit",
                     code="container_nonzero_exit",
                     message=(
-                        f'Container exec exited with code {proc.returncode}. stderr: {stderr_text}'
+                        f"Container exec exited with code {proc.returncode}. stderr: {stderr_text}"
                     ),
                     tool_name=tool.name,
                     session_id=context.session_id,
@@ -908,7 +902,7 @@ class ContainerDispatcher(ToolDispatcher):
                     self._audit_log,
                     audit_event="container.invalid_json",
                     code="container_invalid_json",
-                    message=f'Container produced invalid JSON: {exc}. stderr: {stderr_text}',
+                    message=f"Container produced invalid JSON: {exc}. stderr: {stderr_text}",
                     tool_name=tool.name,
                     session_id=context.session_id,
                     now=now,
@@ -939,8 +933,7 @@ class ContainerDispatcher(ToolDispatcher):
                     event="dispatch.overhead.target_breached",
                     code="dispatch_overhead_target_breached",
                     message=(
-                        f"container dispatch overhead {overhead_ms:.1f}ms "
-                        f"exceeded target 500.0ms"
+                        f"container dispatch overhead {overhead_ms:.1f}ms exceeded target 500.0ms"
                     ),
                     tool_name=tool.name,
                     session_id=context.session_id,

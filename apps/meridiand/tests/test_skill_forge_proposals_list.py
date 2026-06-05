@@ -10,7 +10,8 @@ Tests cover:
   - Items are sorted newest first (descending created_at).
   - Cursor pagination: next_cursor is null when all items fit on one page.
   - Cursor pagination: next_cursor is set when more items exist.
-  - Cursor pagination: Link response header set when next_cursor is present (middleware converts X-Next-Cursor).
+  - Cursor pagination: Link response header set when next_cursor is present
+    (middleware converts X-Next-Cursor).
   - Cursor pagination: cursor query param advances to next page.
   - limit query param restricts items returned.
   - include_efficacy=false (default) does not attach efficacy field to items.
@@ -40,14 +41,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from meridiand._skill_forge_proposals import SkillForgeProposalListError
+import pytest
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -216,20 +216,14 @@ class TestTrajectoryProvenance:
         resp = _list(client)
         assert resp.json()["items"][0]["job_id"] == "sfjob_prov"
 
-    def test_item_has_derived_from_session_ids_null_when_none(
-        self, storage_root: Path
-    ) -> None:
+    def test_item_has_derived_from_session_ids_null_when_none(self, storage_root: Path) -> None:
         _write_proposal(storage_root, derived_from_session_ids=None)
         client = _make_client(storage_root)
         resp = _list(client)
         assert resp.json()["items"][0]["derived_from_session_ids"] is None
 
-    def test_item_has_derived_from_session_ids_when_set(
-        self, storage_root: Path
-    ) -> None:
-        _write_proposal(
-            storage_root, derived_from_session_ids=["sess_1", "sess_2"]
-        )
+    def test_item_has_derived_from_session_ids_when_set(self, storage_root: Path) -> None:
+        _write_proposal(storage_root, derived_from_session_ids=["sess_1", "sess_2"])
         client = _make_client(storage_root)
         resp = _list(client)
         assert resp.json()["items"][0]["derived_from_session_ids"] == [
@@ -287,9 +281,7 @@ class TestPagination:
         resp = _list(client, limit=1)
         assert resp.json()["next_cursor"] is not None
 
-    def test_link_header_set_when_more_items_exist(
-        self, storage_root: Path
-    ) -> None:
+    def test_link_header_set_when_more_items_exist(self, storage_root: Path) -> None:
         _write_proposal(
             storage_root, proposal_id="skillver_a", created_at="2024-01-02T00:00:00+00:00"
         )
@@ -300,9 +292,7 @@ class TestPagination:
         resp = _list(client, limit=1)
         assert "link" in {k.lower() for k in resp.headers}
 
-    def test_link_header_contains_rel_next(
-        self, storage_root: Path
-    ) -> None:
+    def test_link_header_contains_rel_next(self, storage_root: Path) -> None:
         _write_proposal(
             storage_root, proposal_id="skillver_a", created_at="2024-01-02T00:00:00+00:00"
         )
@@ -328,9 +318,7 @@ class TestPagination:
         assert "skillver_b" in ids
         assert "skillver_a" not in ids
 
-    def test_second_page_next_cursor_null_when_exhausted(
-        self, storage_root: Path
-    ) -> None:
+    def test_second_page_next_cursor_null_when_exhausted(self, storage_root: Path) -> None:
         _write_proposal(
             storage_root, proposal_id="skillver_a", created_at="2024-01-02T00:00:00+00:00"
         )
@@ -372,17 +360,13 @@ class TestEfficacy:
         resp = _list(client)
         assert "efficacy" not in resp.json()["items"][0]
 
-    def test_include_efficacy_false_no_efficacy_field(
-        self, storage_root: Path
-    ) -> None:
+    def test_include_efficacy_false_no_efficacy_field(self, storage_root: Path) -> None:
         _write_proposal(storage_root)
         client = _make_client(storage_root)
         resp = _list(client, include_efficacy=False)
         assert "efficacy" not in resp.json()["items"][0]
 
-    def test_include_efficacy_true_attaches_efficacy_record(
-        self, storage_root: Path
-    ) -> None:
+    def test_include_efficacy_true_attaches_efficacy_record(self, storage_root: Path) -> None:
         _write_proposal(storage_root, proposal_id="skillver_abc123")
         _write_efficacy(storage_root, proposal_id="skillver_abc123", lift=0.3)
         client = _make_client(storage_root)
@@ -391,9 +375,7 @@ class TestEfficacy:
         assert "efficacy" in item
         assert item["efficacy"] is not None
 
-    def test_include_efficacy_true_efficacy_has_lift(
-        self, storage_root: Path
-    ) -> None:
+    def test_include_efficacy_true_efficacy_has_lift(self, storage_root: Path) -> None:
         _write_proposal(storage_root, proposal_id="skillver_abc123")
         _write_efficacy(storage_root, proposal_id="skillver_abc123", lift=0.3)
         client = _make_client(storage_root)
@@ -401,9 +383,7 @@ class TestEfficacy:
         item = resp.json()["items"][0]
         assert item["efficacy"]["lift"] == pytest.approx(0.3)
 
-    def test_include_efficacy_true_null_when_no_efficacy_file(
-        self, storage_root: Path
-    ) -> None:
+    def test_include_efficacy_true_null_when_no_efficacy_file(self, storage_root: Path) -> None:
         _write_proposal(storage_root, proposal_id="skillver_noefficacy")
         client = _make_client(storage_root)
         resp = _list(client, include_efficacy=True)
@@ -411,9 +391,7 @@ class TestEfficacy:
         assert "efficacy" in item
         assert item["efficacy"] is None
 
-    def test_include_efficacy_true_efficacy_has_proposal_id(
-        self, storage_root: Path
-    ) -> None:
+    def test_include_efficacy_true_efficacy_has_proposal_id(self, storage_root: Path) -> None:
         _write_proposal(storage_root, proposal_id="skillver_abc123")
         _write_efficacy(storage_root, proposal_id="skillver_abc123")
         client = _make_client(storage_root)
@@ -421,9 +399,7 @@ class TestEfficacy:
         item = resp.json()["items"][0]
         assert item["efficacy"]["proposal_id"] == "skillver_abc123"
 
-    def test_include_efficacy_true_span_has_include_efficacy_true(
-        self, storage_root: Path
-    ) -> None:
+    def test_include_efficacy_true_span_has_include_efficacy_true(self, storage_root: Path) -> None:
         _write_proposal(storage_root)
         client = _make_client(storage_root)
         _otel_exporter.clear()
@@ -481,9 +457,7 @@ class TestOtelSpans:
         span_names = [s.name for s in _otel_exporter.get_finished_spans()]
         assert "skill_forge.proposal.list" in span_names
 
-    def test_span_success_attribute_false_on_cursor_error(
-        self, storage_root: Path
-    ) -> None:
+    def test_span_success_attribute_false_on_cursor_error(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         _list(client, cursor="not-valid-base64!!!")
         span = self._get_span()
@@ -497,9 +471,7 @@ class TestOtelSpans:
 
 
 class TestAuditLog:
-    def test_success_writes_proposal_listed_audit_entry(
-        self, storage_root: Path
-    ) -> None:
+    def test_success_writes_proposal_listed_audit_entry(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         _list(client)
         records = _audit_records(storage_root)
@@ -509,7 +481,8 @@ class TestAuditLog:
         client = _make_client(storage_root)
         _list(client)
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.listed"
         )
         assert record["level"] == "info"
@@ -519,37 +492,34 @@ class TestAuditLog:
         client = _make_client(storage_root)
         _list(client)
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.listed"
         )
         assert record["detail"]["count"] == 1
 
-    def test_success_audit_detail_has_include_efficacy(
-        self, storage_root: Path
-    ) -> None:
+    def test_success_audit_detail_has_include_efficacy(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         _list(client, include_efficacy=False)
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.listed"
         )
         assert record["detail"]["include_efficacy"] is False
 
-    def test_cursor_error_writes_list_failed_audit_entry(
-        self, storage_root: Path
-    ) -> None:
+    def test_cursor_error_writes_list_failed_audit_entry(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         _list(client, cursor="not-valid-base64!!!")
         records = _audit_records(storage_root)
-        assert any(
-            r.get("event") == "skill_forge.proposal.list.failed" for r in records
-        )
+        assert any(r.get("event") == "skill_forge.proposal.list.failed" for r in records)
 
     def test_cursor_error_audit_level_is_error(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         _list(client, cursor="not-valid-base64!!!")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.list.failed"
         )
         assert record["level"] == "error"
@@ -566,9 +536,7 @@ class TestInvalidCursor:
         resp = _list(client, cursor="not-valid-base64!!!")
         assert resp.status_code == 400
 
-    def test_invalid_cursor_error_code_is_cursor_invalid(
-        self, storage_root: Path
-    ) -> None:
+    def test_invalid_cursor_error_code_is_cursor_invalid(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         resp = _list(client, cursor="not-valid-base64!!!")
         assert resp.json()["error"]["code"] == "cursor_invalid"
@@ -602,13 +570,9 @@ class TestRouterWiring:
 
 class TestErrorClasses:
     def test_list_error_http_status(self) -> None:
-        err = SkillForgeProposalListError(
-            message="boom", timestamp="2024-01-01T00:00:00+00:00"
-        )
+        err = SkillForgeProposalListError(message="boom", timestamp="2024-01-01T00:00:00+00:00")
         assert err.http_status() == 500
 
     def test_list_error_code(self) -> None:
-        err = SkillForgeProposalListError(
-            message="boom", timestamp="2024-01-01T00:00:00+00:00"
-        )
+        err = SkillForgeProposalListError(message="boom", timestamp="2024-01-01T00:00:00+00:00")
         assert err.code == "skill_forge_proposal_list_failed"

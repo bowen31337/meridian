@@ -19,8 +19,8 @@ Missing provider/model entries return 0.0 cost (unknown model ≠ error).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -63,13 +63,15 @@ class PriceBook:
         for provider, models in data.items():
             if not isinstance(models, dict):
                 raise ValueError(
-                    f"PriceBook: provider {provider!r} must map to an object, got {type(models).__name__}"
+                    f"PriceBook: provider {provider!r} must map to an object, "
+                    f"got {type(models).__name__}"
                 )
             entries[provider] = {}
             for model, rates in models.items():
                 if not isinstance(rates, dict):
                     raise ValueError(
-                        f"PriceBook: {provider}/{model} must be an object, got {type(rates).__name__}"
+                        f"PriceBook: {provider}/{model} must be an object, "
+                        f"got {type(rates).__name__}"
                     )
                 if "input" not in rates or "output" not in rates:
                     raise ValueError(

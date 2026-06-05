@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from meridian_sdk_tool import ToolContext
 
 from meridian_builtin_tools.read import (
     _INPUT_SCHEMA,
@@ -15,7 +16,6 @@ from meridian_builtin_tools.read import (
     _resolve_safe,
     read_tool,
 )
-from meridian_sdk_tool import ToolContext
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -192,7 +192,7 @@ async def test_read_multibyte_content(ws_ctx: ToolContext, workspace: Path) -> N
     result = await read_tool.execute({"path": "multi.txt"}, ws_ctx)
     assert not result.is_error
     assert result.result["content"] == "café"
-    assert result.result["size"] == len("café".encode("utf-8"))
+    assert result.result["size"] == len("café".encode())
 
 
 @pytest.mark.anyio
@@ -359,9 +359,7 @@ async def test_validation_error_code_contains_validation() -> None:
 
 
 @pytest.mark.anyio
-async def test_confinement_failure_writes_audit_log(
-    tmp_path: Path, ws_ctx: ToolContext
-) -> None:
+async def test_confinement_failure_writes_audit_log(tmp_path: Path, ws_ctx: ToolContext) -> None:
     from meridian_sdk_tool import meridian_tool as _mk_tool
 
     audit_path = str(tmp_path / "audit.ndjson")
@@ -372,9 +370,7 @@ async def test_confinement_failure_writes_audit_log(
         output_schema=_OUTPUT_SCHEMA,
         audit_log_path=audit_path,
     )
-    async def _tool_with_audit(
-        args: dict[str, Any], ctx: ToolContext
-    ) -> dict[str, Any]:
+    async def _tool_with_audit(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         from meridian_builtin_tools.read import _resolve_safe
 
         target = _resolve_safe(ctx.workspace, args["path"])
@@ -408,9 +404,7 @@ async def test_validation_failure_writes_audit_log(tmp_path: Path) -> None:
         output_schema=_OUTPUT_SCHEMA,
         audit_log_path=audit_path,
     )
-    async def _tool_with_audit(
-        args: dict[str, Any], ctx: ToolContext
-    ) -> dict[str, Any]:
+    async def _tool_with_audit(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         return {"path": "x", "content": "", "size": 0, "encoding": "utf-8"}
 
     result = await _tool_with_audit.execute({}, _CTX)

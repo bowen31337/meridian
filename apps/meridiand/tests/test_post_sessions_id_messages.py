@@ -19,8 +19,10 @@ Tests cover:
   - message.added event is written to the event log.
   - On success, audit log entry is written with event "session.message.appended".
   - On success, audit detail includes session_id, thread_id, message_id, and role.
-  - On failure (role rejected), audit log entry is written with event "session.message.append.rejected".
-  - On failure (session not found), audit log entry is written with event "session.message.append.failed".
+  - On failure (role rejected), audit log entry is written with event
+    "session.message.append.rejected".
+  - On failure (session not found), audit log entry is written with event
+    "session.message.append.failed".
   - On failure, error message is surfaced in response body.
   - OTel span "session.message.append" is emitted on success.
   - OTel span has session.id attribute.
@@ -34,14 +36,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from storage_event_log import EventLogWriter, LocalEventLogWriter
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -213,7 +213,9 @@ class TestAppendMessagePersistence:
         result, _ = _post_message(client, session_id, role="system", content="You are helpful.")
         thread_id = result["thread_id"]
         messages_path = storage_root / "threads" / session_id / thread_id / "messages.ndjson"
-        records = [json.loads(l) for l in messages_path.read_text().splitlines() if l.strip()]
+        records = [
+            json.loads(line) for line in messages_path.read_text().splitlines() if line.strip()
+        ]
         record = next(r for r in records if r.get("id") == result["message_id"])
         assert record["role"] == "system"
 
@@ -224,7 +226,9 @@ class TestAppendMessagePersistence:
         result, _ = _post_message(client, session_id, content="Stored content")
         thread_id = result["thread_id"]
         messages_path = storage_root / "threads" / session_id / thread_id / "messages.ndjson"
-        records = [json.loads(l) for l in messages_path.read_text().splitlines() if l.strip()]
+        records = [
+            json.loads(line) for line in messages_path.read_text().splitlines() if line.strip()
+        ]
         record = next(r for r in records if r.get("id") == result["message_id"])
         assert record["content"] == "Stored content"
 

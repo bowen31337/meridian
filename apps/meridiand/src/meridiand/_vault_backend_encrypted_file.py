@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any
 
@@ -186,9 +186,7 @@ class EncryptedFileVaultBackend:
     def secret_exists(self, vault_id: str, key: str) -> bool:
         return key in self._read_secrets(vault_id)
 
-    def store_secret(
-        self, vault_id: str, key: str, value: str, now: str
-    ) -> dict[str, Any]:
+    def store_secret(self, vault_id: str, key: str, value: str, now: str) -> dict[str, Any]:
         data = self._read_secrets(vault_id)
         record: dict[str, Any] = {
             "vault_id": vault_id,

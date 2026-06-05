@@ -36,6 +36,7 @@ Lifecycle events (Architecture §15.2):
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import uuid
 from collections.abc import AsyncIterator
@@ -116,12 +117,14 @@ def _opts_to_dict(opts: ModelCallOpts) -> dict[str, Any]:
                         b["cache_control"] = {"type": "ephemeral"}
                     blocks.append(b)
                 elif btype == "tool_use":
-                    blocks.append({
-                        "type": "tool_use",
-                        "id": block.id,  # type: ignore[union-attr]
-                        "name": block.name,  # type: ignore[union-attr]
-                        "input": block.input,  # type: ignore[union-attr]
-                    })
+                    blocks.append(
+                        {
+                            "type": "tool_use",
+                            "id": block.id,  # type: ignore[union-attr]
+                            "name": block.name,  # type: ignore[union-attr]
+                            "input": block.input,  # type: ignore[union-attr]
+                        }
+                    )
                 elif btype == "tool_result":
                     raw = block.content  # type: ignore[union-attr]
                     tb: dict[str, Any] = {
@@ -134,11 +137,13 @@ def _opts_to_dict(opts: ModelCallOpts) -> dict[str, Any]:
                         tb["content"] = [{"type": "text", "text": str(c)} for c in raw]
                     blocks.append(tb)
                 elif btype == "thinking":
-                    blocks.append({
-                        "type": "thinking",
-                        "thinking": block.thinking,  # type: ignore[union-attr]
-                        "signature": block.signature,  # type: ignore[union-attr]
-                    })
+                    blocks.append(
+                        {
+                            "type": "thinking",
+                            "thinking": block.thinking,  # type: ignore[union-attr]
+                            "signature": block.signature,  # type: ignore[union-attr]
+                        }
+                    )
             messages.append({"role": msg.role, "content": blocks})
 
     d: dict[str, Any] = {
@@ -262,18 +267,14 @@ class CliSubprocessManager:
         """Spawn the subprocess and start the background health-check loop."""
         await self._spawn()
         if self._health_task is None or self._health_task.done():
-            self._health_task = asyncio.create_task(
-                self._health_loop(), name="cli-health-check"
-            )
+            self._health_task = asyncio.create_task(self._health_loop(), name="cli-health-check")
 
     async def stop(self) -> None:
         """Gracefully stop the subprocess and cancel the health-check loop."""
         if self._health_task is not None:
             self._health_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._health_task
-            except asyncio.CancelledError:
-                pass
             self._health_task = None
         await self._kill()
 
@@ -327,7 +328,7 @@ class CliSubprocessManager:
                     self._proc.stdout.readline(),
                     timeout=self._call_timeout_s,
                 )
-            except asyncio.TimeoutError as exc:
+            except TimeoutError as exc:
                 raise CliCallTimeoutError(
                     f"Call {call_id!r} timed out after {self._call_timeout_s}s "
                     f"waiting for next event from subprocess",
@@ -412,7 +413,7 @@ class CliSubprocessManager:
         proc.terminate()
         try:
             await asyncio.wait_for(proc.wait(), timeout=self._sigkill_grace_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
         finally:

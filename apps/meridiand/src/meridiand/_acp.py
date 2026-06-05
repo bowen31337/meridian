@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import uuid
 from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -101,8 +101,7 @@ class AcpInboundFailedError(MeridianError):
 class AcpPeerClient(Protocol):
     """Transport protocol for delivering ACP messages to peer systems."""
 
-    async def call(self, url: str, message: dict[str, Any]) -> dict[str, Any]:
-        ...
+    async def call(self, url: str, message: dict[str, Any]) -> dict[str, Any]: ...
 
 
 class HttpAcpPeerClient:
@@ -126,8 +125,7 @@ class HttpAcpPeerClient:
 class AcpInboundHandler(Protocol):
     """Handler protocol for processing ACP messages received from peer systems."""
 
-    async def handle(self, target: str, message: dict[str, Any]) -> dict[str, Any]:
-        ...
+    async def handle(self, target: str, message: dict[str, Any]) -> dict[str, Any]: ...
 
 
 class DefaultAcpInboundHandler:
@@ -229,7 +227,7 @@ def make_acp_router(
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
             required_cap = Capability(namespace="acp", name="outbound", param=target)
             if not check_grant(frozenset({required_cap}), granted_caps):
@@ -297,7 +295,7 @@ def make_acp_router(
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(
             content={
@@ -356,7 +354,7 @@ def make_acp_router(
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
             # Capability gate: session must hold acp.outbound[target]
             required_cap = Capability(namespace="acp", name="outbound", param=target)
@@ -438,7 +436,7 @@ def make_acp_router(
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(
             content={
@@ -495,7 +493,7 @@ def make_acp_router(
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
             required_cap = Capability(namespace="acp", name="inbound", param=target)
             if not check_grant(frozenset({required_cap}), granted_caps):
@@ -562,7 +560,7 @@ def make_acp_router(
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(
             content={
@@ -620,7 +618,7 @@ def make_acp_router(
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
             # Capability gate: must hold acp.inbound[target]
             required_cap = Capability(namespace="acp", name="inbound", param=target)
@@ -702,7 +700,7 @@ def make_acp_router(
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(
             content={

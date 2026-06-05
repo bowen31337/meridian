@@ -32,13 +32,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -69,7 +67,7 @@ def _audit_records(storage_root: Path) -> list[dict]:
     path = storage_root / "audit.ndjson"
     if not path.exists():
         return []
-    return [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
 # ---------------------------------------------------------------------------
@@ -509,7 +507,11 @@ class TestSpawnManifestPersistence:
                 child_capabilities=["exec.sudo"],
             ),
         )
-        assert not any((storage_root / "sessions").iterdir()) if (storage_root / "sessions").exists() else True
+        assert (
+            not any((storage_root / "sessions").iterdir())
+            if (storage_root / "sessions").exists()
+            else True
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -555,7 +557,6 @@ class TestSpawnOutputSchema:
 
 
 # FastAPI TestClient must be importable here
-from fastapi.testclient import TestClient  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -612,7 +613,7 @@ class TestSpawnOtel:
         # child.session should link back to parent session root span via stored traceparent.
         parent_id = "link-parent-sess"
         parent_trace_id = "cc" * 16  # 32 hex chars
-        parent_span_id = "dd" * 8   # 16 hex chars
+        parent_span_id = "dd" * 8  # 16 hex chars
         parent_tp = f"00-{parent_trace_id}-{parent_span_id}-01"
 
         parent_dir = storage_root / "sessions" / parent_id
@@ -630,9 +631,7 @@ class TestSpawnOtel:
         assert len(child_span.links) == 1
         assert child_span.links[0].context.trace_id == int(parent_trace_id, 16)
 
-    def test_child_session_span_no_link_when_no_parent_manifest(
-        self, storage_root: Path
-    ) -> None:
+    def test_child_session_span_no_link_when_no_parent_manifest(self, storage_root: Path) -> None:
         # No parent manifest → no span link.
         client = self._make_client(storage_root)
         client.post("/v1/x/sessions/no-manifest-parent/spawn", json=_make_body())
@@ -647,9 +646,7 @@ class TestSpawnOtel:
         body = client.post("/v1/x/sessions/tp-parent/spawn", json=_make_body()).json()
         child_id = body["child_session_id"]
 
-        manifest = json.loads(
-            (storage_root / "sessions" / child_id / "manifest.json").read_text()
-        )
+        manifest = json.loads((storage_root / "sessions" / child_id / "manifest.json").read_text())
         assert "traceparent" in manifest
         assert isinstance(manifest["traceparent"], str)
         assert manifest["traceparent"].startswith("00-")

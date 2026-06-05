@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
 from meridian_cli._client import DaemonClient
+import pytest
 
 
 @pytest.fixture()

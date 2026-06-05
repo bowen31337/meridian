@@ -9,6 +9,7 @@ exception is re-raised to the caller.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import datetime
 from typing import Any
 
@@ -55,10 +56,9 @@ class _ProviderSlot:
 
     async def wait_drained(self, timeout: float) -> None:
         """Block until all in-flight calls complete, or *timeout* seconds elapse."""
-        try:
+        # proceed with close even if some calls are still running
+        with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(asyncio.shield(self._drained.wait()), timeout)
-        except asyncio.TimeoutError:
-            pass  # proceed with close even if some calls are still running
 
 
 class ProviderRegistry:
@@ -204,17 +204,13 @@ class ProviderRegistry:
 
     # ── Internal helpers ─────────────────────────────────────────────────────
 
-    async def _atomic_replace(
-        self, name: str, new_slot: _ProviderSlot
-    ) -> _ProviderSlot | None:
+    async def _atomic_replace(self, name: str, new_slot: _ProviderSlot) -> _ProviderSlot | None:
         async with self._lock:
             old = self._slots.get(name)
             self._slots[name] = new_slot
             return old
 
-    async def _atomic_replace_all(
-        self, new_slots: dict[str, _ProviderSlot]
-    ) -> list[_ProviderSlot]:
+    async def _atomic_replace_all(self, new_slots: dict[str, _ProviderSlot]) -> list[_ProviderSlot]:
         async with self._lock:
             old = list(self._slots.values())
             self._slots = new_slots

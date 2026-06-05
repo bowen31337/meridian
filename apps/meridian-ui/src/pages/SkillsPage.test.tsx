@@ -162,13 +162,9 @@ describe("SkillsPage — installed tab loading/error/empty", () => {
     const auditLog = makeAuditLog();
     render(<SkillsPage />, { wrapper: createWrapper({ auditLog }) });
     await waitFor(() =>
-      expect(
-        auditLog.entries.some((e) => e.event === "skill_registry.load.failed"),
-      ).toBe(true),
+      expect(auditLog.entries.some((e) => e.event === "skill_registry.load.failed")).toBe(true),
     );
-    const entry = auditLog.entries.find(
-      (e) => e.event === "skill_registry.load.failed",
-    );
+    const entry = auditLog.entries.find((e) => e.event === "skill_registry.load.failed");
     expect(entry?.level).toBe("error");
   });
 
@@ -255,9 +251,7 @@ describe("SkillsPage — skill detail / version history", () => {
 
     fireEvent.click(screen.getByTestId(`skill-select-${SKILL_1.id}`));
 
-    await waitFor(() =>
-      expect(screen.getByTestId("skill-detail-panel")).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByTestId("skill-detail-panel")).toBeTruthy());
   });
 
   it("shows version history table after expansion", async () => {
@@ -267,9 +261,7 @@ describe("SkillsPage — skill detail / version history", () => {
 
     fireEvent.click(screen.getByTestId(`skill-select-${SKILL_1.id}`));
 
-    await waitFor(() =>
-      expect(screen.getByTestId("versions-table")).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByTestId("versions-table")).toBeTruthy());
     expect(screen.getByTestId("version-row-skillver_001")).toBeTruthy();
   });
 
@@ -280,14 +272,10 @@ describe("SkillsPage — skill detail / version history", () => {
 
     const btn = screen.getByTestId(`skill-select-${SKILL_1.id}`);
     fireEvent.click(btn);
-    await waitFor(() =>
-      expect(screen.getByTestId("skill-detail-panel")).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByTestId("skill-detail-panel")).toBeTruthy());
 
     fireEvent.click(btn);
-    await waitFor(() =>
-      expect(screen.queryByTestId("skill-detail-panel")).toBeNull(),
-    );
+    await waitFor(() => expect(screen.queryByTestId("skill-detail-panel")).toBeNull());
   });
 
   it("shows versions-error and writes to audit log when versions load fails", async () => {
@@ -307,15 +295,11 @@ describe("SkillsPage — skill detail / version history", () => {
 
     fireEvent.click(screen.getByTestId(`skill-select-${SKILL_1.id}`));
 
+    await waitFor(() => expect(screen.getByTestId("versions-error")).toBeTruthy());
     await waitFor(() =>
-      expect(screen.getByTestId("versions-error")).toBeTruthy(),
-    );
-    await waitFor(() =>
-      expect(
-        auditLog.entries.some(
-          (e) => e.event === "skill_registry.versions.load.failed",
-        ),
-      ).toBe(true),
+      expect(auditLog.entries.some((e) => e.event === "skill_registry.versions.load.failed")).toBe(
+        true,
+      ),
     );
   });
 });
@@ -325,15 +309,15 @@ describe("SkillsPage — skill detail / version history", () => {
 // ---------------------------------------------------------------------------
 
 describe("SkillsPage — agent activation toggle", () => {
-  function mockWithAgentAndActivations(
-    activations: object[] = [],
-  ) {
+  function mockWithAgentAndActivations(activations: object[] = []) {
     vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL) => {
       const url = input.toString();
       if (url.includes(`/v1/agents/${AGENT_1.id}/skills`) && !url.includes("/approve")) {
-        if ((fetch as ReturnType<typeof vi.fn>).mock.calls.filter(
-          (c: [RequestInfo | URL, ...unknown[]]) => c[0].toString().includes(`/v1/agents/${AGENT_1.id}/skills`)
-        ).length <= 1) {
+        if (
+          (fetch as ReturnType<typeof vi.fn>).mock.calls.filter((c) =>
+            String(c[0]).includes(`/v1/agents/${AGENT_1.id}/skills`),
+          ).length <= 1
+        ) {
           return jsonResponse({
             items: activations,
             total: activations.length,
@@ -372,14 +356,10 @@ describe("SkillsPage — agent activation toggle", () => {
     fireEvent.click(screen.getByTestId(`skill-select-${SKILL_1.id}`));
 
     await waitFor(() =>
-      expect(
-        screen.getByTestId(`agent-activation-row-${AGENT_1.id}`),
-      ).toBeTruthy(),
+      expect(screen.getByTestId(`agent-activation-row-${AGENT_1.id}`)).toBeTruthy(),
     );
     await waitFor(() =>
-      expect(
-        screen.getByTestId(`request-activation-${AGENT_1.id}`),
-      ).toBeTruthy(),
+      expect(screen.getByTestId(`request-activation-${AGENT_1.id}`)).toBeTruthy(),
     );
   });
 
@@ -419,9 +399,7 @@ describe("SkillsPage — agent activation toggle", () => {
     fireEvent.click(screen.getByTestId(`skill-select-${SKILL_1.id}`));
 
     await waitFor(() =>
-      expect(
-        screen.getByTestId(`approve-activation-${AGENT_1.id}`),
-      ).toBeTruthy(),
+      expect(screen.getByTestId(`approve-activation-${AGENT_1.id}`)).toBeTruthy(),
     );
     expect(screen.getByTestId(`revoke-activation-${AGENT_1.id}`)).toBeTruthy();
   });
@@ -461,14 +439,8 @@ describe("SkillsPage — agent activation toggle", () => {
     await waitFor(() => expect(screen.getByTestId("skills-table")).toBeTruthy());
     fireEvent.click(screen.getByTestId(`skill-select-${SKILL_1.id}`));
 
-    await waitFor(() =>
-      expect(
-        screen.getByTestId(`revoke-activation-${AGENT_1.id}`),
-      ).toBeTruthy(),
-    );
-    expect(
-      screen.queryByTestId(`approve-activation-${AGENT_1.id}`),
-    ).toBeNull();
+    await waitFor(() => expect(screen.getByTestId(`revoke-activation-${AGENT_1.id}`)).toBeTruthy());
+    expect(screen.queryByTestId(`approve-activation-${AGENT_1.id}`)).toBeNull();
   });
 });
 
@@ -486,20 +458,18 @@ describe("SkillsPage — forge proposals tab", () => {
     proposalsResponse: () => Response,
     extraHandlers: ((url: string, init?: RequestInit) => Response | null)[] = [],
   ) {
-    vi.mocked(fetch).mockImplementation(
-      async (input: RequestInfo | URL, init?: RequestInit) => {
-        const url = input.toString();
-        for (const handler of extraHandlers) {
-          const result = handler(url, init);
-          if (result !== null) return result;
-        }
-        if (url.includes("/v1/x/skill_forge/proposals")) {
-          return proposalsResponse();
-        }
-        // Default: empty skills list for the Installed tab
-        return jsonResponse({ items: [], next_cursor: null, limit: 20 });
-      },
-    );
+    vi.mocked(fetch).mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input.toString();
+      for (const handler of extraHandlers) {
+        const result = handler(url, init);
+        if (result !== null) return result;
+      }
+      if (url.includes("/v1/x/skill_forge/proposals")) {
+        return proposalsResponse();
+      }
+      // Default: empty skills list for the Installed tab
+      return jsonResponse({ items: [], next_cursor: null, limit: 20 });
+    });
   }
 
   it("shows loading state for proposals", () => {
@@ -515,50 +485,34 @@ describe("SkillsPage — forge proposals tab", () => {
     );
     render(<SkillsPage />, { wrapper: createWrapper() });
     switchToProposalsTab();
-    await waitFor(() =>
-      expect(screen.getByTestId("proposals-error")).toBeTruthy(),
-    );
-    expect(screen.getByTestId("proposals-error").textContent).toContain(
-      "proposals down",
-    );
+    await waitFor(() => expect(screen.getByTestId("proposals-error")).toBeTruthy());
+    expect(screen.getByTestId("proposals-error").textContent).toContain("proposals down");
   });
 
   it("writes forge_proposals.load.failed to audit log on fetch failure", async () => {
-    mockProposalsFetch(() =>
-      jsonResponse({ code: "err", message: "fail" }, 500),
-    );
+    mockProposalsFetch(() => jsonResponse({ code: "err", message: "fail" }, 500));
     const auditLog = makeAuditLog();
     render(<SkillsPage />, { wrapper: createWrapper({ auditLog }) });
     switchToProposalsTab();
     await waitFor(() =>
       expect(
-        auditLog.entries.some(
-          (e) => e.event === "skill_registry.forge_proposals.load.failed",
-        ),
+        auditLog.entries.some((e) => e.event === "skill_registry.forge_proposals.load.failed"),
       ).toBe(true),
     );
   });
 
   it("shows empty state when no proposals exist", async () => {
-    mockProposalsFetch(() =>
-      jsonResponse({ items: [], next_cursor: null, limit: 20 }),
-    );
+    mockProposalsFetch(() => jsonResponse({ items: [], next_cursor: null, limit: 20 }));
     render(<SkillsPage />, { wrapper: createWrapper() });
     switchToProposalsTab();
-    await waitFor(() =>
-      expect(screen.getByTestId("proposals-empty")).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByTestId("proposals-empty")).toBeTruthy());
   });
 
   it("renders proposal rows with skill_id and status", async () => {
-    mockProposalsFetch(() =>
-      jsonResponse({ items: [PROPOSAL_1], next_cursor: null, limit: 20 }),
-    );
+    mockProposalsFetch(() => jsonResponse({ items: [PROPOSAL_1], next_cursor: null, limit: 20 }));
     render(<SkillsPage />, { wrapper: createWrapper() });
     switchToProposalsTab();
-    await waitFor(() =>
-      expect(screen.getByTestId("proposals-table")).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByTestId("proposals-table")).toBeTruthy());
     expect(screen.getByTestId(`proposal-row-${PROPOSAL_1.id}`)).toBeTruthy();
     expect(screen.getByText(PROPOSAL_1.skill_id)).toBeTruthy();
     expect(screen.getByText("PROPOSAL")).toBeTruthy();
@@ -566,26 +520,23 @@ describe("SkillsPage — forge proposals tab", () => {
 
   it("approve button calls approve endpoint and invalidates query", async () => {
     let proposalsFetchCount = 0;
-    mockProposalsFetch(
-      () => {
-        proposalsFetchCount++;
-        if (proposalsFetchCount === 1) {
-          return jsonResponse({ items: [PROPOSAL_1], next_cursor: null, limit: 20 });
+    mockProposalsFetch(() => {
+      proposalsFetchCount++;
+      if (proposalsFetchCount === 1) {
+        return jsonResponse({ items: [PROPOSAL_1], next_cursor: null, limit: 20 });
+      }
+      return jsonResponse({ items: [], next_cursor: null, limit: 20 });
+    }, [
+      (url, init) => {
+        if (
+          url.includes(`/proposals/${PROPOSAL_1.id}/approve`) &&
+          (init as RequestInit)?.method === "POST"
+        ) {
+          return jsonResponse({ id: "skillver_new" }, 200);
         }
-        return jsonResponse({ items: [], next_cursor: null, limit: 20 });
+        return null;
       },
-      [
-        (url, init) => {
-          if (
-            url.includes(`/proposals/${PROPOSAL_1.id}/approve`) &&
-            (init as RequestInit)?.method === "POST"
-          ) {
-            return jsonResponse({ id: "skillver_new" }, 200);
-          }
-          return null;
-        },
-      ],
-    );
+    ]);
 
     render(<SkillsPage />, { wrapper: createWrapper() });
     switchToProposalsTab();
@@ -608,9 +559,7 @@ describe("SkillsPage — forge proposals tab", () => {
   });
 
   it("reject button shows reason input and confirm", async () => {
-    mockProposalsFetch(() =>
-      jsonResponse({ items: [PROPOSAL_1], next_cursor: null, limit: 20 }),
-    );
+    mockProposalsFetch(() => jsonResponse({ items: [PROPOSAL_1], next_cursor: null, limit: 20 }));
     render(<SkillsPage />, { wrapper: createWrapper() });
     switchToProposalsTab();
     await waitFor(() =>
@@ -620,9 +569,7 @@ describe("SkillsPage — forge proposals tab", () => {
     fireEvent.click(screen.getByTestId(`reject-proposal-${PROPOSAL_1.id}`));
 
     expect(screen.getByTestId(`reject-reason-${PROPOSAL_1.id}`)).toBeTruthy();
-    expect(
-      screen.getByTestId(`confirm-reject-${PROPOSAL_1.id}`),
-    ).toBeTruthy();
+    expect(screen.getByTestId(`confirm-reject-${PROPOSAL_1.id}`)).toBeTruthy();
   });
 
   it("confirm reject calls reject endpoint with reason", async () => {
@@ -656,7 +603,7 @@ describe("SkillsPage — forge proposals tab", () => {
         (c[0] as string).includes(`/proposals/${PROPOSAL_1.id}/reject`),
       );
       expect(rejectCall).toBeTruthy();
-      const body = JSON.parse((rejectCall![1] as RequestInit).body as string);
+      const body = JSON.parse((rejectCall?.[1] as RequestInit).body as string);
       expect(body.reason).toBe("not useful");
     });
   });
@@ -686,13 +633,9 @@ describe("SkillsPage — forge proposals tab", () => {
 
     fireEvent.click(screen.getByTestId(`approve-proposal-${PROPOSAL_1.id}`));
 
-    await waitFor(() =>
-      expect(screen.getByTestId("proposals-action-error")).toBeTruthy(),
-    );
+    await waitFor(() => expect(screen.getByTestId("proposals-action-error")).toBeTruthy());
     expect(
-      auditLog.entries.some(
-        (e) => e.event === "skill_registry.forge_proposal.approve.failed",
-      ),
+      auditLog.entries.some((e) => e.event === "skill_registry.forge_proposal.approve.failed"),
     ).toBe(true);
   });
 });
@@ -706,9 +649,7 @@ describe("SkillsPage — tab navigation", () => {
     vi.mocked(fetch).mockImplementation(() => new Promise(() => {}));
     render(<SkillsPage />, { wrapper: createWrapper() });
     expect(screen.getByTestId("tab-installed").getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByTestId("tab-proposals").getAttribute("aria-pressed")).toBe(
-      "false",
-    );
+    expect(screen.getByTestId("tab-proposals").getAttribute("aria-pressed")).toBe("false");
   });
 
   it("switches to Forge Proposals tab on click", () => {
@@ -716,9 +657,7 @@ describe("SkillsPage — tab navigation", () => {
     render(<SkillsPage />, { wrapper: createWrapper() });
     fireEvent.click(screen.getByTestId("tab-proposals"));
     expect(screen.getByTestId("tab-proposals").getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByTestId("tab-installed").getAttribute("aria-pressed")).toBe(
-      "false",
-    );
+    expect(screen.getByTestId("tab-installed").getAttribute("aria-pressed")).toBe("false");
   });
 });
 

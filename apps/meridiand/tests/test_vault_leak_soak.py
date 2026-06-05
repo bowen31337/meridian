@@ -58,11 +58,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
+from core_errors import HandlerOptions, install_error_handler
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-from core_errors import AuditLog, AuditLogEntry, HandlerOptions, install_error_handler
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from meridiand._vault_leak_soak import (
@@ -74,7 +72,6 @@ from meridiand._vault_leak_soak import (
 )
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -412,26 +409,34 @@ class TestVaultLeakSoakAudit:
     def test_success_audit_level_is_info(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         client.post("/v1/x/ci/vault-leak-soak-run")
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "vault.leak.soak.ran")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.leak.soak.ran"
+        )
         assert record["level"] == "info"
 
     def test_success_audit_detail_has_run_id(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         client.post("/v1/x/ci/vault-leak-soak-run")
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "vault.leak.soak.ran")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.leak.soak.ran"
+        )
         assert "run_id" in record["detail"] and record["detail"]["run_id"]
 
     def test_success_audit_detail_has_canary_count(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         client.post("/v1/x/ci/vault-leak-soak-run")
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "vault.leak.soak.ran")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.leak.soak.ran"
+        )
         assert "canary_count" in record["detail"]
         assert record["detail"]["canary_count"] == CANARY_COUNT
 
     def test_success_audit_detail_has_leak_count_zero(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         client.post("/v1/x/ci/vault-leak-soak-run")
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "vault.leak.soak.ran")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.leak.soak.ran"
+        )
         assert record["detail"]["leak_count"] == 0
 
     def test_failure_writes_failed_audit_entry(self, storage_root: Path) -> None:
@@ -446,7 +451,8 @@ class TestVaultLeakSoakAudit:
         client = _make_client(storage_root, canary_override=[_KNOWN_CANARY])
         client.post("/v1/x/ci/vault-leak-soak-run")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "vault.leak.soak.run.failed"
         )
         assert record["level"] == "error"
@@ -456,7 +462,8 @@ class TestVaultLeakSoakAudit:
         client = _make_client(storage_root, canary_override=[_KNOWN_CANARY])
         client.post("/v1/x/ci/vault-leak-soak-run")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "vault.leak.soak.run.failed"
         )
         assert "run_id" in record["detail"] and record["detail"]["run_id"]
@@ -466,7 +473,8 @@ class TestVaultLeakSoakAudit:
         client = _make_client(storage_root, canary_override=[_KNOWN_CANARY])
         client.post("/v1/x/ci/vault-leak-soak-run")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "vault.leak.soak.run.failed"
         )
         assert record["detail"]["leak_count"] >= 1
@@ -476,7 +484,8 @@ class TestVaultLeakSoakAudit:
         client = _make_client(storage_root, canary_override=[_KNOWN_CANARY])
         client.post("/v1/x/ci/vault-leak-soak-run")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "vault.leak.soak.run.failed"
         )
         assert record["detail"]["first_leak_source"] == "file"

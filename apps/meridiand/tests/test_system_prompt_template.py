@@ -30,16 +30,15 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
 from meridiand._audit import FileAuditLog
 from meridiand._system_prompt_template import (
     TemplateExpandError,
     TemplateMemoryNotFoundError,
     expand_system_prompt,
 )
+import pytest
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -156,9 +155,7 @@ class TestSuccessfulExpansion:
     def test_no_audit_entry_on_success(self, storage_root: Path) -> None:
         _write_memory(storage_root, "user.x", "y")
         audit = FileAuditLog(storage_root)
-        expand_system_prompt(
-            "{{ memory.user.x }}", storage_root=storage_root, audit_log=audit
-        )
+        expand_system_prompt("{{ memory.user.x }}", storage_root=storage_root, audit_log=audit)
         assert _audit_records(storage_root) == []
 
 
@@ -197,7 +194,8 @@ class TestMissingMemory:
                 audit_log=audit,
             )
         rec = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "system_prompt.template.expand.failed"
         )
         assert rec["code"] == "template_memory_not_found"
@@ -211,7 +209,8 @@ class TestMissingMemory:
                 audit_log=audit,
             )
         rec = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "system_prompt.template.expand.failed"
         )
         assert rec["level"] == "error"
@@ -225,7 +224,8 @@ class TestMissingMemory:
                 audit_log=audit,
             )
         rec = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "system_prompt.template.expand.failed"
         )
         assert len(rec["detail"]["message"]) > 0
@@ -240,48 +240,55 @@ class TestUnexpectedError:
     def test_io_error_raises_template_expand_error(self, storage_root: Path) -> None:
         _write_memory(storage_root, "user.key", "val")
         audit = FileAuditLog(storage_root)
-        with patch(
-            "meridiand._system_prompt_template.json.loads",
-            side_effect=OSError("disk read failed"),
+        with (
+            patch(
+                "meridiand._system_prompt_template.json.loads",
+                side_effect=OSError("disk read failed"),
+            ),
+            pytest.raises(TemplateExpandError),
         ):
-            with pytest.raises(TemplateExpandError):
-                expand_system_prompt(
-                    "{{ memory.user.key }}",
-                    storage_root=storage_root,
-                    audit_log=audit,
-                )
+            expand_system_prompt(
+                "{{ memory.user.key }}",
+                storage_root=storage_root,
+                audit_log=audit,
+            )
 
     def test_unexpected_error_writes_audit_entry(self, storage_root: Path) -> None:
         _write_memory(storage_root, "user.key", "val")
         audit = FileAuditLog(storage_root)
-        with patch(
-            "meridiand._system_prompt_template.json.loads",
-            side_effect=OSError("disk read failed"),
+        with (
+            patch(
+                "meridiand._system_prompt_template.json.loads",
+                side_effect=OSError("disk read failed"),
+            ),
+            pytest.raises(TemplateExpandError),
         ):
-            with pytest.raises(TemplateExpandError):
-                expand_system_prompt(
-                    "{{ memory.user.key }}",
-                    storage_root=storage_root,
-                    audit_log=audit,
-                )
+            expand_system_prompt(
+                "{{ memory.user.key }}",
+                storage_root=storage_root,
+                audit_log=audit,
+            )
         records = _audit_records(storage_root)
         assert any(r.get("event") == "system_prompt.template.expand.failed" for r in records)
 
     def test_unexpected_error_audit_code(self, storage_root: Path) -> None:
         _write_memory(storage_root, "user.key", "val")
         audit = FileAuditLog(storage_root)
-        with patch(
-            "meridiand._system_prompt_template.json.loads",
-            side_effect=OSError("disk read failed"),
+        with (
+            patch(
+                "meridiand._system_prompt_template.json.loads",
+                side_effect=OSError("disk read failed"),
+            ),
+            pytest.raises(TemplateExpandError),
         ):
-            with pytest.raises(TemplateExpandError):
-                expand_system_prompt(
-                    "{{ memory.user.key }}",
-                    storage_root=storage_root,
-                    audit_log=audit,
-                )
+            expand_system_prompt(
+                "{{ memory.user.key }}",
+                storage_root=storage_root,
+                audit_log=audit,
+            )
         rec = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "system_prompt.template.expand.failed"
         )
         assert rec["code"] == "template_expand_failed"
@@ -289,18 +296,21 @@ class TestUnexpectedError:
     def test_unexpected_error_audit_level_is_error(self, storage_root: Path) -> None:
         _write_memory(storage_root, "user.key", "val")
         audit = FileAuditLog(storage_root)
-        with patch(
-            "meridiand._system_prompt_template.json.loads",
-            side_effect=OSError("disk read failed"),
+        with (
+            patch(
+                "meridiand._system_prompt_template.json.loads",
+                side_effect=OSError("disk read failed"),
+            ),
+            pytest.raises(TemplateExpandError),
         ):
-            with pytest.raises(TemplateExpandError):
-                expand_system_prompt(
-                    "{{ memory.user.key }}",
-                    storage_root=storage_root,
-                    audit_log=audit,
-                )
+            expand_system_prompt(
+                "{{ memory.user.key }}",
+                storage_root=storage_root,
+                audit_log=audit,
+            )
         rec = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "system_prompt.template.expand.failed"
         )
         assert rec["level"] == "error"

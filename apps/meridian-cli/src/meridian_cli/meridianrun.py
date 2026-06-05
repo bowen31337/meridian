@@ -47,7 +47,7 @@ class _Renderer:
 
     def __init__(self, console: Console) -> None:
         self._console = console
-        self._streaming = False   # True while accumulating message.delta tokens
+        self._streaming = False  # True while accumulating message.delta tokens
         self._in_thinking = False  # True while inside a thinking block
 
     def render(self, event: dict[str, Any]) -> None:
@@ -64,8 +64,7 @@ class _Renderer:
             phase = data.get("phase", "?")
             ps = _phase_style(phase)
             self._console.print(
-                f"[dim]{ts}[/dim] [bold]Phase:[/bold] [dim]{prev}[/dim]"
-                f" → [{ps}]{phase}[/{ps}]"
+                f"[dim]{ts}[/dim] [bold]Phase:[/bold] [dim]{prev}[/dim] → [{ps}]{phase}[/{ps}]"
             )
 
         elif etype == "message.delta":
@@ -76,25 +75,20 @@ class _Renderer:
             role = data.get("role", "")
             content = data.get("content", "")
             if role == "user" and isinstance(content, str) and content:
-                self._console.print(
-                    f"[dim]{ts}[/dim] [bold magenta]User:[/bold magenta] {content}"
-                )
+                self._console.print(f"[dim]{ts}[/dim] [bold magenta]User:[/bold magenta] {content}")
 
         elif etype == "tool_call.requested":
             self._flush()
             name = data.get("tool_name") or data.get("name") or "?"
             args_raw = data.get("arguments") or data.get("args") or {}
             if isinstance(args_raw, dict):
-                args_str = ", ".join(
-                    f"{k}={repr(v)}" for k, v in list(args_raw.items())[:3]
-                )
+                args_str = ", ".join(f"{k}={repr(v)}" for k, v in list(args_raw.items())[:3])
                 if len(args_raw) > 3:
                     args_str += ", …"
             else:
                 args_str = str(args_raw)[:80]
             self._console.print(
-                f"[dim]{ts}[/dim] [bold yellow]⟳ {name}[/bold yellow]"
-                f"([dim]{args_str}[/dim])"
+                f"[dim]{ts}[/dim] [bold yellow]⟳ {name}[/bold yellow]([dim]{args_str}[/dim])"
             )
 
         elif etype == "tool_call.dispatched":
@@ -106,6 +100,7 @@ class _Renderer:
                 snippet = result[:120].replace("\n", " ")
             else:
                 import json
+
                 snippet = json.dumps(result)[:120]
             self._console.print(f"  [bold green]✓[/bold green] [dim]{snippet}[/dim]")
 

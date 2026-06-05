@@ -2,15 +2,17 @@
 """Lint Rule L2: Provider SDK imports confined to their own subtree.
 
 Each third-party provider SDK may only be imported inside its designated
-packages/providers/<name>/ directory:
+package directory:
 
-  anthropic  → packages/providers/anthropic/
-  openai     → packages/providers/openai/
-  openrouter → packages/providers/openrouter/
-  ollama     → packages/providers/ollama/
+  anthropic  → packages/provider-anthropic-apikey/
+  openai     → packages/sdk-provider/
+  openrouter → packages/sdk-provider/
+  ollama     → packages/sdk-provider/
 
-Any import of these packages outside its designated directory is a
-provider-isolation violation.
+The OpenAI/OpenRouter/Ollama adapters live in packages/sdk-provider (see its
+openai.py / openrouter.py / ollama.py modules); the Anthropic API-key adapter
+is its own package. Any import of these SDKs outside its designated directory
+is a provider-isolation violation.
 
 Exit code 0 = clean.  Exit code 1 = violations found.
 On failure writes a structured error to stderr and appends an NDJSON audit
@@ -23,24 +25,22 @@ import ast
 import datetime
 import json
 import os
-import sys
 from pathlib import Path
+import sys
 
 # Map each provider SDK top-level import name to its allowed directory
 # (relative to repo root).
 _PROVIDER_ALLOWED: dict[str, Path] = {
-    "anthropic": Path("packages/providers/anthropic"),
-    "openai": Path("packages/providers/openai"),
-    "openrouter": Path("packages/providers/openrouter"),
-    "ollama": Path("packages/providers/ollama"),
+    "anthropic": Path("packages/provider-anthropic-apikey"),
+    "openai": Path("packages/sdk-provider"),
+    "openrouter": Path("packages/sdk-provider"),
+    "ollama": Path("packages/sdk-provider"),
 }
 
 _BANNED_IMPORTS: frozenset[str] = frozenset(_PROVIDER_ALLOWED)
 
 # Directory names that are always skipped during traversal.
-_SKIP_DIRS: frozenset[str] = frozenset(
-    {".git", "__pycache__", ".venv", ".eggs", "node_modules"}
-)
+_SKIP_DIRS: frozenset[str] = frozenset({".git", "__pycache__", ".venv", ".eggs", "node_modules"})
 
 
 def _is_test_file(path: Path) -> bool:
@@ -72,11 +72,10 @@ def _extract_provider_imports(path: Path) -> list[str]:
                 top = alias.name.split(".")[0]
                 if top in _BANNED_IMPORTS:
                     seen[top] = None
-        elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                top = node.module.split(".")[0]
-                if top in _BANNED_IMPORTS:
-                    seen[top] = None
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            top = node.module.split(".")[0]
+            if top in _BANNED_IMPORTS:
+                seen[top] = None
     return list(seen)
 
 

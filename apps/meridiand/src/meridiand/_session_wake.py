@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -47,9 +47,7 @@ class _WakeDispatcher(Protocol):
 
 class SessionWakeNotFoundError(MeridianError):
     def __init__(self, *, message: str, timestamp: str) -> None:
-        super().__init__(
-            code="session_wake_not_found", message=message, timestamp=timestamp
-        )
+        super().__init__(code="session_wake_not_found", message=message, timestamp=timestamp)
 
     def http_status(self) -> int:
         return 404
@@ -162,7 +160,7 @@ def make_session_wake_router(
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(
             content={

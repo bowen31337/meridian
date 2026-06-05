@@ -43,7 +43,6 @@ from sdk_sandbox._secret_refs import (
 
 from .conftest import CapturingAuditLog, MockSpan, MockTracer
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

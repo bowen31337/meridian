@@ -38,7 +38,6 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
@@ -46,7 +45,6 @@ from storage_event_log import LocalEventLogWriter
 from storage_reposit import LocalEventLogReader
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -107,55 +105,77 @@ class TestSoftBudgetExceededResponse:
         assert resp.status_code == 200
 
     def test_response_has_session_id(self, storage_root: Path) -> None:
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/sess2/soft-budget-exceeded", json=_VALID_BODY
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post("/v1/x/sessions/sess2/soft-budget-exceeded", json=_VALID_BODY)
+            .json()
+        )
         assert body["session_id"] == "sess2"
 
     def test_response_after_is_waiting_for_user(self, storage_root: Path) -> None:
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/sess3/soft-budget-exceeded", json=_VALID_BODY
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post("/v1/x/sessions/sess3/soft-budget-exceeded", json=_VALID_BODY)
+            .json()
+        )
         assert body["after"] == "waiting_for_user"
 
     def test_response_reason_is_budget_warning(self, storage_root: Path) -> None:
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/sess4/soft-budget-exceeded", json=_VALID_BODY
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post("/v1/x/sessions/sess4/soft-budget-exceeded", json=_VALID_BODY)
+            .json()
+        )
         assert body["reason"] == "budget_warning"
 
     def test_response_before_defaults_to_created(self, storage_root: Path) -> None:
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/sess5/soft-budget-exceeded", json=_VALID_BODY
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post("/v1/x/sessions/sess5/soft-budget-exceeded", json=_VALID_BODY)
+            .json()
+        )
         assert body["before"] == "created"
 
     def test_response_before_reflects_prior_phase(self, storage_root: Path) -> None:
         _seed_phase(storage_root, "sess6", "running")
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/sess6/soft-budget-exceeded", json=_VALID_BODY
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post("/v1/x/sessions/sess6/soft-budget-exceeded", json=_VALID_BODY)
+            .json()
+        )
         assert body["before"] == "running"
 
     def test_response_dimension_matches_request(self, storage_root: Path) -> None:
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/sess7/soft-budget-exceeded",
-            json={"dimension": "input_tokens", "limit": 1000.0, "actual": 1500.0},
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post(
+                "/v1/x/sessions/sess7/soft-budget-exceeded",
+                json={"dimension": "input_tokens", "limit": 1000.0, "actual": 1500.0},
+            )
+            .json()
+        )
         assert body["dimension"] == "input_tokens"
 
     def test_response_limit_matches_request(self, storage_root: Path) -> None:
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/sess8/soft-budget-exceeded",
-            json={"dimension": "dollars", "limit": 5.0, "actual": 7.0},
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post(
+                "/v1/x/sessions/sess8/soft-budget-exceeded",
+                json={"dimension": "dollars", "limit": 5.0, "actual": 7.0},
+            )
+            .json()
+        )
         assert body["limit"] == 5.0
 
     def test_response_actual_matches_request(self, storage_root: Path) -> None:
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/sess9/soft-budget-exceeded",
-            json={"dimension": "dollars", "limit": 5.0, "actual": 7.0},
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post(
+                "/v1/x/sessions/sess9/soft-budget-exceeded",
+                json={"dimension": "dollars", "limit": 5.0, "actual": 7.0},
+            )
+            .json()
+        )
         assert body["actual"] == 7.0
 
 
@@ -257,9 +277,10 @@ class TestSoftBudgetExceededEventLog:
 class TestSoftBudgetExceededHookDispatch:
     def test_pre_message_hook_receives_session_id(self, storage_root: Path) -> None:
         import uuid
+
+        from core_errors import NoopAuditLog
         from meridiand._hook_dispatch import dispatch_hooks
         from sdk_sandbox import ExecutionContext
-        from core_errors import NoopAuditLog
 
         hooks_dir = storage_root / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
@@ -304,9 +325,10 @@ class TestSoftBudgetExceededHookDispatch:
 
     def test_pre_message_hook_payload_has_budget_warning(self, storage_root: Path) -> None:
         import uuid
+
+        from core_errors import NoopAuditLog
         from meridiand._hook_dispatch import dispatch_hooks
         from sdk_sandbox import ExecutionContext
-        from core_errors import NoopAuditLog
 
         hooks_dir = storage_root / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
@@ -350,9 +372,10 @@ class TestSoftBudgetExceededHookDispatch:
 
     def test_pre_message_hook_budget_warning_has_dimension(self, storage_root: Path) -> None:
         import uuid
+
+        from core_errors import NoopAuditLog
         from meridiand._hook_dispatch import dispatch_hooks
         from sdk_sandbox import ExecutionContext
-        from core_errors import NoopAuditLog
 
         hooks_dir = storage_root / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
@@ -383,7 +406,11 @@ class TestSoftBudgetExceededHookDispatch:
                 "pre_message",
                 {
                     "session_id": "s",
-                    "budget_warning": {"dimension": "input_tokens", "limit": 100.0, "actual": 150.0},
+                    "budget_warning": {
+                        "dimension": "input_tokens",
+                        "limit": 100.0,
+                        "actual": 150.0,
+                    },
                 },
                 ExecutionContext(session_id="s"),
                 hooks_dir=hooks_dir,
@@ -396,9 +423,10 @@ class TestSoftBudgetExceededHookDispatch:
 
     def test_pre_message_hook_budget_warning_has_limit(self, storage_root: Path) -> None:
         import uuid
+
+        from core_errors import NoopAuditLog
         from meridiand._hook_dispatch import dispatch_hooks
         from sdk_sandbox import ExecutionContext
-        from core_errors import NoopAuditLog
 
         hooks_dir = storage_root / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
@@ -442,9 +470,10 @@ class TestSoftBudgetExceededHookDispatch:
 
     def test_pre_message_hook_budget_warning_has_actual(self, storage_root: Path) -> None:
         import uuid
+
+        from core_errors import NoopAuditLog
         from meridiand._hook_dispatch import dispatch_hooks
         from sdk_sandbox import ExecutionContext
-        from core_errors import NoopAuditLog
 
         hooks_dir = storage_root / "hooks"
         hooks_dir.mkdir(parents=True, exist_ok=True)
@@ -652,16 +681,12 @@ class TestSoftBudgetExceededRouterWiring:
         audit = FileAuditLog(storage_root)
         app = create_app(audit)
         client = TestClient(app, raise_server_exceptions=False)
-        resp = client.post(
-            "/v1/x/sessions/any/soft-budget-exceeded", json=_VALID_BODY
-        )
+        resp = client.post("/v1/x/sessions/any/soft-budget-exceeded", json=_VALID_BODY)
         assert resp.status_code == 404
 
     def test_no_event_log_returns_404(self, storage_root: Path) -> None:
         audit = FileAuditLog(storage_root)
         app = create_app(audit, storage_root=storage_root)
         client = TestClient(app, raise_server_exceptions=False)
-        resp = client.post(
-            "/v1/x/sessions/any/soft-budget-exceeded", json=_VALID_BODY
-        )
+        resp = client.post("/v1/x/sessions/any/soft-budget-exceeded", json=_VALID_BODY)
         assert resp.status_code == 404

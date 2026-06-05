@@ -28,16 +28,13 @@ Tests cover:
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -174,9 +171,7 @@ class TestCancelTreeWalk:
 
 class TestCancelManifestUpdate:
     def _read_manifest(self, storage_root: Path, child_id: str) -> dict:
-        return json.loads(
-            (storage_root / "sessions" / child_id / "manifest.json").read_text()
-        )
+        return json.loads((storage_root / "sessions" / child_id / "manifest.json").read_text())
 
     def test_child_manifest_status_set_to_cancelled(self, storage_root: Path) -> None:
         _write_child_manifest(storage_root, "parent-mu", "child-mu1")

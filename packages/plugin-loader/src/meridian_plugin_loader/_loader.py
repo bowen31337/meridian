@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 import contextlib
-import logging
 from datetime import UTC, datetime
+import logging
 from pathlib import Path
 from typing import Any
 
+from core_errors import AuditLog, AuditLogEntry
 from opentelemetry import trace
 from opentelemetry.trace import StatusCode
-
-from core_errors import AuditLog, AuditLogEntry
 
 from ._discovery import DEFAULT_PLUGINS_YML, discover_from_entry_points, discover_from_yml
 from ._manifest import PluginLoadError, PluginLoadResult, PluginManifest

@@ -34,10 +34,12 @@ Tests cover:
   - Checkpoint with completed tool calls records meridian_tool_call_duration_seconds.
   - Channel inbound increments meridian_channel_inbound_total{kind}.
   - Channel outbound increments meridian_channel_outbound_total{kind}.
-  - Phase transition increments meridian_active_sessions for target phase and decrements prior phase.
+  - Phase transition increments meridian_active_sessions for target phase and
+    decrements prior phase.
   - Session cancel increments meridian_active_sessions{phase="terminated"}.
   - Harness wake increments meridian_harness_wakes_total.
-  - Skill forge proposal approve increments meridian_skill_forge_proposals_total{outcome="approved"}.
+  - Skill forge proposal approve increments
+    meridian_skill_forge_proposals_total{outcome="approved"}.
   - Skill forge proposal reject increments meridian_skill_forge_proposals_total{outcome="rejected"}.
   - Vault secret meta access increments meridian_vault_accesses_total{vault_id}.
 """
@@ -45,11 +47,10 @@ Tests cover:
 from __future__ import annotations
 
 import json
-import uuid
 from pathlib import Path
 from typing import Any
+import uuid
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
@@ -66,7 +67,6 @@ from sdk_channel import (
 )
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Shared stubs
@@ -261,7 +261,6 @@ def _write_manifest(storage_root: Path, session_id: str, extra: dict | None = No
 
 
 def test_session_cancel_increments_sessions_total(tmp_path: Path) -> None:
-    from meridiand._metrics_registry import sessions_total
     from storage_event_log import LocalEventLogWriter
 
     storage_root = tmp_path / "storage"
@@ -284,7 +283,6 @@ def test_session_cancel_increments_sessions_total(tmp_path: Path) -> None:
 
 
 def test_session_cancel_records_duration(tmp_path: Path) -> None:
-    from meridiand._metrics_registry import session_duration_seconds
     from storage_event_log import LocalEventLogWriter
 
     storage_root = tmp_path / "storage"
@@ -312,7 +310,6 @@ def test_session_cancel_records_duration(tmp_path: Path) -> None:
 
 
 def test_checkpoint_increments_tool_calls_total(tmp_path: Path) -> None:
-    from meridiand._metrics_registry import tool_calls_total
 
     storage_root = tmp_path / "storage"
     storage_root.mkdir()
@@ -361,7 +358,6 @@ def test_checkpoint_increments_tool_calls_total(tmp_path: Path) -> None:
 
 
 def test_checkpoint_records_tool_call_duration(tmp_path: Path) -> None:
-    from meridiand._metrics_registry import tool_call_duration_seconds
 
     storage_root = tmp_path / "storage"
     storage_root.mkdir()

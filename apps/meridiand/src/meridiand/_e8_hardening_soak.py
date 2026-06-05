@@ -16,10 +16,10 @@ the error message in the JSON error body, and writes the failure to the audit lo
 
 from __future__ import annotations
 
-import json
-import uuid
 from datetime import UTC, datetime
+import json
 from pathlib import Path
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -89,7 +89,8 @@ def _seed_harness_kill_session(
     channel_id: str,
     now: str,
 ) -> None:
-    """Harness SIGKILL: process killed while harness was running; manifest on disk, no orderly shutdown event."""
+    """Harness SIGKILL: process killed while harness was running; manifest on disk,
+    no orderly shutdown event."""
     session_dir = storage_root / "sessions" / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
     (session_dir / "manifest.json").write_text(
@@ -113,7 +114,8 @@ def _seed_tool_worker_kill_session(
     channel_id: str,
     now: str,
 ) -> None:
-    """Tool-worker SIGKILL: sandbox subprocess killed during tool execution; in-flight call recorded in manifest."""
+    """Tool-worker SIGKILL: sandbox subprocess killed during tool execution; in-flight
+    call recorded in manifest."""
     session_dir = storage_root / "sessions" / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
     (session_dir / "manifest.json").write_text(
@@ -138,7 +140,8 @@ def _seed_daemon_kill_session(
     channel_id: str,
     now: str,
 ) -> None:
-    """Daemon SIGKILL: entire meridiand process killed; all in-memory state lost, disk state intact."""
+    """Daemon SIGKILL: entire meridiand process killed; all in-memory state lost, disk
+    state intact."""
     session_dir = storage_root / "sessions" / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
     (session_dir / "manifest.json").write_text(
@@ -256,9 +259,7 @@ def make_e8_hardening_soak_router(
                         session_id = f"e8_{run_id}_{agent_id}_{channel_id}_{i}"
 
                         try:
-                            _SEED_FNS[layer](
-                                storage_root, session_id, agent_id, channel_id, now
-                            )
+                            _SEED_FNS[layer](storage_root, session_id, agent_id, channel_id, now)
                             recovered = _attempt_recovery(storage_root, session_id)
                         except Exception as exc:
                             recovered = False
@@ -295,12 +296,8 @@ def make_e8_hardening_soak_router(
             span.set_attribute("e8.hardening.soak.failure_count", failure_count)
             span.set_attribute("e8.hardening.soak.resume_rate", resume_rate)
             for layer, counts in layer_results.items():
-                span.set_attribute(
-                    f"e8.hardening.soak.{layer}.total", counts["total"]
-                )
-                span.set_attribute(
-                    f"e8.hardening.soak.{layer}.resumed", counts["resumed"]
-                )
+                span.set_attribute(f"e8.hardening.soak.{layer}.total", counts["total"])
+                span.set_attribute(f"e8.hardening.soak.{layer}.resumed", counts["resumed"])
 
             if resume_rate < RESUME_RATE_THRESHOLD:
                 pct = resume_rate * 100

@@ -3,19 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 import sqlite3
-import tempfile
 from pathlib import Path
 from typing import Any
 
 import pytest
-
-from meridian_builtin_tools.kb_search import (
-    _INPUT_SCHEMA,
-    _OUTPUT_SCHEMA,
-    kb_search_tool,
-)
 from meridian_kb_indexer._reader import (
     _glob_matches,
     _hash_embed,
@@ -24,8 +16,15 @@ from meridian_kb_indexer._reader import (
     _scope_matches,
 )
 
+from meridian_builtin_tools.kb_search import (
+    _INPUT_SCHEMA,
+    _OUTPUT_SCHEMA,
+    kb_search_tool,
+)
+
 try:
     import sqlite3 as _sqlite3_check
+
     import sqlite_vec as _sqlite_vec  # type: ignore[import-not-found]
 
     _con_check = _sqlite3_check.connect(":memory:")
@@ -212,9 +211,7 @@ async def test_returns_no_error_on_valid_query(
 
 
 @pytest.mark.anyio
-async def test_results_key_is_list(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_results_key_is_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db = tmp_path / "kb.sqlite"
     _make_test_db(db, _SAMPLE_CHUNKS)
     monkeypatch.setenv("MERIDIAN_KB_PATH", str(db))
@@ -224,9 +221,7 @@ async def test_results_key_is_list(
 
 
 @pytest.mark.anyio
-async def test_query_is_echoed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_query_is_echoed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db = tmp_path / "kb.sqlite"
     _make_test_db(db, _SAMPLE_CHUNKS)
     monkeypatch.setenv("MERIDIAN_KB_PATH", str(db))
@@ -243,16 +238,12 @@ async def test_scope_is_echoed_when_provided(
     _make_test_db(db, _SAMPLE_CHUNKS)
     monkeypatch.setenv("MERIDIAN_KB_PATH", str(db))
 
-    result = await kb_search_tool.execute(
-        {"query": "authenticate", "scope": "src/**/*.py"}, _CTX
-    )
+    result = await kb_search_tool.execute({"query": "authenticate", "scope": "src/**/*.py"}, _CTX)
     assert result.result["scope"] == "src/**/*.py"
 
 
 @pytest.mark.anyio
-async def test_scope_is_null_when_omitted(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_scope_is_null_when_omitted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db = tmp_path / "kb.sqlite"
     _make_test_db(db, _SAMPLE_CHUNKS)
     monkeypatch.setenv("MERIDIAN_KB_PATH", str(db))
@@ -262,9 +253,7 @@ async def test_scope_is_null_when_omitted(
 
 
 @pytest.mark.anyio
-async def test_total_matches_results_count(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_total_matches_results_count(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db = tmp_path / "kb.sqlite"
     _make_test_db(db, _SAMPLE_CHUNKS)
     monkeypatch.setenv("MERIDIAN_KB_PATH", str(db))
@@ -306,9 +295,7 @@ async def test_result_items_have_required_fields(
 
 
 @pytest.mark.anyio
-async def test_score_is_positive_float(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_score_is_positive_float(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db = tmp_path / "kb.sqlite"
     _make_test_db(db, _SAMPLE_CHUNKS)
     monkeypatch.setenv("MERIDIAN_KB_PATH", str(db))
@@ -335,9 +322,7 @@ async def test_scope_filter_excludes_nonmatching_paths(
     monkeypatch.setenv("MERIDIAN_KB_PATH", str(db))
 
     # Scope to docs/ only — should NOT return src/auth results
-    result = await kb_search_tool.execute(
-        {"query": "authenticate", "scope": "docs/**"}, _CTX
-    )
+    result = await kb_search_tool.execute({"query": "authenticate", "scope": "docs/**"}, _CTX)
     assert not result.is_error
     for item in result.result["results"]:
         assert item["file_path"].startswith("docs/")
@@ -351,9 +336,7 @@ async def test_scope_filter_includes_matching_paths(
     _make_test_db(db, _SAMPLE_CHUNKS)
     monkeypatch.setenv("MERIDIAN_KB_PATH", str(db))
 
-    result = await kb_search_tool.execute(
-        {"query": "authenticate", "scope": "src/**/*.py"}, _CTX
-    )
+    result = await kb_search_tool.execute({"query": "authenticate", "scope": "src/**/*.py"}, _CTX)
     assert not result.is_error
     assert result.result["total"] > 0
     for item in result.result["results"]:
@@ -405,9 +388,7 @@ async def test_limit_caps_number_of_results(
 
 
 @pytest.mark.anyio
-async def test_default_limit_is_applied(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_default_limit_is_applied(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db = tmp_path / "kb.sqlite"
     many_chunks = [
         {
@@ -523,9 +504,7 @@ async def test_error_code_is_validation_related_on_bad_input() -> None:
 
 
 @pytest.mark.anyio
-async def test_corrupt_db_returns_is_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_corrupt_db_returns_is_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db = tmp_path / "kb.sqlite"
     db.write_text("this is not a sqlite database", encoding="utf-8")
     monkeypatch.setenv("MERIDIAN_KB_PATH", str(db))
@@ -535,9 +514,7 @@ async def test_corrupt_db_returns_is_error(
 
 
 @pytest.mark.anyio
-async def test_corrupt_db_writes_audit_log(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_corrupt_db_writes_audit_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db = tmp_path / "kb.sqlite"
     db.write_text("not a database", encoding="utf-8")
     monkeypatch.setenv("MERIDIAN_KB_PATH", str(db))
@@ -561,9 +538,7 @@ async def test_corrupt_db_writes_audit_log(
         scope: str | None = args.get("scope")
         limit: int = args.get("limit", 10)
         db_path = _resolve_db_path(ctx.workspace)
-        results = await asyncio.to_thread(
-            _sync_search, db_path, query, scope, limit, ctx.workspace
-        )
+        results = await asyncio.to_thread(_sync_search, db_path, query, scope, limit, ctx.workspace)
         return {
             "results": results,
             "total": len(results),
@@ -587,9 +562,7 @@ async def test_corrupt_db_writes_audit_log(
 
 
 @pytest.mark.anyio
-async def test_db_path_from_env_var(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_db_path_from_env_var(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db = tmp_path / "custom_kb.sqlite"
     _make_test_db(db, _SAMPLE_CHUNKS)
     monkeypatch.setenv("MERIDIAN_KB_PATH", str(db))
@@ -727,9 +700,7 @@ async def test_no_vec_table_scores_are_positive(
 # ---------------------------------------------------------------------------
 
 
-def _make_test_db_with_vec(
-    path: Path, chunks: list[dict[str, Any]] | None = None
-) -> None:
+def _make_test_db_with_vec(path: Path, chunks: list[dict[str, Any]] | None = None) -> None:
     """Create a KB database with both kb_chunks (FTS5) and kb_chunks_vec (vec0)."""
     con = sqlite3.connect(str(path))
     con.enable_load_extension(True)
@@ -777,9 +748,7 @@ def _make_test_db_with_vec(
 
 @pytest.mark.skipif(not _SQLITE_VEC_AVAILABLE, reason="sqlite-vec not installed")
 @pytest.mark.anyio
-async def test_hybrid_returns_results(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_hybrid_returns_results(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db = tmp_path / "kb.sqlite"
     _make_test_db_with_vec(db, _SAMPLE_CHUNKS)
     monkeypatch.setenv("MERIDIAN_KB_PATH", str(db))
@@ -791,9 +760,7 @@ async def test_hybrid_returns_results(
 
 @pytest.mark.skipif(not _SQLITE_VEC_AVAILABLE, reason="sqlite-vec not installed")
 @pytest.mark.anyio
-async def test_hybrid_scores_are_positive(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_hybrid_scores_are_positive(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db = tmp_path / "kb.sqlite"
     _make_test_db_with_vec(db, _SAMPLE_CHUNKS)
     monkeypatch.setenv("MERIDIAN_KB_PATH", str(db))
@@ -806,16 +773,12 @@ async def test_hybrid_scores_are_positive(
 
 @pytest.mark.skipif(not _SQLITE_VEC_AVAILABLE, reason="sqlite-vec not installed")
 @pytest.mark.anyio
-async def test_hybrid_scope_filter_works(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_hybrid_scope_filter_works(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     db = tmp_path / "kb.sqlite"
     _make_test_db_with_vec(db, _SAMPLE_CHUNKS)
     monkeypatch.setenv("MERIDIAN_KB_PATH", str(db))
 
-    result = await kb_search_tool.execute(
-        {"query": "authenticate", "scope": "src/**/*.py"}, _CTX
-    )
+    result = await kb_search_tool.execute({"query": "authenticate", "scope": "src/**/*.py"}, _CTX)
     assert not result.is_error
     for item in result.result["results"]:
         assert item["file_path"].endswith(".py")

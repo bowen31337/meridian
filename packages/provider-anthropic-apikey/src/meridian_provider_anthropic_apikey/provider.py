@@ -20,7 +20,6 @@ from typing import Any
 
 import anthropic
 from anthropic import AsyncAnthropic
-
 from meridian_sdk_provider.audit import AuditLog, AuditLogEntry, NoopAuditLog
 from meridian_sdk_provider.errors import (
     ProviderCallError,
@@ -29,7 +28,12 @@ from meridian_sdk_provider.errors import (
     ProviderTimeoutError,
 )
 from meridian_sdk_provider.protocol import ModelCapabilities, ModelEntry, ProviderCapabilities
-from meridian_sdk_provider.telemetry import get_tracer, record_cache_metrics, record_invocation_event, record_provider_failure
+from meridian_sdk_provider.telemetry import (
+    get_tracer,
+    record_cache_metrics,
+    record_invocation_event,
+    record_provider_failure,
+)
 from meridian_sdk_provider.types import (
     MessageStartEvent,
     MessageStopEvent,
@@ -85,12 +89,14 @@ def _convert_message(msg: Any) -> dict[str, Any]:
                 b["cache_control"] = {"type": "ephemeral"}
             blocks.append(b)
         elif btype == "tool_use":
-            blocks.append({
-                "type": "tool_use",
-                "id": block.id,
-                "name": block.name,
-                "input": block.input,
-            })
+            blocks.append(
+                {
+                    "type": "tool_use",
+                    "id": block.id,
+                    "name": block.name,
+                    "input": block.input,
+                }
+            )
         elif btype == "tool_result":
             raw = block.content
             b = {"type": "tool_result", "tool_use_id": block.tool_use_id}
@@ -100,11 +106,13 @@ def _convert_message(msg: Any) -> dict[str, Any]:
                 b["content"] = [{"type": "text", "text": str(c)} for c in raw]
             blocks.append(b)
         elif btype == "thinking":
-            blocks.append({
-                "type": "thinking",
-                "thinking": block.thinking,
-                "signature": block.signature,
-            })
+            blocks.append(
+                {
+                    "type": "thinking",
+                    "thinking": block.thinking,
+                    "signature": block.signature,
+                }
+            )
 
     return {"role": msg.role, "content": blocks}
 
@@ -270,7 +278,9 @@ class AnthropicApiKeyProvider:
                 if etype == "message_start":
                     usage = raw.message.usage
                     input_tokens = usage.input_tokens
-                    cache_creation_input_tokens = getattr(usage, "cache_creation_input_tokens", 0) or 0
+                    cache_creation_input_tokens = (
+                        getattr(usage, "cache_creation_input_tokens", 0) or 0
+                    )
                     cache_read_input_tokens = getattr(usage, "cache_read_input_tokens", 0) or 0
                     yield MessageStartEvent(
                         type="message_start",

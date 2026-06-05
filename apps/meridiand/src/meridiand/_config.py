@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import os
 from datetime import UTC, datetime
+import os
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
 from core_errors import (
     AuditLog,
     AuditLogEntry,
@@ -17,6 +16,7 @@ from core_errors import (
     record_invocation_event,
 )
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+import yaml
 
 DEFAULT_CONFIG_PATH = Path.home() / ".meridian" / "config.yaml"
 DEFAULT_SOCKET_PATH = Path.home() / ".meridian" / "meridiand.sock"
@@ -31,7 +31,14 @@ _DEFAULT_CORS_HEADERS = ["*"]
 _VALID_LOG_LEVELS = {"debug", "info", "warning", "error", "critical"}
 _VALID_VAULT_BACKENDS = {"os_keychain", "encrypted_file"}
 _VALID_FALLBACK_ON_VALUES = {"rate_limit", "timeout", "5xx", "any"}
-_VALID_PROVIDER_KINDS = {"anthropic", "openai", "openrouter", "ollama", "local", "claude_code_oauth"}
+_VALID_PROVIDER_KINDS = {
+    "anthropic",
+    "openai",
+    "openrouter",
+    "ollama",
+    "local",
+    "claude_code_oauth",
+}
 _SECRET_REF_VAULT_PREFIX = "secret_ref://vault/"
 
 
@@ -338,7 +345,7 @@ def parse_config(yaml_content: str, audit_log: AuditLog | None = None) -> Meridi
                     detail={"message": str(exc)},
                 )
             )
-            raise err
+            raise err from exc
 
 
 def load_config(path: Path, audit_log: AuditLog | None = None) -> MeridianConfig:
@@ -396,7 +403,7 @@ def load_config(path: Path, audit_log: AuditLog | None = None) -> MeridianConfig
                     },
                 )
             )
-            raise err
+            raise err from exc
 
 
 def resolve_config_location(audit_log: AuditLog | None = None) -> Path:
@@ -467,11 +474,12 @@ def resolve_config_location(audit_log: AuditLog | None = None) -> Path:
                     detail={"message": str(exc)},
                 )
             )
-            raise err
+            raise err from exc
 
 
 def validate_config(config: MeridianConfig, audit_log: AuditLog | None = None) -> None:
-    """Validate vaults, providers, routing, daemon, and storage sections; raise ConfigValidateError on failure."""
+    """Validate vaults, providers, routing, daemon, and storage sections; raise
+    ConfigValidateError on failure."""
     _audit = audit_log if audit_log is not None else NoopAuditLog()
     now = _now()
     tracer = get_tracer()
@@ -528,7 +536,7 @@ def validate_config(config: MeridianConfig, audit_log: AuditLog | None = None) -
                         f"expected secret_ref://vault/{{vault_id}}/{{key}}"
                     )
                 else:
-                    remainder = provider.auth[len(_SECRET_REF_VAULT_PREFIX):]
+                    remainder = provider.auth[len(_SECRET_REF_VAULT_PREFIX) :]
                     slash_pos = remainder.find("/")
                     if slash_pos <= 0 or slash_pos == len(remainder) - 1:
                         errors.append(
@@ -557,7 +565,12 @@ def validate_config(config: MeridianConfig, audit_log: AuditLog | None = None) -
                     when = rule.when
                     if when.estimated_input_tokens is not None:
                         tok = when.estimated_input_tokens
-                        if tok.gt is None and tok.gte is None and tok.lt is None and tok.lte is None:
+                        if (
+                            tok.gt is None
+                            and tok.gte is None
+                            and tok.lt is None
+                            and tok.lte is None
+                        ):
                             errors.append(
                                 f"{rule_prefix}.when.estimated_input_tokens: "
                                 "at least one of gt, gte, lt, lte must be specified"
@@ -566,8 +579,7 @@ def validate_config(config: MeridianConfig, audit_log: AuditLog | None = None) -
                 fb_prefix = f"routing.default.fallbacks[{i}]"
                 if ":" not in fb.model:
                     errors.append(
-                        f"{fb_prefix}.model: {fb.model!r} must be in "
-                        "'provider_name:model_id' form"
+                        f"{fb_prefix}.model: {fb.model!r} must be in 'provider_name:model_id' form"
                     )
                 else:
                     pname = fb.model.split(":")[0]

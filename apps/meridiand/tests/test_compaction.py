@@ -2,10 +2,13 @@
 Auto-compaction policy conformance suite.
 
 Tests cover:
-  - GET /v1/x/compaction/policy returns correct enabled, idle_days, summary_strategy, tail_events, retention_days.
-  - GET /v1/x/compaction/policy default values (enabled=True, idle_days=30, strategy=tail, tail_events=50).
+  - GET /v1/x/compaction/policy returns correct enabled, idle_days, summary_strategy,
+    tail_events, retention_days.
+  - GET /v1/x/compaction/policy default values (enabled=True, idle_days=30,
+    strategy=tail, tail_events=50).
   - POST /v1/x/compaction/sessions/{session_id} returns 200 on success.
-  - Response has session_id, compacted_at, strategy, original_event_count, summary_event_count, archive_key, archived_file_count.
+  - Response has session_id, compacted_at, strategy, original_event_count,
+    summary_event_count, archive_key, archived_file_count.
   - strategy is "tail".
   - original_event_count matches number of input events.
   - summary_event_count is at most tail_events.
@@ -42,17 +45,15 @@ from __future__ import annotations
 import gzip
 import json
 import os
-import time
 from pathlib import Path
+import time
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from meridiand._config import CompactionConfig
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -206,9 +207,11 @@ class TestCompactSessionSuccess:
         events = [{"seq": i, "ts": "T", "type": "message.added", "data": {}} for i in range(10)]
         f = _write_event_file(storage_root, "sess_006", events=events)
         _set_old_mtime(f)
-        body = _make_client(storage_root, compaction=policy).post(
-            "/v1/x/compaction/sessions/sess_006"
-        ).json()
+        body = (
+            _make_client(storage_root, compaction=policy)
+            .post("/v1/x/compaction/sessions/sess_006")
+            .json()
+        )
         assert body["summary_event_count"] == 2
 
     def test_response_summary_count_equals_total_when_fewer_than_tail(
@@ -218,9 +221,11 @@ class TestCompactSessionSuccess:
         events = [{"seq": i, "ts": "T", "type": "message.added", "data": {}} for i in range(3)]
         f = _write_event_file(storage_root, "sess_007", events=events)
         _set_old_mtime(f)
-        body = _make_client(storage_root, compaction=policy).post(
-            "/v1/x/compaction/sessions/sess_007"
-        ).json()
+        body = (
+            _make_client(storage_root, compaction=policy)
+            .post("/v1/x/compaction/sessions/sess_007")
+            .json()
+        )
         assert body["summary_event_count"] == 3
 
     def test_response_archive_key_prefix(self, storage_root: Path) -> None:
@@ -278,7 +283,7 @@ class TestCompactSessionPersistence:
         f = _write_event_file(storage_root, "sess_p04", events=events)
         _set_old_mtime(f)
         _make_client(storage_root, compaction=policy).post("/v1/x/compaction/sessions/sess_p04")
-        remaining_lines = [l for l in f.read_text().splitlines() if l.strip()]
+        remaining_lines = [line for line in f.read_text().splitlines() if line.strip()]
         assert len(remaining_lines) == 2
 
     def test_tail_contains_last_events(self, storage_root: Path) -> None:
@@ -287,17 +292,13 @@ class TestCompactSessionPersistence:
         f = _write_event_file(storage_root, "sess_p05", events=events)
         _set_old_mtime(f)
         _make_client(storage_root, compaction=policy).post("/v1/x/compaction/sessions/sess_p05")
-        lines = [l for l in f.read_text().splitlines() if l.strip()]
-        seqs = [json.loads(l)["seq"] for l in lines]
+        lines = [line for line in f.read_text().splitlines() if line.strip()]
+        seqs = [json.loads(line)["seq"] for line in lines]
         assert seqs == [3, 4]
 
     def test_older_date_partition_files_removed(self, storage_root: Path) -> None:
-        f_old = _write_event_file(
-            storage_root, "sess_p06", year="2025", month="01", day="01"
-        )
-        f_new = _write_event_file(
-            storage_root, "sess_p06", year="2026", month="05", day="01"
-        )
+        f_old = _write_event_file(storage_root, "sess_p06", year="2025", month="01", day="01")
+        f_new = _write_event_file(storage_root, "sess_p06", year="2026", month="05", day="01")
         _set_old_mtime(f_old)
         _set_old_mtime(f_new)
         _make_client(storage_root).post("/v1/x/compaction/sessions/sess_p06")
@@ -352,7 +353,8 @@ class TestCompactSessionFailure:
         client = _make_client(storage_root)
         client.post("/v1/x/compaction/sessions/ghost_session")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "compaction.compact_session.failed"
         )
         assert record["level"] == "error"
@@ -361,7 +363,8 @@ class TestCompactSessionFailure:
         client = _make_client(storage_root)
         client.post("/v1/x/compaction/sessions/ghost_session")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "compaction.compact_session.failed"
         )
         assert record["code"] == "compaction_session_not_found"
@@ -370,7 +373,8 @@ class TestCompactSessionFailure:
         client = _make_client(storage_root)
         client.post("/v1/x/compaction/sessions/ghost_session")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "compaction.compact_session.failed"
         )
         assert record["detail"]["session_id"] == "ghost_session"
@@ -379,7 +383,8 @@ class TestCompactSessionFailure:
         client = _make_client(storage_root)
         client.post("/v1/x/compaction/sessions/ghost_session")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "compaction.compact_session.failed"
         )
         assert record["detail"]["run_id"].startswith("compact_")
@@ -388,7 +393,8 @@ class TestCompactSessionFailure:
         client = _make_client(storage_root)
         client.post("/v1/x/compaction/sessions/ghost_session")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "compaction.compact_session.failed"
         )
         assert len(record["detail"]["message"]) > 0
@@ -468,17 +474,13 @@ class TestCompactionRun:
         policy = CompactionConfig(idle_days=30)
         f = _write_event_file(storage_root, "idle_sess")
         _set_old_mtime(f, days_ago=40)
-        body = _make_client(storage_root, compaction=policy).post(
-            "/v1/x/compaction/run"
-        ).json()
+        body = _make_client(storage_root, compaction=policy).post("/v1/x/compaction/run").json()
         assert body["compacted_count"] == 1
 
     def test_recent_session_not_compacted(self, storage_root: Path) -> None:
         policy = CompactionConfig(idle_days=30)
         _write_event_file(storage_root, "recent_sess")
-        body = _make_client(storage_root, compaction=policy).post(
-            "/v1/x/compaction/run"
-        ).json()
+        body = _make_client(storage_root, compaction=policy).post("/v1/x/compaction/run").json()
         assert body["compacted_count"] == 0
 
     def test_results_list_length_matches_count(self, storage_root: Path) -> None:
@@ -487,9 +489,7 @@ class TestCompactionRun:
         f2 = _write_event_file(storage_root, "idle_b")
         _set_old_mtime(f1, days_ago=40)
         _set_old_mtime(f2, days_ago=40)
-        body = _make_client(storage_root, compaction=policy).post(
-            "/v1/x/compaction/run"
-        ).json()
+        body = _make_client(storage_root, compaction=policy).post("/v1/x/compaction/run").json()
         assert len(body["results"]) == body["compacted_count"]
 
 
@@ -578,7 +578,7 @@ class TestSessionArchive:
         f = _write_event_file(storage_root, "arc_006", events=events)
         _set_old_mtime(f)
         _make_client(storage_root, compaction=policy).post("/v1/x/sessions/arc_006/archive")
-        remaining = [l for l in f.read_text().splitlines() if l.strip()]
+        remaining = [line for line in f.read_text().splitlines() if line.strip()]
         assert len(remaining) == 2
 
     def test_missing_session_returns_404(self, storage_root: Path) -> None:
@@ -597,7 +597,8 @@ class TestSessionArchive:
     def test_failure_audit_level_is_error(self, storage_root: Path) -> None:
         _make_client(storage_root).post("/v1/x/sessions/ghost/archive")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "sessions.archive_session.failed"
         )
         assert record["level"] == "error"
@@ -605,7 +606,8 @@ class TestSessionArchive:
     def test_failure_audit_code(self, storage_root: Path) -> None:
         _make_client(storage_root).post("/v1/x/sessions/ghost/archive")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "sessions.archive_session.failed"
         )
         assert record["code"] == "compaction_session_not_found"
@@ -613,7 +615,8 @@ class TestSessionArchive:
     def test_failure_audit_detail_has_session_id(self, storage_root: Path) -> None:
         _make_client(storage_root).post("/v1/x/sessions/ghost/archive")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "sessions.archive_session.failed"
         )
         assert record["detail"]["session_id"] == "ghost"
@@ -621,7 +624,8 @@ class TestSessionArchive:
     def test_failure_audit_detail_has_run_id(self, storage_root: Path) -> None:
         _make_client(storage_root).post("/v1/x/sessions/ghost/archive")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "sessions.archive_session.failed"
         )
         assert record["detail"]["run_id"].startswith("archive_")
@@ -629,7 +633,8 @@ class TestSessionArchive:
     def test_failure_audit_detail_has_message(self, storage_root: Path) -> None:
         _make_client(storage_root).post("/v1/x/sessions/ghost/archive")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "sessions.archive_session.failed"
         )
         assert len(record["detail"]["message"]) > 0
@@ -655,7 +660,9 @@ class TestSessionArchive:
 
 
 class TestSessionRestore:
-    def _archive_session(self, storage_root: Path, session_id: str, events: list[dict] | None = None) -> dict:
+    def _archive_session(
+        self, storage_root: Path, session_id: str, events: list[dict] | None = None
+    ) -> dict:
         f = _write_event_file(storage_root, session_id, events=events)
         _set_old_mtime(f)
         return _make_client(storage_root).post(f"/v1/x/sessions/{session_id}/archive").json()
@@ -693,7 +700,7 @@ class TestSessionRestore:
         _set_old_mtime(f)
         _make_client(storage_root, compaction=policy).post("/v1/x/sessions/rst_006/archive")
         _make_client(storage_root, compaction=policy).post("/v1/x/sessions/rst_006/restore")
-        lines = [l for l in f.read_text().splitlines() if l.strip()]
+        lines = [line for line in f.read_text().splitlines() if line.strip()]
         assert len(lines) == 5
 
     def test_restored_events_match_originals(self, storage_root: Path) -> None:
@@ -702,8 +709,8 @@ class TestSessionRestore:
         _set_old_mtime(f)
         _make_client(storage_root).post("/v1/x/sessions/rst_007/archive")
         _make_client(storage_root).post("/v1/x/sessions/rst_007/restore")
-        lines = [l for l in f.read_text().splitlines() if l.strip()]
-        seqs = [json.loads(l)["seq"] for l in lines]
+        lines = [line for line in f.read_text().splitlines() if line.strip()]
+        seqs = [json.loads(line)["seq"] for line in lines]
         assert seqs == list(range(4))
 
     def test_archive_blob_deleted_after_restore(self, storage_root: Path) -> None:
@@ -736,7 +743,8 @@ class TestSessionRestore:
     def test_failure_audit_level_is_error(self, storage_root: Path) -> None:
         _make_client(storage_root).post("/v1/x/sessions/ghost/restore")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "sessions.restore_session.failed"
         )
         assert record["level"] == "error"
@@ -744,7 +752,8 @@ class TestSessionRestore:
     def test_failure_audit_code(self, storage_root: Path) -> None:
         _make_client(storage_root).post("/v1/x/sessions/ghost/restore")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "sessions.restore_session.failed"
         )
         assert record["code"] == "restore_session_not_archived"
@@ -752,7 +761,8 @@ class TestSessionRestore:
     def test_failure_audit_detail_has_session_id(self, storage_root: Path) -> None:
         _make_client(storage_root).post("/v1/x/sessions/ghost/restore")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "sessions.restore_session.failed"
         )
         assert record["detail"]["session_id"] == "ghost"
@@ -760,7 +770,8 @@ class TestSessionRestore:
     def test_failure_audit_detail_has_run_id(self, storage_root: Path) -> None:
         _make_client(storage_root).post("/v1/x/sessions/ghost/restore")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "sessions.restore_session.failed"
         )
         assert record["detail"]["run_id"].startswith("restore_")
@@ -768,7 +779,8 @@ class TestSessionRestore:
     def test_failure_audit_detail_has_message(self, storage_root: Path) -> None:
         _make_client(storage_root).post("/v1/x/sessions/ghost/restore")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "sessions.restore_session.failed"
         )
         assert len(record["detail"]["message"]) > 0
@@ -797,7 +809,7 @@ class TestSessionRestore:
         with f.open("a") as fh:
             fh.write(json.dumps({"seq": 5, "ts": "T", "type": "x", "data": {}}) + "\n")
         _make_client(storage_root, compaction=policy).post("/v1/x/sessions/rst_new_01/restore")
-        lines = [l for l in f.read_text().splitlines() if l.strip()]
+        lines = [line for line in f.read_text().splitlines() if line.strip()]
         assert len(lines) == 6
-        seqs = [json.loads(l)["seq"] for l in lines]
+        seqs = [json.loads(line)["seq"] for line in lines]
         assert seqs == list(range(6))

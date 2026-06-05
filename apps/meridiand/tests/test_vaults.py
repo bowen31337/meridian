@@ -51,13 +51,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -238,8 +236,7 @@ class TestVaultCreateAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/vaults", json=_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "vault.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.create.failed"
         )
         assert record["level"] == "error"
 
@@ -247,8 +244,7 @@ class TestVaultCreateAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/vaults", json=_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "vault.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.create.failed"
         )
         assert record["code"] == "vault_invalid_request"
 
@@ -256,8 +252,7 @@ class TestVaultCreateAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/vaults", json=_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "vault.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.create.failed"
         )
         assert record["detail"]["vault_id"].startswith("vault_")
 
@@ -265,8 +260,7 @@ class TestVaultCreateAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/vaults", json=_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "vault.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.create.failed"
         )
         assert "name" in record["detail"]
 
@@ -274,8 +268,7 @@ class TestVaultCreateAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/vaults", json=_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "vault.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.create.failed"
         )
         assert "message" in record["detail"]
         assert len(record["detail"]["message"]) > 0
@@ -522,9 +515,7 @@ class TestVaultDeleteNotFound:
 
 
 class TestVaultDeleteInUse:
-    def _create_channel_referencing(
-        self, storage_root: Path, vault_id: str
-    ) -> None:
+    def _create_channel_referencing(self, storage_root: Path, vault_id: str) -> None:
         channels_dir = storage_root / "channels"
         channels_dir.mkdir(parents=True, exist_ok=True)
         record = {
@@ -610,8 +601,7 @@ class TestVaultDeleteAuditLog:
         client = _make_client(storage_root)
         client.delete("/v1/vaults/vault_missing")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "vault.delete.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.delete.failed"
         )
         assert record["level"] == "error"
 
@@ -619,8 +609,7 @@ class TestVaultDeleteAuditLog:
         client = _make_client(storage_root)
         client.delete("/v1/vaults/vault_missing")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "vault.delete.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.delete.failed"
         )
         assert record["code"] == "vault_not_found"
 
@@ -628,8 +617,7 @@ class TestVaultDeleteAuditLog:
         client = _make_client(storage_root)
         client.delete("/v1/vaults/vault_missing")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "vault.delete.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.delete.failed"
         )
         assert record["detail"]["vault_id"] == "vault_missing"
 
@@ -637,8 +625,7 @@ class TestVaultDeleteAuditLog:
         client = _make_client(storage_root)
         client.delete("/v1/vaults/vault_missing")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "vault.delete.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.delete.failed"
         )
         assert len(record["detail"]["message"]) > 0
 
@@ -672,8 +659,7 @@ class TestVaultDeleteAuditLog:
         (channels_dir / "ch_audit2.json").write_text(json.dumps(record))
         client.delete(f"/v1/vaults/{vault_id}")
         audit_record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "vault.delete.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.delete.failed"
         )
         assert audit_record["code"] == "vault_in_use"
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 import starlette.testclient as _starlette_tc
 
-
 # ---------------------------------------------------------------------------
 # Patch Starlette's TestClient to simulate loopback connections.
 #

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import Awaitable, Callable
+import contextlib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -161,7 +162,7 @@ class HarnessPool:
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
     async def wake(self, session_id: str) -> None:
         """Resume a session in its hashed worker slot."""
@@ -202,7 +203,7 @@ class HarnessPool:
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
     async def start(self) -> None:
         """Start all worker tasks and auto-resume active sessions from storage."""
@@ -234,10 +235,9 @@ class HarnessPool:
                         except Exception:
                             continue
                         if phase not in _STOP_PHASES:
-                            try:
+                            # HarnessPoolError already logged; continue with remaining sessions.
+                            with contextlib.suppress(HarnessPoolError):
                                 await self.wake(session_id)
-                            except HarnessPoolError:
-                                pass  # already logged; continue resuming remaining sessions
             except Exception as exc:
                 if isinstance(exc, HarnessPoolError):
                     raise
@@ -256,15 +256,13 @@ class HarnessPool:
                         detail={"message": err.message},
                     )
                 )
-                raise err
+                raise err from exc
 
     async def stop(self) -> None:
         """Cancel all running worker tasks."""
         for slot in self._slots:
             if slot.task is not None and not slot.task.done():
                 slot.task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError):
                     await slot.task
-                except asyncio.CancelledError:
-                    pass
                 slot.task = None

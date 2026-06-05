@@ -43,8 +43,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import pytest
 from opentelemetry.trace import StatusCode
+import pytest
 from system_ulid import (
     AuditLogEntry,
     IdPrefix,

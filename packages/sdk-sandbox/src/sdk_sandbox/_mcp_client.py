@@ -15,8 +15,8 @@ MCP stdio protocol (per spec):
 from __future__ import annotations
 
 import asyncio
-import json
 from dataclasses import dataclass
+import json
 from typing import Any
 
 try:
@@ -60,8 +60,8 @@ async def _stdio_read_response(
     for _ in range(_MAX_SKIP_LINES):
         try:
             raw = await asyncio.wait_for(reader.readline(), timeout=timeout_s)
-        except asyncio.TimeoutError:
-            raise ValueError(f"Timed out waiting for MCP response id={request_id!r}")
+        except TimeoutError:
+            raise ValueError(f"Timed out waiting for MCP response id={request_id!r}") from None
         if not raw:
             raise ValueError("MCP server closed stdout before sending a response")
         line = raw.strip()
@@ -73,9 +73,7 @@ async def _stdio_read_response(
             continue
         if msg.get("id") == request_id:
             return msg
-    raise ValueError(
-        f"No response with id={request_id!r} found after {_MAX_SKIP_LINES} lines"
-    )
+    raise ValueError(f"No response with id={request_id!r} found after {_MAX_SKIP_LINES} lines")
 
 
 async def _stdio_handshake(proc: asyncio.subprocess.Process, timeout_s: float) -> None:
@@ -106,9 +104,7 @@ async def _stdio_handshake(proc: asyncio.subprocess.Process, timeout_s: float) -
         err = resp["error"]
         raise ValueError(f"MCP initialize failed: {err.get('message', resp)}")
 
-    notif = json.dumps(
-        {"jsonrpc": "2.0", "method": "notifications/initialized"}
-    ).encode()
+    notif = json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}).encode()
     proc.stdin.write(notif + b"\n")
     await proc.stdin.drain()
 
@@ -154,7 +150,7 @@ async def _close_stdio_process(proc: asyncio.subprocess.Process) -> None:
         pass
     try:
         await asyncio.wait_for(proc.wait(), timeout=_PROCESS_GRACE_S)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
 
 
@@ -169,7 +165,8 @@ async def stdio_tools_call(
     arguments: dict[str, Any],
     timeout_s: float,
 ) -> dict[str, Any]:
-    """Spawn an MCP stdio server, perform handshake, call tools/call, and return the raw RPC response.
+    """Spawn an MCP stdio server, perform handshake, call tools/call, and return the
+    raw RPC response.
 
     Raises ValueError or OSError on transport failure.
     """

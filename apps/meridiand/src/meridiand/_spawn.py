@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
-import uuid
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse
 from opentelemetry import context as otel_context, trace
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 from pydantic import BaseModel
-from sdk_capabilities import CapabilityParseError, is_subset, missing, parse_set
+from sdk_capabilities import CapabilityParseError, missing, parse_set
 
 
 def _now() -> str:
@@ -110,7 +110,7 @@ def make_spawn_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
             if not any(c.namespace == "agent" and c.name == "spawn" for c in parent_caps):
                 err = SpawnError(

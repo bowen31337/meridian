@@ -10,10 +10,10 @@ in effect and the daemon keeps running.
 from __future__ import annotations
 
 import asyncio
-import logging
-import signal
 from datetime import UTC, datetime
+import logging
 from pathlib import Path
+import signal
 
 from core_errors import (
     AuditLog,
@@ -104,9 +104,7 @@ async def _do_reload(
                 new_providers = {}
                 for provider_cfg in config.providers:
                     resolved_auth = _resolve_auth(provider_cfg, secret_resolver)
-                    new_providers[provider_cfg.name] = _build_provider(
-                        provider_cfg, resolved_auth
-                    )
+                    new_providers[provider_cfg.name] = _build_provider(provider_cfg, resolved_auth)
                 provider_count = len(new_providers)
                 await registry.swap_all(new_providers)
             except ProviderFactoryError as exc:

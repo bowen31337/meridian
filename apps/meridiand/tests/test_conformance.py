@@ -18,14 +18,14 @@ import logging
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-import yaml
 from core_errors import AuditLogEntry
 from fastapi.testclient import TestClient
 from meridiand.__main__ import main
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from meridiand._config import ConfigLoadError, load_config
+import pytest
+import yaml
 
 # ---------------------------------------------------------------------------
 # load_config

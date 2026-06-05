@@ -12,11 +12,11 @@ log before re-raising.
 
 from __future__ import annotations
 
-import json
-import uuid
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -71,8 +71,7 @@ class TrajectoryRunner(Protocol):
         test_case: dict[str, Any],
         *,
         skill_instructions: str | None,
-    ) -> bool:
-        ...
+    ) -> bool: ...
 
 
 class NoopTrajectoryRunner:
@@ -144,9 +143,7 @@ async def compare_proposal_trajectories(
             for test_case in tests:
                 test_name: str = test_case.get("name", "")
                 passed_without = await _runner.run(test_case, skill_instructions=None)
-                passed_with = await _runner.run(
-                    test_case, skill_instructions=instructions
-                )
+                passed_with = await _runner.run(test_case, skill_instructions=instructions)
                 case_results.append(
                     {
                         "test_name": test_name,
@@ -157,14 +154,10 @@ async def compare_proposal_trajectories(
 
             n = len(case_results)
             pass_rate_without = (
-                sum(1 for c in case_results if c["passed_without_skill"]) / n
-                if n > 0
-                else 0.0
+                sum(1 for c in case_results if c["passed_without_skill"]) / n if n > 0 else 0.0
             )
             pass_rate_with = (
-                sum(1 for c in case_results if c["passed_with_skill"]) / n
-                if n > 0
-                else 0.0
+                sum(1 for c in case_results if c["passed_with_skill"]) / n if n > 0 else 0.0
             )
             lift = pass_rate_with - pass_rate_without
 
@@ -181,13 +174,9 @@ async def compare_proposal_trajectories(
             }
 
             efficacy_dir.mkdir(parents=True, exist_ok=True)
-            (efficacy_dir / f"{proposal_id}_efficacy.json").write_text(
-                json.dumps(metric_record)
-            )
+            (efficacy_dir / f"{proposal_id}_efficacy.json").write_text(json.dumps(metric_record))
 
-            span.set_attribute(
-                "skill_efficacy.pass_rate_without_skill", pass_rate_without
-            )
+            span.set_attribute("skill_efficacy.pass_rate_without_skill", pass_rate_without)
             span.set_attribute("skill_efficacy.pass_rate_with_skill", pass_rate_with)
             span.set_attribute("skill_efficacy.lift", lift)
             span.set_attribute("skill_efficacy.compare_trajectories.success", True)
@@ -231,9 +220,7 @@ async def compare_proposal_trajectories(
 
         except Exception as exc:
             err2 = SkillEfficacyError(
-                message=(
-                    f"Failed to compare trajectories for proposal {proposal_id!r}: {exc}"
-                ),
+                message=(f"Failed to compare trajectories for proposal {proposal_id!r}: {exc}"),
                 timestamp=_now(),
                 cause=exc,
             )
@@ -253,6 +240,6 @@ async def compare_proposal_trajectories(
                     },
                 )
             )
-            raise err2
+            raise err2 from exc
 
     return metric_record

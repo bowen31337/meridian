@@ -47,12 +47,10 @@ Tests cover:
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
@@ -62,7 +60,6 @@ from meridiand._skill_forge_proposals import (
 )
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -150,9 +147,7 @@ def _read_proposal(storage_root: Path, proposal_id: str) -> dict[str, Any]:
 
 
 def _read_version(storage_root: Path, version_id: str) -> dict[str, Any]:
-    return json.loads(
-        (storage_root / "skill_versions" / f"{version_id}.json").read_text()
-    )
+    return json.loads((storage_root / "skill_versions" / f"{version_id}.json").read_text())
 
 
 def _read_skill(storage_root: Path, skill_id: str) -> dict[str, Any]:
@@ -217,9 +212,7 @@ class TestApproveSuccess:
         resp = _approve(client)
         assert resp.json()["source_type"] == "forge"
 
-    def test_response_version_number_is_1_for_first_promotion(
-        self, storage_root: Path
-    ) -> None:
+    def test_response_version_number_is_1_for_first_promotion(self, storage_root: Path) -> None:
         _write_proposal(storage_root)
         client = _make_client(storage_root)
         resp = _approve(client)
@@ -642,15 +635,11 @@ class TestRouterWiring:
 
 class TestErrorClasses:
     def test_approve_error_http_status(self) -> None:
-        err = SkillForgeProposalApproveError(
-            message="boom", timestamp="2024-01-01T00:00:00+00:00"
-        )
+        err = SkillForgeProposalApproveError(message="boom", timestamp="2024-01-01T00:00:00+00:00")
         assert err.http_status() == 500
 
     def test_approve_error_code(self) -> None:
-        err = SkillForgeProposalApproveError(
-            message="boom", timestamp="2024-01-01T00:00:00+00:00"
-        )
+        err = SkillForgeProposalApproveError(message="boom", timestamp="2024-01-01T00:00:00+00:00")
         assert err.code == "skill_forge_proposal_approve_failed"
 
 
@@ -705,6 +694,6 @@ class TestForgeVersionId:
             tests=[],
             derived_from_session_ids=None,
         )
-        hex_part = vid[len("skillver_"):]
+        hex_part = vid[len("skillver_") :]
         assert len(hex_part) == 64
         assert all(c in "0123456789abcdef" for c in hex_part)

@@ -216,7 +216,7 @@ def _make_provider(
             raise error
 
         async def _gen() -> Any:
-            for c in (chunks or []):
+            for c in chunks or []:
                 yield c
 
         return _gen()
@@ -369,9 +369,7 @@ class TestCallStreamingEvents:
         assert text_events[0].text == "Hello world"
 
     async def test_yields_message_stop_with_tokens(self, mock_span: MockSpan) -> None:
-        provider = _make_provider(
-            chunks=_text_chunks("Hi", prompt_tokens=7, completion_tokens=3)
-        )
+        provider = _make_provider(chunks=_text_chunks("Hi", prompt_tokens=7, completion_tokens=3))
         events = [e async for e in provider.call(_make_opts())]
         stop = next(e for e in events if isinstance(e, MessageStopEvent))
         assert stop.input_tokens == 7
@@ -541,7 +539,9 @@ class TestCallToolEvents:
         chunks = [
             _mk_chunk(
                 model="gpt-4o",
-                tool_calls=[_mk_tc(index=0, id="call_z", function=_mk_fn(name="do_it", arguments=""))],
+                tool_calls=[
+                    _mk_tc(index=0, id="call_z", function=_mk_fn(name="do_it", arguments=""))
+                ],
             ),
             _mk_chunk(
                 model="gpt-4o",

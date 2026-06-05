@@ -27,8 +27,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-import pytest
 from opentelemetry.trace import StatusCode
+import pytest
 from storage_repository import (
     Agent,
     AgentFilter,
@@ -62,6 +62,7 @@ from storage_repository import (
 )
 from storage_repository._contract import (
     AgentRepository,
+    AuditLogEntryRepository,
     ChannelRepository,
     EnvironmentRepository,
     MemoryRepository,
@@ -310,6 +311,10 @@ class _StubDriver(RepositoryDriver):
     def webhooks(self) -> WebhookRepository:
         raise NotImplementedError
 
+    @property
+    def audit_log_entries(self) -> AuditLogEntryRepository:
+        raise NotImplementedError
+
     async def migrate(self) -> None:
         pass
 
@@ -540,12 +545,12 @@ class TestSqliteMigrate:
         await sqlite_driver.migrate()  # second run must not raise
         await sqlite_driver.migrate()  # third run must not raise
 
-    async def test_migrate_records_all_versions(self, sqlite_driver: SqliteRepositoryDriver) -> None:
+    async def test_migrate_records_all_versions(
+        self, sqlite_driver: SqliteRepositoryDriver
+    ) -> None:
         from storage_repository._migrations import SCHEMA_VERSION
 
-        async with sqlite_driver._conn.execute(
-            "SELECT COUNT(*) FROM schema_migrations"
-        ) as cur:
+        async with sqlite_driver._conn.execute("SELECT COUNT(*) FROM schema_migrations") as cur:
             row = await cur.fetchone()
         assert row[0] == SCHEMA_VERSION
 

@@ -33,14 +33,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from storage_event_log import EventLogWriter, LocalEventLogWriter
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -287,8 +285,12 @@ class TestListMessagesResponse:
         client = _make_client(storage_root)
         session = _post_session(client)
         session_id = session["session_id"]
-        thread_dir_a = _seed_thread(storage_root, session_id, "thread_a", "2026-05-21T10:00:00+00:00")
-        thread_dir_b = _seed_thread(storage_root, session_id, "thread_b", "2026-05-21T11:00:00+00:00")
+        thread_dir_a = _seed_thread(
+            storage_root, session_id, "thread_a", "2026-05-21T10:00:00+00:00"
+        )
+        thread_dir_b = _seed_thread(
+            storage_root, session_id, "thread_b", "2026-05-21T11:00:00+00:00"
+        )
         _seed_message(
             thread_dir_a,
             message_id="msg_a",
@@ -318,8 +320,12 @@ class TestListMessagesFiltering:
         client = _make_client(storage_root)
         session = _post_session(client)
         session_id = session["session_id"]
-        thread_dir_a = _seed_thread(storage_root, session_id, "thread_a", "2026-05-21T10:00:00+00:00")
-        thread_dir_b = _seed_thread(storage_root, session_id, "thread_b", "2026-05-21T11:00:00+00:00")
+        thread_dir_a = _seed_thread(
+            storage_root, session_id, "thread_a", "2026-05-21T10:00:00+00:00"
+        )
+        thread_dir_b = _seed_thread(
+            storage_root, session_id, "thread_b", "2026-05-21T11:00:00+00:00"
+        )
         _seed_message(
             thread_dir_a,
             message_id="msg_a",
@@ -371,8 +377,12 @@ class TestListMessagesFiltering:
         client = _make_client(storage_root)
         session = _post_session(client)
         session_id = session["session_id"]
-        thread_dir_a = _seed_thread(storage_root, session_id, "thread_a", "2026-05-21T10:00:00+00:00")
-        thread_dir_b = _seed_thread(storage_root, session_id, "thread_b", "2026-05-21T11:00:00+00:00")
+        thread_dir_a = _seed_thread(
+            storage_root, session_id, "thread_a", "2026-05-21T10:00:00+00:00"
+        )
+        thread_dir_b = _seed_thread(
+            storage_root, session_id, "thread_b", "2026-05-21T11:00:00+00:00"
+        )
         _seed_message(
             thread_dir_a,
             message_id="msg_a_user",
@@ -431,10 +441,10 @@ class TestListMessagesFiltering:
 
 
 class TestListMessagesPagination:
-    def _seed_messages(
-        self, storage_root: Path, session_id: str, count: int
-    ) -> None:
-        thread_dir = _seed_thread(storage_root, session_id, "thread_pg", "2026-05-21T10:00:00+00:00")
+    def _seed_messages(self, storage_root: Path, session_id: str, count: int) -> None:
+        thread_dir = _seed_thread(
+            storage_root, session_id, "thread_pg", "2026-05-21T10:00:00+00:00"
+        )
         for i in range(count):
             _seed_message(
                 thread_dir,
@@ -553,7 +563,9 @@ class TestListMessagesAudit:
         client = _make_client(storage_root)
         session = _post_session(client)
         session_id = session["session_id"]
-        thread_dir = _seed_thread(storage_root, session_id, "thread_corrupt", "2026-05-21T10:00:00+00:00")
+        thread_dir = _seed_thread(
+            storage_root, session_id, "thread_corrupt", "2026-05-21T10:00:00+00:00"
+        )
         (thread_dir / "messages.ndjson").write_text("not valid json {{{\n")
         _get_messages(client, session_id)
         records = _audit_records(storage_root)
@@ -563,7 +575,9 @@ class TestListMessagesAudit:
         client = _make_client(storage_root)
         session = _post_session(client)
         session_id = session["session_id"]
-        thread_dir = _seed_thread(storage_root, session_id, "thread_corrupt", "2026-05-21T10:00:00+00:00")
+        thread_dir = _seed_thread(
+            storage_root, session_id, "thread_corrupt", "2026-05-21T10:00:00+00:00"
+        )
         (thread_dir / "messages.ndjson").write_text("not valid json {{{\n")
         _get_messages(client, session_id)
         records = _audit_records(storage_root)
@@ -574,7 +588,9 @@ class TestListMessagesAudit:
         client = _make_client(storage_root)
         session = _post_session(client)
         session_id = session["session_id"]
-        thread_dir = _seed_thread(storage_root, session_id, "thread_corrupt", "2026-05-21T10:00:00+00:00")
+        thread_dir = _seed_thread(
+            storage_root, session_id, "thread_corrupt", "2026-05-21T10:00:00+00:00"
+        )
         (thread_dir / "messages.ndjson").write_text("not valid json {{{\n")
         _get_messages(client, session_id)
         records = _audit_records(storage_root)
@@ -585,7 +601,9 @@ class TestListMessagesAudit:
         client = _make_client(storage_root)
         session = _post_session(client)
         session_id = session["session_id"]
-        thread_dir = _seed_thread(storage_root, session_id, "thread_corrupt", "2026-05-21T10:00:00+00:00")
+        thread_dir = _seed_thread(
+            storage_root, session_id, "thread_corrupt", "2026-05-21T10:00:00+00:00"
+        )
         (thread_dir / "messages.ndjson").write_text("not valid json {{{\n")
         _get_messages(client, session_id)
         records = _audit_records(storage_root)
@@ -604,7 +622,9 @@ class TestListMessagesFailure:
         client = _make_client(storage_root)
         session = _post_session(client)
         session_id = session["session_id"]
-        thread_dir = _seed_thread(storage_root, session_id, "thread_corrupt", "2026-05-21T10:00:00+00:00")
+        thread_dir = _seed_thread(
+            storage_root, session_id, "thread_corrupt", "2026-05-21T10:00:00+00:00"
+        )
         (thread_dir / "messages.ndjson").write_text("not valid json {{{\n")
         result, _ = _get_messages(client, session_id)
         assert result["_status"] == 500
@@ -613,7 +633,9 @@ class TestListMessagesFailure:
         client = _make_client(storage_root)
         session = _post_session(client)
         session_id = session["session_id"]
-        thread_dir = _seed_thread(storage_root, session_id, "thread_corrupt", "2026-05-21T10:00:00+00:00")
+        thread_dir = _seed_thread(
+            storage_root, session_id, "thread_corrupt", "2026-05-21T10:00:00+00:00"
+        )
         (thread_dir / "messages.ndjson").write_text("not valid json {{{\n")
         result, _ = _get_messages(client, session_id)
         assert result["error"]["code"] == "session_messages_list_failed"
@@ -622,7 +644,9 @@ class TestListMessagesFailure:
         client = _make_client(storage_root)
         session = _post_session(client)
         session_id = session["session_id"]
-        thread_dir = _seed_thread(storage_root, session_id, "thread_corrupt", "2026-05-21T10:00:00+00:00")
+        thread_dir = _seed_thread(
+            storage_root, session_id, "thread_corrupt", "2026-05-21T10:00:00+00:00"
+        )
         (thread_dir / "messages.ndjson").write_text("not valid json {{{\n")
         result, _ = _get_messages(client, session_id)
         assert "message" in result["error"]
@@ -673,7 +697,9 @@ class TestListMessagesOtel:
         client = _make_client(storage_root)
         session = _post_session(client)
         session_id = session["session_id"]
-        thread_dir = _seed_thread(storage_root, session_id, "thread_corrupt", "2026-05-21T10:00:00+00:00")
+        thread_dir = _seed_thread(
+            storage_root, session_id, "thread_corrupt", "2026-05-21T10:00:00+00:00"
+        )
         (thread_dir / "messages.ndjson").write_text("not valid json {{{\n")
         _otel_exporter.clear()
         _get_messages(client, session_id)

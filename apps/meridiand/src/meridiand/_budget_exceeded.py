@@ -135,7 +135,7 @@ def make_budget_exceeded_router(
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(
             content={

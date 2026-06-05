@@ -19,6 +19,9 @@ dev = [
     "opentelemetry-sdk>=1.24",
 ]
 
+[tool.uv.sources]
+meridian-core-errors = { workspace = true }
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

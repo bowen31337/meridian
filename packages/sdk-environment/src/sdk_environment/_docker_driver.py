@@ -177,7 +177,7 @@ class DockerBackendDriver(EnvironmentDriver):
                 proc.communicate(stdin_data),
                 timeout=timeout_s,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             raise
         return proc.returncode if proc.returncode is not None else 0, stdout_b, stderr_b
@@ -188,17 +188,13 @@ class DockerBackendDriver(EnvironmentDriver):
 
     async def provision(self, request: ProvisionRequest) -> None:
         cmd = self._build_run_cmd(request.environment_id)
-        returncode, _stdout_b, stderr_b = await self._run_subprocess(
-            cmd, timeout_s=self._timeout_s
-        )
+        returncode, _stdout_b, stderr_b = await self._run_subprocess(cmd, timeout_s=self._timeout_s)
         if returncode != 0:
             raise RuntimeError(
                 f"docker run failed (exit {returncode}): "
                 f"{stderr_b.decode(errors='replace').strip()}"
             )
-        self._containers[request.environment_id] = self._container_name(
-            request.environment_id
-        )
+        self._containers[request.environment_id] = self._container_name(request.environment_id)
 
     async def execute(self, request: ExecuteRequest) -> ExecuteResult:
         container_name = self._containers.get(request.environment_id)
@@ -220,7 +216,7 @@ class DockerBackendDriver(EnvironmentDriver):
             returncode, stdout_b, stderr_b = await self._run_subprocess(
                 cmd, stdin_data=stdin_data, timeout_s=timeout_s
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise
         duration_ms = _ms_since(start)
 
@@ -239,5 +235,5 @@ class DockerBackendDriver(EnvironmentDriver):
         # Best-effort cleanup: don't raise on non-zero exit (container may not exist)
         try:
             await self._run_subprocess(cmd, timeout_s=self._timeout_s)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise

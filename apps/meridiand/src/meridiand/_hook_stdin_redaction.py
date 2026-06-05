@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime
+import re
 from typing import Any
 
 from core_errors import (
@@ -72,12 +72,24 @@ def _walk(
         return value  # unsubstituted — ref URI is not the secret value
     if isinstance(value, dict):
         return {
-            k: _walk(v, allowed_keys=allowed_keys, resolver=resolver, agent_id=agent_id, tool_call_id=tool_call_id)
+            k: _walk(
+                v,
+                allowed_keys=allowed_keys,
+                resolver=resolver,
+                agent_id=agent_id,
+                tool_call_id=tool_call_id,
+            )
             for k, v in value.items()
         }
     if isinstance(value, list):
         return [
-            _walk(item, allowed_keys=allowed_keys, resolver=resolver, agent_id=agent_id, tool_call_id=tool_call_id)
+            _walk(
+                item,
+                allowed_keys=allowed_keys,
+                resolver=resolver,
+                agent_id=agent_id,
+                tool_call_id=tool_call_id,
+            )
             for item in value
         ]
     return value

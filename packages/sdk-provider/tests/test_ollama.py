@@ -144,9 +144,7 @@ def _make_provider(
     elif chat_status != 200:
         routes["/api/chat"] = httpx.Response(chat_status, text="error body")
     transport = _AsyncTransport(routes)
-    http_client = httpx.AsyncClient(
-        transport=transport, base_url="http://localhost:11434"
-    )
+    http_client = httpx.AsyncClient(transport=transport, base_url="http://localhost:11434")
     return OllamaProvider(name="test-ollama", audit_log=audit_log, _http=http_client)
 
 
@@ -261,7 +259,12 @@ class TestCallStreamingEvents:
         body = _ndjson(
             {"model": "llama3.2", "message": {"role": "assistant", "content": "A"}, "done": False},
             {"model": "llama3.2", "message": {"role": "assistant", "content": "B"}, "done": False},
-            {"model": "llama3.2", "message": {"role": "assistant", "content": ""}, "done": True, "done_reason": "stop"},
+            {
+                "model": "llama3.2",
+                "message": {"role": "assistant", "content": ""},
+                "done": True,
+                "done_reason": "stop",
+            },
         )
         provider = _make_provider(chat_body=body)
         events = [e async for e in provider.call(_make_opts())]
@@ -322,7 +325,12 @@ class TestCallToolEvents:
                 },
                 "done": False,
             },
-            {"model": "llama3.2", "message": {"role": "assistant", "content": ""}, "done": True, "done_reason": "stop"},
+            {
+                "model": "llama3.2",
+                "message": {"role": "assistant", "content": ""},
+                "done": True,
+                "done_reason": "stop",
+            },
         )
         provider = _make_provider(chat_body=body)
         events = [e async for e in provider.call(_make_opts())]
@@ -387,9 +395,7 @@ class TestCallErrors:
             async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
                 raise httpx.TimeoutException("timed out")
 
-        http = httpx.AsyncClient(
-            transport=_TimeoutTransport(), base_url="http://localhost:11434"
-        )
+        http = httpx.AsyncClient(transport=_TimeoutTransport(), base_url="http://localhost:11434")
         provider = OllamaProvider(name="test-ollama", _http=http)
         with pytest.raises(ProviderTimeoutError):
             [e async for e in provider.call(_make_opts())]
@@ -399,9 +405,7 @@ class TestCallErrors:
             async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
                 raise httpx.ConnectError("connection refused")
 
-        http = httpx.AsyncClient(
-            transport=_ConnectTransport(), base_url="http://localhost:11434"
-        )
+        http = httpx.AsyncClient(transport=_ConnectTransport(), base_url="http://localhost:11434")
         provider = OllamaProvider(name="test-ollama", _http=http)
         with pytest.raises(ProviderCallError):
             [e async for e in provider.call(_make_opts())]
@@ -441,9 +445,7 @@ class TestCallAuditLog:
                 raise httpx.TimeoutException("timed out")
 
         audit = CollectingAuditLog()
-        http = httpx.AsyncClient(
-            transport=_TimeoutTransport(), base_url="http://localhost:11434"
-        )
+        http = httpx.AsyncClient(transport=_TimeoutTransport(), base_url="http://localhost:11434")
         provider = OllamaProvider(name="test-ollama", audit_log=audit, _http=http)
         with pytest.raises(ProviderTimeoutError):
             [e async for e in provider.call(_make_opts())]

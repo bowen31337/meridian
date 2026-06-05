@@ -15,7 +15,12 @@ from ._runtime import EventLogOptions, EventLogRuntime
 from ._subscriber_bus import SUBSCRIBER_CHANNEL_SIZE, SubscriberBus
 
 # Telemetry
-from ._telemetry import get_tracer, record_event_log_failure, record_fsync_event, record_invocation_event
+from ._telemetry import (
+    get_tracer,
+    record_event_log_failure,
+    record_fsync_event,
+    record_invocation_event,
+)
 from ._types import (
     AuditLogEntry,
     EventLogFailure,

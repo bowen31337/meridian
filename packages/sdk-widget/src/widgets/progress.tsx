@@ -1,4 +1,4 @@
-import React from "react";
+import type React from "react";
 import { defineWidget } from "../contract.js";
 import type { WidgetProps } from "../contract.js";
 
@@ -35,11 +35,12 @@ function ProgressWidgetImpl({ props }: WidgetProps<ProgressProps>): React.ReactE
   const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0;
 
   return (
-    <div data-widget-kind="meridian.progress" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+    <div
+      data-widget-kind="meridian.progress"
+      style={{ display: "flex", flexDirection: "column", gap: 4 }}
+    >
       {label != null && (
-        <div
-          style={{ display: "flex", justifyContent: "space-between", fontSize: "0.875rem" }}
-        >
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.875rem" }}>
           <span>{label}</span>
           <span aria-hidden="true">{pct}%</span>
         </div>

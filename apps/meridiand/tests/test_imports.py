@@ -7,7 +7,8 @@ Tests cover:
   - POST /v1/x/imports/openclaw creates a meridian-import-*.audit.ndjson in storage_root.
   - POST /v1/x/imports/openclaw audit file has import_started line as first entry.
   - POST /v1/x/imports/openclaw audit file has one record_translated line per input record.
-  - POST /v1/x/imports/openclaw record_translated line has seq, source_id, target_id, kind, lossy_fields.
+  - POST /v1/x/imports/openclaw record_translated line has seq, source_id, target_id,
+    kind, lossy_fields.
   - POST /v1/x/imports/openclaw record_translated kind is "channel".
   - POST /v1/x/imports/openclaw audit file has checklist line after all record_translated lines.
   - POST /v1/x/imports/openclaw checklist includes token_vault_ref_missing item when config absent.
@@ -63,11 +64,13 @@ Tests cover:
   - POST /v1/x/imports/hermes empty tools returns 422.
   - POST /v1/x/imports/openclaw/install returns 201 on success.
   - POST /v1/x/imports/openclaw/install response has audit_path and per-subsystem keys.
-  - POST /v1/x/imports/openclaw/install channels/sessions/memory_stores/tools imported counts correct.
+  - POST /v1/x/imports/openclaw/install channels/sessions/memory_stores/tools imported
+    counts correct.
   - POST /v1/x/imports/openclaw/install empty subsystems returns zeros.
   - POST /v1/x/imports/openclaw/install creates meridian-import-*.audit.ndjson.
   - POST /v1/x/imports/openclaw/install audit has import_started as first entry.
-  - POST /v1/x/imports/openclaw/install audit has record_translated for each record across all subsystems.
+  - POST /v1/x/imports/openclaw/install audit has record_translated for each record
+    across all subsystems.
   - POST /v1/x/imports/openclaw/install record_translated kinds cover all subsystem types.
   - POST /v1/x/imports/openclaw/install audit ends with import_completed.
   - POST /v1/x/imports/openclaw/install audit has checklist entry.
@@ -113,11 +116,14 @@ Tests cover:
   - OTel span "import.hermes" emitted on failure.
   - POST /v1/x/imports/hermes/install returns 201 on success.
   - POST /v1/x/imports/hermes/install response has audit_path and per-subsystem keys.
-  - POST /v1/x/imports/hermes/install skills/environments/providers/sessions/user_profiles/cron/acp_registry imported counts correct.
+  - POST /v1/x/imports/hermes/install
+    skills/environments/providers/sessions/user_profiles/cron/acp_registry imported
+    counts correct.
   - POST /v1/x/imports/hermes/install empty subsystems returns zeros.
   - POST /v1/x/imports/hermes/install creates meridian-import-*.audit.ndjson.
   - POST /v1/x/imports/hermes/install audit has import_started as first entry.
-  - POST /v1/x/imports/hermes/install audit has record_translated for each record across all subsystems.
+  - POST /v1/x/imports/hermes/install audit has record_translated for each record
+    across all subsystems.
   - POST /v1/x/imports/hermes/install record_translated kinds cover all subsystem types.
   - POST /v1/x/imports/hermes/install audit ends with import_completed.
   - POST /v1/x/imports/hermes/install audit has checklist entry.
@@ -175,14 +181,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
-from meridiand._imports import make_imports_router
 
 import tests._otel_shared as _otel_shared
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -265,7 +268,12 @@ class TestOpenClawImportSuccess:
 
     def test_imported_count_matches_records(self, storage_root: Path) -> None:
         records = [
-            {"id": "oc_001", "kind": "telegram", "name": "Ch1", "config": {"token_vault_ref": "v1"}},
+            {
+                "id": "oc_001",
+                "kind": "telegram",
+                "name": "Ch1",
+                "config": {"token_vault_ref": "v1"},
+            },
             {"id": "oc_002", "kind": "slack", "name": "Ch2", "config": {"token_vault_ref": "v2"}},
         ]
         client = _make_client(storage_root)
@@ -370,7 +378,9 @@ class TestOpenClawAuditLog:
 
     def test_checklist_includes_token_vault_ref_missing(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        client.post("/v1/x/imports/openclaw", json={"records": [{"id": "oc_1", "kind": "telegram"}]})
+        client.post(
+            "/v1/x/imports/openclaw", json={"records": [{"id": "oc_1", "kind": "telegram"}]}
+        )
         entries = _import_audit_records(storage_root)
         c = next(e for e in entries if e["type"] == "checklist")
         assert any("token_vault_ref" in item for item in c["items"])
@@ -581,8 +591,20 @@ class TestHermesImportSuccess:
 
     def test_imported_count_matches_records(self, storage_root: Path) -> None:
         records = [
-            {"id": "h_1", "name": "skill-a", "description": "d", "instructions": "i", "tools": [{"name": "t"}]},
-            {"id": "h_2", "name": "skill-b", "description": "d", "instructions": "i", "tools": [{"name": "t"}]},
+            {
+                "id": "h_1",
+                "name": "skill-a",
+                "description": "d",
+                "instructions": "i",
+                "tools": [{"name": "t"}],
+            },
+            {
+                "id": "h_2",
+                "name": "skill-b",
+                "description": "d",
+                "instructions": "i",
+                "tools": [{"name": "t"}],
+            },
         ]
         client = _make_client(storage_root)
         body = client.post("/v1/x/imports/hermes", json={"records": records}).json()
@@ -646,7 +668,9 @@ class TestHermesAuditLog:
         client.post("/v1/x/imports/hermes", json={"records": [rec]})
         entries = _import_audit_records(storage_root)
         c = next(e for e in entries if e["type"] == "checklist")
-        assert any("version_tag" in item.lower() or "version" in item.lower() for item in c["items"])
+        assert any(
+            "version_tag" in item.lower() or "version" in item.lower() for item in c["items"]
+        )
 
     def test_checklist_includes_tags_item(self, storage_root: Path) -> None:
         rec = {**_hermes_body()["records"][0], "tags": ["ml", "nlp"]}
@@ -778,19 +802,37 @@ class TestHermesSkillRecords:
 
 class TestHermesTransactional:
     def test_empty_id_returns_422(self, storage_root: Path) -> None:
-        rec = {"id": "", "name": "skill", "description": "d", "instructions": "i", "tools": [{"name": "t"}]}
+        rec = {
+            "id": "",
+            "name": "skill",
+            "description": "d",
+            "instructions": "i",
+            "tools": [{"name": "t"}],
+        }
         client = _make_client(storage_root)
         resp = client.post("/v1/x/imports/hermes", json={"records": [rec]})
         assert resp.status_code == 422
 
     def test_empty_name_returns_422(self, storage_root: Path) -> None:
-        rec = {"id": "h_1", "name": "", "description": "d", "instructions": "i", "tools": [{"name": "t"}]}
+        rec = {
+            "id": "h_1",
+            "name": "",
+            "description": "d",
+            "instructions": "i",
+            "tools": [{"name": "t"}],
+        }
         client = _make_client(storage_root)
         resp = client.post("/v1/x/imports/hermes", json={"records": [rec]})
         assert resp.status_code == 422
 
     def test_empty_instructions_returns_422(self, storage_root: Path) -> None:
-        rec = {"id": "h_1", "name": "s", "description": "d", "instructions": "", "tools": [{"name": "t"}]}
+        rec = {
+            "id": "h_1",
+            "name": "s",
+            "description": "d",
+            "instructions": "",
+            "tools": [{"name": "t"}],
+        }
         client = _make_client(storage_root)
         resp = client.post("/v1/x/imports/hermes", json={"records": [rec]})
         assert resp.status_code == 422
@@ -802,13 +844,25 @@ class TestHermesTransactional:
         assert resp.status_code == 422
 
     def test_validation_failure_error_code(self, storage_root: Path) -> None:
-        rec = {"id": "", "name": "s", "description": "d", "instructions": "i", "tools": [{"name": "t"}]}
+        rec = {
+            "id": "",
+            "name": "s",
+            "description": "d",
+            "instructions": "i",
+            "tools": [{"name": "t"}],
+        }
         client = _make_client(storage_root)
         body = client.post("/v1/x/imports/hermes", json={"records": [rec]}).json()
         assert body["error"]["code"] == "import_record_invalid"
 
     def test_no_skill_files_written_on_failure(self, storage_root: Path) -> None:
-        rec = {"id": "", "name": "s", "description": "d", "instructions": "i", "tools": [{"name": "t"}]}
+        rec = {
+            "id": "",
+            "name": "s",
+            "description": "d",
+            "instructions": "i",
+            "tools": [{"name": "t"}],
+        }
         client = _make_client(storage_root)
         client.post("/v1/x/imports/hermes", json={"records": [rec]})
         skills_dir = storage_root / "skills"
@@ -816,14 +870,26 @@ class TestHermesTransactional:
             assert list(skills_dir.glob("*.json")) == []
 
     def test_import_failed_entry_in_import_audit_log(self, storage_root: Path) -> None:
-        rec = {"id": "", "name": "s", "description": "d", "instructions": "i", "tools": [{"name": "t"}]}
+        rec = {
+            "id": "",
+            "name": "s",
+            "description": "d",
+            "instructions": "i",
+            "tools": [{"name": "t"}],
+        }
         client = _make_client(storage_root)
         client.post("/v1/x/imports/hermes", json={"records": [rec]})
         entries = _import_audit_records(storage_root)
         assert any(e["type"] == "import_failed" for e in entries)
 
     def test_failure_written_to_main_audit_log(self, storage_root: Path) -> None:
-        rec = {"id": "", "name": "s", "description": "d", "instructions": "i", "tools": [{"name": "t"}]}
+        rec = {
+            "id": "",
+            "name": "s",
+            "description": "d",
+            "instructions": "i",
+            "tools": [{"name": "t"}],
+        }
         client = _make_client(storage_root)
         client.post("/v1/x/imports/hermes", json={"records": [rec]})
         records = _main_audit_records(storage_root)
@@ -848,6 +914,7 @@ class TestAppFactoryWiring:
 
     def test_import_routes_absent_without_storage_root(self) -> None:
         from core_errors import NoopAuditLog
+
         app = create_app(NoopAuditLog())
         paths = [r.path for r in app.routes]  # type: ignore[attr-defined]
         assert "/v1/x/imports/openclaw" not in paths
@@ -882,7 +949,13 @@ class TestOTelSpans:
         assert any("import.hermes" in n for n in span_names)
 
     def test_hermes_span_emitted_on_failure(self, storage_root: Path) -> None:
-        rec = {"id": "", "name": "s", "description": "d", "instructions": "i", "tools": [{"name": "t"}]}
+        rec = {
+            "id": "",
+            "name": "s",
+            "description": "d",
+            "instructions": "i",
+            "tools": [{"name": "t"}],
+        }
         client = _make_client(storage_root)
         client.post("/v1/x/imports/hermes", json={"records": [rec]})
         span_names = [s.name for s in _otel_shared.otel_exporter.get_finished_spans()]
@@ -896,7 +969,20 @@ class TestOTelSpans:
 
     def test_hermes_install_span_emitted_on_failure(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        client.post("/v1/x/imports/hermes/install", json={"skills": [{"id": "", "name": "s", "description": "d", "instructions": "i", "tools": [{"name": "t"}]}]})
+        client.post(
+            "/v1/x/imports/hermes/install",
+            json={
+                "skills": [
+                    {
+                        "id": "",
+                        "name": "s",
+                        "description": "d",
+                        "instructions": "i",
+                        "tools": [{"name": "t"}],
+                    }
+                ]
+            },
+        )
         span_names = [s.name for s in _otel_shared.otel_exporter.get_finished_spans()]
         assert any("import.hermes_install" in n for n in span_names)
 
@@ -920,9 +1006,7 @@ def _hermes_install_body(**overrides: Any) -> dict:
         "environments": [
             {"id": "h_e001", "name": "dev-env", "backend": "docker", "image": "ubuntu:24.04"}
         ],
-        "providers": [
-            {"id": "h_p001", "name": "anthropic-main", "kind": "anthropic"}
-        ],
+        "providers": [{"id": "h_p001", "name": "anthropic-main", "kind": "anthropic"}],
         "sessions": [
             {
                 "id": "h_sess001",
@@ -931,9 +1015,7 @@ def _hermes_install_body(**overrides: Any) -> dict:
                 "events": [{"type": "session.created", "ts": "2024-01-01T00:00:00+00:00"}],
             }
         ],
-        "user_profiles": [
-            {"id": "h_u001", "username": "alice", "display_name": "Alice"}
-        ],
+        "user_profiles": [{"id": "h_u001", "username": "alice", "display_name": "Alice"}],
         "cron": [
             {"id": "h_c001", "trigger_type": "interval", "session_id": "sess_abc", "interval": "1h"}
         ],
@@ -964,7 +1046,15 @@ class TestHermesInstallSuccess:
     def test_response_has_all_subsystem_keys(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         body = client.post("/v1/x/imports/hermes/install", json=_hermes_install_body()).json()
-        for key in ("skills", "environments", "providers", "sessions", "user_profiles", "cron", "acp_registry"):
+        for key in (
+            "skills",
+            "environments",
+            "providers",
+            "sessions",
+            "user_profiles",
+            "cron",
+            "acp_registry",
+        ):
             assert key in body, f"missing key: {key}"
 
     def test_skills_imported_count(self, storage_root: Path) -> None:
@@ -1019,7 +1109,9 @@ class TestHermesInstallSuccess:
         entries = _import_audit_records(storage_root)
         assert entries[0]["type"] == "import_started"
 
-    def test_audit_log_has_record_translated_for_each_subsystem_record(self, storage_root: Path) -> None:
+    def test_audit_log_has_record_translated_for_each_subsystem_record(
+        self, storage_root: Path
+    ) -> None:
         client = _make_client(storage_root)
         client.post("/v1/x/imports/hermes/install", json=_hermes_install_body())
         entries = _import_audit_records(storage_root)
@@ -1032,7 +1124,15 @@ class TestHermesInstallSuccess:
         client.post("/v1/x/imports/hermes/install", json=_hermes_install_body())
         entries = _import_audit_records(storage_root)
         kinds = {e["kind"] for e in entries if e["type"] == "record_translated"}
-        assert kinds == {"skill", "environment", "provider", "session", "user_profile", "cron", "acp_peer"}
+        assert kinds == {
+            "skill",
+            "environment",
+            "provider",
+            "session",
+            "user_profile",
+            "cron",
+            "acp_peer",
+        }
 
     def test_audit_log_ends_with_import_completed(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
@@ -1180,7 +1280,7 @@ class TestHermesInstallSessions:
         sess_id = body["sessions"]["ids"][0]
         elog = storage_root / "sessions" / sess_id / "events.ndjson"
         assert elog.exists()
-        lines = [l for l in elog.read_text().splitlines() if l.strip()]
+        lines = [line for line in elog.read_text().splitlines() if line.strip()]
         assert len(lines) == 1
 
     def test_session_thread_written(self, storage_root: Path) -> None:
@@ -1301,7 +1401,9 @@ class TestHermesInstallCron:
 
     def test_cron_empty_session_id_returns_422(self, storage_root: Path) -> None:
         install = _hermes_install_body()
-        install["cron"] = [{"id": "h_c003", "trigger_type": "interval", "session_id": "", "interval": "5m"}]
+        install["cron"] = [
+            {"id": "h_c003", "trigger_type": "interval", "session_id": "", "interval": "5m"}
+        ]
         client = _make_client(storage_root)
         resp = client.post("/v1/x/imports/hermes/install", json=install)
         assert resp.status_code == 422
@@ -1309,7 +1411,9 @@ class TestHermesInstallCron:
     def test_cron_timestamp_trigger_sets_next_fire_at(self, storage_root: Path) -> None:
         ts = "2025-01-01T12:00:00+00:00"
         install = _hermes_install_body()
-        install["cron"] = [{"id": "h_c004", "trigger_type": "timestamp", "session_id": "sess_abc", "timestamp": ts}]
+        install["cron"] = [
+            {"id": "h_c004", "trigger_type": "timestamp", "session_id": "sess_abc", "timestamp": ts}
+        ]
         client = _make_client(storage_root)
         body = client.post("/v1/x/imports/hermes/install", json=install).json()
         cron_id = body["cron"]["ids"][0]
@@ -1373,19 +1477,49 @@ class TestHermesInstallAcpRegistry:
 
 class TestHermesInstallFailure:
     def test_validation_failure_returns_422(self, storage_root: Path) -> None:
-        install = {"skills": [{"id": "", "name": "s", "description": "d", "instructions": "i", "tools": [{"name": "t"}]}]}
+        install = {
+            "skills": [
+                {
+                    "id": "",
+                    "name": "s",
+                    "description": "d",
+                    "instructions": "i",
+                    "tools": [{"name": "t"}],
+                }
+            ]
+        }
         client = _make_client(storage_root)
         resp = client.post("/v1/x/imports/hermes/install", json=install)
         assert resp.status_code == 422
 
     def test_validation_failure_error_code(self, storage_root: Path) -> None:
-        install = {"skills": [{"id": "", "name": "s", "description": "d", "instructions": "i", "tools": [{"name": "t"}]}]}
+        install = {
+            "skills": [
+                {
+                    "id": "",
+                    "name": "s",
+                    "description": "d",
+                    "instructions": "i",
+                    "tools": [{"name": "t"}],
+                }
+            ]
+        }
         client = _make_client(storage_root)
         body = client.post("/v1/x/imports/hermes/install", json=install).json()
         assert body["error"]["code"] == "import_record_invalid"
 
     def test_no_files_written_on_failure(self, storage_root: Path) -> None:
-        install = {"skills": [{"id": "", "name": "s", "description": "d", "instructions": "i", "tools": [{"name": "t"}]}]}
+        install = {
+            "skills": [
+                {
+                    "id": "",
+                    "name": "s",
+                    "description": "d",
+                    "instructions": "i",
+                    "tools": [{"name": "t"}],
+                }
+            ]
+        }
         client = _make_client(storage_root)
         client.post("/v1/x/imports/hermes/install", json=install)
         if (storage_root / "skills").exists():
@@ -1434,9 +1568,7 @@ def _openclaw_install_body(**overrides: Any) -> dict:
                 "events": [{"type": "message", "role": "user", "content": "hello"}],
             }
         ],
-        "memory": [
-            {"key": "MEMORY.md", "content": "# Agent Memory\n\nUser prefers dark mode."}
-        ],
+        "memory": [{"key": "MEMORY.md", "content": "# Agent Memory\n\nUser prefers dark mode."}],
         "tools": [
             {
                 "id": "oc_tool_001",
@@ -1571,18 +1703,14 @@ class TestOpenClawInstallSessions:
         client = _make_client(storage_root)
         resp = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
         sess_id = resp.json()["sessions"]["ids"][0]
-        manifest = json.loads(
-            (storage_root / "sessions" / sess_id / "manifest.json").read_text()
-        )
+        manifest = json.loads((storage_root / "sessions" / sess_id / "manifest.json").read_text())
         assert manifest["status"] == "archived"
 
     def test_session_openclaw_id_in_metadata(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         resp = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
         sess_id = resp.json()["sessions"]["ids"][0]
-        manifest = json.loads(
-            (storage_root / "sessions" / sess_id / "manifest.json").read_text()
-        )
+        manifest = json.loads((storage_root / "sessions" / sess_id / "manifest.json").read_text())
         assert manifest["metadata"]["openclaw_id"] == "oc_sess_001"
 
     def test_session_events_written_as_ndjson(self, storage_root: Path) -> None:
@@ -1591,7 +1719,7 @@ class TestOpenClawInstallSessions:
         sess_id = resp.json()["sessions"]["ids"][0]
         elog = storage_root / "sessions" / sess_id / "events.ndjson"
         assert elog.exists()
-        lines = [json.loads(l) for l in elog.read_text().splitlines() if l.strip()]
+        lines = [json.loads(line) for line in elog.read_text().splitlines() if line.strip()]
         assert lines[0]["type"] == "message"
 
     def test_session_thread_written(self, storage_root: Path) -> None:
@@ -1638,18 +1766,14 @@ class TestOpenClawInstallMemoryStores:
         client = _make_client(storage_root)
         resp = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
         store_id = resp.json()["memory_stores"]["ids"][0]
-        record = json.loads(
-            (storage_root / "memory_stores" / f"{store_id}.json").read_text()
-        )
+        record = json.loads((storage_root / "memory_stores" / f"{store_id}.json").read_text())
         assert record["scope"] == "agent"
 
     def test_memory_store_metadata_tagged_from_openclaw(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         resp = client.post("/v1/x/imports/openclaw/install", json=_openclaw_install_body())
         store_id = resp.json()["memory_stores"]["ids"][0]
-        record = json.loads(
-            (storage_root / "memory_stores" / f"{store_id}.json").read_text()
-        )
+        record = json.loads((storage_root / "memory_stores" / f"{store_id}.json").read_text())
         assert record["metadata"]["from"] == "openclaw"
 
     def test_memory_store_raw_content_written(self, storage_root: Path) -> None:
@@ -1667,8 +1791,10 @@ class TestOpenClawInstallMemoryStores:
         client = _make_client(storage_root)
         resp = client.post("/v1/x/imports/openclaw/install", json=body)
         assert resp.json()["memory_stores"]["imported"] == 0
-        assert not (storage_root / "memory_stores").exists() or \
-            list((storage_root / "memory_stores").glob("*.json")) == []
+        assert (
+            not (storage_root / "memory_stores").exists()
+            or list((storage_root / "memory_stores").glob("*.json")) == []
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
-import { useCallback } from "react";
 import type { CanvasInteraction } from "@meridian/sdk-widget";
+import { useCallback } from "react";
 import type { CanvasInteractionRequest } from "../client.js";
 import { createApiClient } from "../client.js";
 import { useMeridianApi } from "../context.js";

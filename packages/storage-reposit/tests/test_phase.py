@@ -40,8 +40,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from opentelemetry.trace import StatusCode
+import pytest
 from storage_reposit import (
     AuditLogEntry,
     IndexerFailure,
@@ -52,7 +52,6 @@ from storage_reposit import (
 )
 
 from .conftest import CapturingAuditLog, MockSpan, StubPhaseProjection
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -303,9 +302,7 @@ class TestPhaseProjectionRuntimeUnexpectedException:
             rt.current_phase("s1", options=make_options(audit_log))
         assert exc_info.value.code == "PHASE_PROJECT_FAILED"
 
-    def test_cause_preserved(
-        self, mock_phase_span: MockSpan, audit_log: CapturingAuditLog
-    ) -> None:
+    def test_cause_preserved(self, mock_phase_span: MockSpan, audit_log: CapturingAuditLog) -> None:
         orig = OSError("disk full")
         rt = make_runtime(StubPhaseProjection(raises=orig))
         with pytest.raises(IndexerFailure) as exc_info:

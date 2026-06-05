@@ -68,13 +68,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -311,7 +309,8 @@ class TestUserProfileAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/user_profiles", json=_body(username=""))
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "user_profile.create.failed"
         )
         assert record["level"] == "error"
@@ -320,7 +319,8 @@ class TestUserProfileAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/user_profiles", json=_body(username=""))
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "user_profile.create.failed"
         )
         assert record["code"] == "user_profile_invalid_request"
@@ -329,7 +329,8 @@ class TestUserProfileAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/user_profiles", json=_body(username=""))
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "user_profile.create.failed"
         )
         assert record["detail"]["user_profile_id"].startswith("user_")
@@ -340,16 +341,15 @@ class TestUserProfileAuditLog:
         # Trigger a validation error with empty username but show name context via a different field
         client.post("/v1/user_profiles", json={"username": ""})
         records = _audit_records(storage_root)
-        record = next(
-            r for r in records if r.get("event") == "user_profile.create.failed"
-        )
+        record = next(r for r in records if r.get("event") == "user_profile.create.failed")
         assert "username" in record["detail"]
 
     def test_failure_audit_detail_has_message(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         client.post("/v1/user_profiles", json=_body(username=""))
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "user_profile.create.failed"
         )
         assert "message" in record["detail"]
@@ -587,7 +587,8 @@ class TestUserProfileDeleteAuditLog:
         client = _make_client(storage_root)
         client.delete("/v1/user_profiles/user_missing")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "user_profile.delete.failed"
         )
         assert record["level"] == "error"
@@ -596,7 +597,8 @@ class TestUserProfileDeleteAuditLog:
         client = _make_client(storage_root)
         client.delete("/v1/user_profiles/user_missing")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "user_profile.delete.failed"
         )
         assert record["code"] == "user_profile_not_found"
@@ -605,7 +607,8 @@ class TestUserProfileDeleteAuditLog:
         client = _make_client(storage_root)
         client.delete("/v1/user_profiles/user_missing")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "user_profile.delete.failed"
         )
         assert record["detail"]["user_profile_id"] == "user_missing"
@@ -614,7 +617,8 @@ class TestUserProfileDeleteAuditLog:
         client = _make_client(storage_root)
         client.delete("/v1/user_profiles/user_missing")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "user_profile.delete.failed"
         )
         assert len(record["detail"]["message"]) > 0
@@ -631,7 +635,8 @@ class TestUserProfileDeleteAuditLog:
         user_id = client.post("/v1/user_profiles", json=_body(username="alice")).json()["id"]
         client.delete(f"/v1/user_profiles/{user_id}")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "user_profile.delete.failed"
         )
         assert record["code"] == "user_profile_is_primary"
@@ -771,8 +776,16 @@ class TestUserProfileUpdateSuccess:
         client = _make_client(storage_root)
         user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
         body = client.patch(f"/v1/user_profiles/{user_id}", json={"display_name": "X"}).json()
-        for field in ("id", "username", "display_name", "capabilities", "memories",
-                      "is_primary", "created_at", "updated_at"):
+        for field in (
+            "id",
+            "username",
+            "display_name",
+            "capabilities",
+            "memories",
+            "is_primary",
+            "created_at",
+            "updated_at",
+        ):
             assert field in body
 
     def test_patch_empty_capabilities_clears_list(self, storage_root: Path) -> None:
@@ -829,9 +842,7 @@ class TestUserProfileUpdateValidation:
     def test_invalid_capability_returns_422(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
-        resp = client.patch(
-            f"/v1/user_profiles/{user_id}", json={"capabilities": ["NOT VALID"]}
-        )
+        resp = client.patch(f"/v1/user_profiles/{user_id}", json={"capabilities": ["NOT VALID"]})
         assert resp.status_code == 422
 
     def test_invalid_capability_error_code(self, storage_root: Path) -> None:
@@ -845,9 +856,7 @@ class TestUserProfileUpdateValidation:
     def test_invalid_capability_error_has_message(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
-        body = client.patch(
-            f"/v1/user_profiles/{user_id}", json={"capabilities": ["bad!"]}
-        ).json()
+        body = client.patch(f"/v1/user_profiles/{user_id}", json={"capabilities": ["bad!"]}).json()
         assert len(body["error"]["message"]) > 0
 
     def test_one_invalid_capability_in_list_returns_422(self, storage_root: Path) -> None:
@@ -862,9 +871,7 @@ class TestUserProfileUpdateValidation:
     def test_invalid_capability_does_not_update_profile(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
-        client.patch(
-            f"/v1/user_profiles/{user_id}", json={"capabilities": ["INVALID"]}
-        )
+        client.patch(f"/v1/user_profiles/{user_id}", json={"capabilities": ["INVALID"]})
         resource = _profile_resource(storage_root, user_id)
         assert resource["capabilities"] == []
 
@@ -882,16 +889,12 @@ class TestUserProfileUpdateNotFound:
 
     def test_not_found_error_code(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.patch(
-            "/v1/user_profiles/user_nonexistent", json={"display_name": "X"}
-        ).json()
+        body = client.patch("/v1/user_profiles/user_nonexistent", json={"display_name": "X"}).json()
         assert body["error"]["code"] == "user_profile_not_found"
 
     def test_not_found_error_has_message(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.patch(
-            "/v1/user_profiles/user_nonexistent", json={"display_name": "X"}
-        ).json()
+        body = client.patch("/v1/user_profiles/user_nonexistent", json={"display_name": "X"}).json()
         assert len(body["error"]["message"]) > 0
 
 
@@ -911,7 +914,8 @@ class TestUserProfileUpdateAuditLog:
         client = _make_client(storage_root)
         client.patch("/v1/user_profiles/user_missing", json={"display_name": "X"})
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "user_profile.update.failed"
         )
         assert record["level"] == "error"
@@ -920,7 +924,8 @@ class TestUserProfileUpdateAuditLog:
         client = _make_client(storage_root)
         client.patch("/v1/user_profiles/user_missing", json={"display_name": "X"})
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "user_profile.update.failed"
         )
         assert record["code"] == "user_profile_not_found"
@@ -929,7 +934,8 @@ class TestUserProfileUpdateAuditLog:
         client = _make_client(storage_root)
         client.patch("/v1/user_profiles/user_missing", json={"display_name": "X"})
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "user_profile.update.failed"
         )
         assert record["detail"]["user_profile_id"] == "user_missing"
@@ -938,7 +944,8 @@ class TestUserProfileUpdateAuditLog:
         client = _make_client(storage_root)
         client.patch("/v1/user_profiles/user_missing", json={"display_name": "X"})
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "user_profile.update.failed"
         )
         assert len(record["detail"]["message"]) > 0
@@ -955,7 +962,8 @@ class TestUserProfileUpdateAuditLog:
         user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
         client.patch(f"/v1/user_profiles/{user_id}", json={"capabilities": ["BAD CAP"]})
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "user_profile.update.failed"
         )
         assert record["code"] == "user_profile_invalid_request"
@@ -1111,7 +1119,14 @@ class TestUserProfileGetSuccess:
         client = _make_client(storage_root)
         user_id = client.post("/v1/user_profiles", json=_body()).json()["id"]
         body = client.get(f"/v1/user_profiles/{user_id}").json()
-        for field in ("id", "display_name", "is_primary", "memories", "capabilities", "channel_pairings"):
+        for field in (
+            "id",
+            "display_name",
+            "is_primary",
+            "memories",
+            "capabilities",
+            "channel_pairings",
+        ):
             assert field in body
 
     def test_get_reflects_patch_changes(self, storage_root: Path) -> None:
@@ -1160,8 +1175,7 @@ class TestUserProfileGetAuditLog:
         client = _make_client(storage_root)
         client.get("/v1/user_profiles/user_missing")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "user_profile.get.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "user_profile.get.failed"
         )
         assert record["level"] == "error"
 
@@ -1169,8 +1183,7 @@ class TestUserProfileGetAuditLog:
         client = _make_client(storage_root)
         client.get("/v1/user_profiles/user_missing")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "user_profile.get.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "user_profile.get.failed"
         )
         assert record["code"] == "user_profile_not_found"
 
@@ -1178,8 +1191,7 @@ class TestUserProfileGetAuditLog:
         client = _make_client(storage_root)
         client.get("/v1/user_profiles/user_missing")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "user_profile.get.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "user_profile.get.failed"
         )
         assert record["detail"]["user_profile_id"] == "user_missing"
 
@@ -1187,8 +1199,7 @@ class TestUserProfileGetAuditLog:
         client = _make_client(storage_root)
         client.get("/v1/user_profiles/user_missing")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "user_profile.get.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "user_profile.get.failed"
         )
         assert len(record["detail"]["message"]) > 0
 

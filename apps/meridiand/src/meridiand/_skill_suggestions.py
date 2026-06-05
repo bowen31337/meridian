@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
-import uuid
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -84,9 +84,7 @@ class SkillSuggestionConflictError(MeridianError):
 
 
 class SkillSuggestionEmitError(MeridianError):
-    def __init__(
-        self, *, message: str, timestamp: str, cause: BaseException | None = None
-    ) -> None:
+    def __init__(self, *, message: str, timestamp: str, cause: BaseException | None = None) -> None:
         super().__init__(
             code="skill_suggestion_emit_failed", message=message, timestamp=timestamp, cause=cause
         )
@@ -96,9 +94,7 @@ class SkillSuggestionEmitError(MeridianError):
 
 
 class SkillSuggestionApproveError(MeridianError):
-    def __init__(
-        self, *, message: str, timestamp: str, cause: BaseException | None = None
-    ) -> None:
+    def __init__(self, *, message: str, timestamp: str, cause: BaseException | None = None) -> None:
         super().__init__(
             code="skill_suggestion_approve_failed",
             message=message,
@@ -182,9 +178,7 @@ def make_skill_suggestions_router(*, audit_log: AuditLog, storage_root: Path) ->
     # ------------------------------------------------------------------
 
     @router.post("/v1/agents/{agent_id}/skill_suggestions", status_code=201)
-    async def emit_skill_suggestion(
-        agent_id: str, body: SkillSuggestionRequest
-    ) -> JSONResponse:
+    async def emit_skill_suggestion(agent_id: str, body: SkillSuggestionRequest) -> JSONResponse:
         now = _now()
         tracer = get_tracer()
         suggestion_id = f"skillsugg_{uuid.uuid4().hex}"
@@ -222,9 +216,7 @@ def make_skill_suggestions_router(*, audit_log: AuditLog, storage_root: Path) ->
                     )
 
                 agent_record: dict[str, Any] = json.loads(agent_path.read_text())
-                agent_config: dict[str, Any] = (
-                    agent_record.get("version", {}).get("config", {})
-                )
+                agent_config: dict[str, Any] = agent_record.get("version", {}).get("config", {})
                 activation_mode = agent_config.get("skill_activation_mode")
                 if activation_mode != _AUTO_SUGGEST_MODE:
                     raise SkillSuggestionModeError(
@@ -244,7 +236,10 @@ def make_skill_suggestions_router(*, audit_log: AuditLog, storage_root: Path) ->
                     )
 
                 existing_suggestion = _latest_suggestion(suggestions_dir, agent_id, body.skill_id)
-                if existing_suggestion is not None and existing_suggestion.get("status") == "suggested":
+                if (
+                    existing_suggestion is not None
+                    and existing_suggestion.get("status") == "suggested"
+                ):
                     raise SkillSuggestionConflictError(
                         message=(
                             f"Skill '{body.skill_id}' already has a pending suggestion"
@@ -346,7 +341,7 @@ def make_skill_suggestions_router(*, audit_log: AuditLog, storage_root: Path) ->
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=suggestion_record, status_code=201)
 
@@ -473,7 +468,7 @@ def make_skill_suggestions_router(*, audit_log: AuditLog, storage_root: Path) ->
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=suggestion, status_code=200)
 

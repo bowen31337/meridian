@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
-import uuid
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -64,9 +64,7 @@ class SkillActivationConflictError(MeridianError):
 
 
 class SkillActivationError(MeridianError):
-    def __init__(
-        self, *, message: str, timestamp: str, cause: BaseException | None = None
-    ) -> None:
+    def __init__(self, *, message: str, timestamp: str, cause: BaseException | None = None) -> None:
         super().__init__(
             code="skill_activation_failed", message=message, timestamp=timestamp, cause=cause
         )
@@ -76,9 +74,7 @@ class SkillActivationError(MeridianError):
 
 
 class SkillActivationApproveError(MeridianError):
-    def __init__(
-        self, *, message: str, timestamp: str, cause: BaseException | None = None
-    ) -> None:
+    def __init__(self, *, message: str, timestamp: str, cause: BaseException | None = None) -> None:
         super().__init__(
             code="skill_activation_approve_failed",
             message=message,
@@ -91,9 +87,7 @@ class SkillActivationApproveError(MeridianError):
 
 
 class SkillActivationRevokeError(MeridianError):
-    def __init__(
-        self, *, message: str, timestamp: str, cause: BaseException | None = None
-    ) -> None:
+    def __init__(self, *, message: str, timestamp: str, cause: BaseException | None = None) -> None:
         super().__init__(
             code="skill_activation_revoke_failed",
             message=message,
@@ -106,9 +100,7 @@ class SkillActivationRevokeError(MeridianError):
 
 
 class SkillActivationListError(MeridianError):
-    def __init__(
-        self, *, message: str, timestamp: str, cause: BaseException | None = None
-    ) -> None:
+    def __init__(self, *, message: str, timestamp: str, cause: BaseException | None = None) -> None:
         super().__init__(
             code="skill_activation_list_failed",
             message=message,
@@ -172,9 +164,7 @@ def make_skill_activations_router(*, audit_log: AuditLog, storage_root: Path) ->
     # ------------------------------------------------------------------
 
     @router.post("/v1/agents/{agent_id}/skills", status_code=201)
-    async def request_skill_activation(
-        agent_id: str, body: SkillActivationRequest
-    ) -> JSONResponse:
+    async def request_skill_activation(agent_id: str, body: SkillActivationRequest) -> JSONResponse:
         now = _now()
         tracer = get_tracer()
         activation_id = f"skillact_{uuid.uuid4().hex}"
@@ -299,7 +289,7 @@ def make_skill_activations_router(*, audit_log: AuditLog, storage_root: Path) ->
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=activation_record, status_code=201)
 
@@ -342,8 +332,7 @@ def make_skill_activations_router(*, audit_log: AuditLog, storage_root: Path) ->
                 if found.get("status") != "pending":
                     raise SkillActivationConflictError(
                         message=(
-                            f"Activation is not in 'pending' state"
-                            f" (current: {found.get('status')})"
+                            f"Activation is not in 'pending' state (current: {found.get('status')})"
                         ),
                         timestamp=now,
                     )
@@ -408,7 +397,7 @@ def make_skill_activations_router(*, audit_log: AuditLog, storage_root: Path) ->
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=activation, status_code=200)
 
@@ -516,7 +505,7 @@ def make_skill_activations_router(*, audit_log: AuditLog, storage_root: Path) ->
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=activation, status_code=200)
 
@@ -574,7 +563,7 @@ def make_skill_activations_router(*, audit_log: AuditLog, storage_root: Path) ->
                         detail={"agent_id": agent_id, "message": err.message},
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(
             content={"items": page, "total": total, "limit": limit, "offset": offset},

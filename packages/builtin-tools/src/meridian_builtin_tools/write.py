@@ -85,9 +85,7 @@ _OUTPUT_SCHEMA: dict[str, Any] = {
         },
         "created": {
             "type": "boolean",
-            "description": (
-                "True when the file was newly created; false when it was overwritten."
-            ),
+            "description": ("True when the file was newly created; false when it was overwritten."),
         },
     },
 }
@@ -119,23 +117,19 @@ def _resolve_safe(workspace: str, rel_path: str) -> Path:
                     sym_rel = str(current.relative_to(ws))
                 except ValueError:
                     sym_rel = str(current)
-                raise ValueError(
-                    f"Symlink {sym_rel!r} points outside workspace root"
-                )
+                raise ValueError(f"Symlink {sym_rel!r} points outside workspace root") from None
 
     # Final confinement check: resolved path (covers dotdot and other escapes).
     target = (ws / rel_path).resolve()
     try:
         target.relative_to(ws)
     except ValueError:
-        raise ValueError(f"Path {rel_path!r} resolves outside workspace root")
+        raise ValueError(f"Path {rel_path!r} resolves outside workspace root") from None
 
     return target
 
 
-def _record_invocation(
-    path: str, mode: str, bytes_written: int, created: bool
-) -> None:
+def _record_invocation(path: str, mode: str, bytes_written: int, created: bool) -> None:
     """Attach a ``write.invocation`` event to the active OTel span.
 
     Degrades gracefully when opentelemetry-api is not installed or no span is
@@ -194,8 +188,7 @@ async def write_tool(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     raw: bytes = content.encode(encoding)
     if len(raw) > _MAX_CONTENT_BYTES:
         raise ValueError(
-            f"Content exceeds maximum size of "
-            f"{_MAX_CONTENT_BYTES // (1024 * 1024)} MiB"
+            f"Content exceeds maximum size of {_MAX_CONTENT_BYTES // (1024 * 1024)} MiB"
         )
 
     target.parent.mkdir(parents=True, exist_ok=True)

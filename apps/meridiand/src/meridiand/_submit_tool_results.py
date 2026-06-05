@@ -120,9 +120,7 @@ def make_submit_tool_results_router(
     router = APIRouter()
 
     @router.post("/v1/sessions/{session_id}/submit_tool_results", status_code=202)
-    async def submit_tool_results(
-        session_id: str, body: SubmitToolResultsRequest
-    ) -> JSONResponse:
+    async def submit_tool_results(session_id: str, body: SubmitToolResultsRequest) -> JSONResponse:
         now = _now()
         tracer = get_tracer()
         _submit_counter.add(1, {"session.id": session_id})
@@ -256,7 +254,7 @@ def make_submit_tool_results_router(
                         },
                     )
                 )
-                raise err3
+                raise err3 from exc
 
         return JSONResponse(
             content={

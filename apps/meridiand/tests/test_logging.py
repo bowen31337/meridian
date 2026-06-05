@@ -41,13 +41,11 @@ Tests cover:
 
 from __future__ import annotations
 
+from datetime import datetime
 import json
 import logging
 import sys
-from datetime import UTC, datetime
 from typing import Any
-
-import pytest
 
 from core_errors import AuditLog, AuditLogEntry
 from meridiand._logging import (
@@ -56,7 +54,7 @@ from meridiand._logging import (
     configure_json_logging,
     emit_early_error,
 )
-
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -374,9 +372,7 @@ class TestConfigureJsonLogging:
         assert entry.detail is not None
         assert "cannot create handler" in entry.detail["message"]
 
-    def test_failure_without_audit_log_raises_only(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_failure_without_audit_log_raises_only(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def _bad(*args: Any, **kwargs: Any) -> None:
             raise OSError("cannot create handler")
 
@@ -450,5 +446,5 @@ class TestEmitEarlyError:
     def test_single_line_output(self, capsys: pytest.CaptureFixture[str]) -> None:
         emit_early_error("meridiand", "something failed")
         captured = capsys.readouterr()
-        lines = [l for l in captured.err.splitlines() if l.strip()]
+        lines = [line for line in captured.err.splitlines() if line.strip()]
         assert len(lines) == 1

@@ -68,7 +68,7 @@ def make_ui_router(*, audit_log: AuditLog, ui_dist_path: Path) -> APIRouter:
                         raise UiServeError(
                             message=f"Path traversal denied: {rel_path!r}",
                             timestamp=_now(),
-                        )
+                        ) from None
                     if candidate.is_file():
                         return FileResponse(candidate)
 
@@ -100,7 +100,7 @@ def make_ui_router(*, audit_log: AuditLog, ui_dist_path: Path) -> APIRouter:
                         detail={"path": rel_path, "message": err.message},
                     )
                 )
-                raise err
+                raise err from exc
 
     @router.get("/ui")
     async def get_ui_root() -> Response:

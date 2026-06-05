@@ -69,7 +69,7 @@ describe("recordApiInvocationEvent", () => {
       operation: "providers.list",
       timestamp: "2026-01-01T00:00:00.000Z",
     });
-    const attrs = span.addEvent.mock.calls[0]![1] as Record<string, unknown>;
+    const attrs = span.addEvent.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(attrs).not.toHaveProperty("session.id");
   });
 });
@@ -108,10 +108,15 @@ describe("recordApiFailure", () => {
   it("uses HTTP status code for ApiError in audit detail", () => {
     const span = makeSpan();
     const auditLog = makeAuditLog();
-    recordApiFailure(asSpan(span), new ApiError(404, { code: "NOT_FOUND", message: "not found" }), auditLog, {
-      operation: "sessions.get",
-      sessionId: "sess_y",
-    });
+    recordApiFailure(
+      asSpan(span),
+      new ApiError(404, { code: "NOT_FOUND", message: "not found" }),
+      auditLog,
+      {
+        operation: "sessions.get",
+        sessionId: "sess_y",
+      },
+    );
     expect(auditLog.entries[0]?.detail?.code).toBe("404");
   });
 

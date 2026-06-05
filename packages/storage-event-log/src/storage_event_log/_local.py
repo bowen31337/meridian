@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import json
 import os
-import time
-from datetime import UTC, datetime
 from pathlib import Path
+import time
 from typing import Any
 
 from ._contract import EventLogWriter

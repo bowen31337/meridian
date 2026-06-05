@@ -5,23 +5,36 @@ Tests cover:
   - Non-HTTP scope (websocket) is passed through without audit.
   - Requests to non-monitored routes are passed through without audit.
   - POST /v1/skills success (2xx) writes info-level audit entry with code capability_skill_create.
-  - POST /v1/skills failure (4xx/5xx) writes error-level audit entry with code capability_skill_create_failed.
-  - POST /v1/skills/install success writes info-level audit entry with code capability_skill_install.
-  - POST /v1/skills/install failure writes error-level audit entry with code capability_skill_install_failed.
-  - POST /v1/vaults/{id}/secrets success writes info-level audit entry with code vault_secret_store.
-  - POST /v1/vaults/{id}/secrets failure writes error-level audit entry with code vault_secret_store_failed.
-  - GET /v1/vaults/{id}/secrets/{name}/meta success writes info-level entry with code vault_secret_meta.
-  - GET /v1/vaults/{id}/secrets/{name}/meta failure writes error-level entry with code vault_secret_meta_failed.
+  - POST /v1/skills failure (4xx/5xx) writes error-level audit entry with code
+    capability_skill_create_failed.
+  - POST /v1/skills/install success writes info-level audit entry with code
+    capability_skill_install.
+  - POST /v1/skills/install failure writes error-level audit entry with code
+    capability_skill_install_failed.
+  - POST /v1/vaults/{id}/secrets success writes info-level audit entry with code
+    vault_secret_store.
+  - POST /v1/vaults/{id}/secrets failure writes error-level audit entry with code
+    vault_secret_store_failed.
+  - GET /v1/vaults/{id}/secrets/{name}/meta success writes info-level entry with code
+    vault_secret_meta.
+  - GET /v1/vaults/{id}/secrets/{name}/meta failure writes error-level entry with code
+    vault_secret_meta_failed.
   - POST /v1/channels/{id}/pair success writes info-level audit entry with code channel_pair.
-  - POST /v1/channels/{id}/pair failure writes error-level audit entry with code channel_pair_failed.
-  - POST /v1/agents/{id}/skills/{id}/approve success writes info-level entry with code skill_activation_approve.
-  - POST /v1/agents/{id}/skills/{id}/approve failure writes error-level entry with code skill_activation_approve_failed.
+  - POST /v1/channels/{id}/pair failure writes error-level audit entry with code
+    channel_pair_failed.
+  - POST /v1/agents/{id}/skills/{id}/approve success writes info-level entry with code
+    skill_activation_approve.
+  - POST /v1/agents/{id}/skills/{id}/approve failure writes error-level entry with code
+    skill_activation_approve_failed.
   - POST /v1/environments success writes info-level audit entry with code environment_create.
-  - POST /v1/environments failure writes error-level audit entry with code environment_create_failed.
+  - POST /v1/environments failure writes error-level audit entry with code
+    environment_create_failed.
   - PATCH /v1/environments/{id} success writes info-level entry with code environment_update.
-  - PATCH /v1/environments/{id} failure writes error-level entry with code environment_update_failed.
+  - PATCH /v1/environments/{id} failure writes error-level entry with code
+    environment_update_failed.
   - DELETE /v1/environments/{id} success writes info-level entry with code environment_delete.
-  - DELETE /v1/environments/{id} failure writes error-level entry with code environment_delete_failed.
+  - DELETE /v1/environments/{id} failure writes error-level entry with code
+    environment_delete_failed.
   - Audit entry detail includes path and method.
   - Uncaught exception from inner app writes error audit entry and re-raises.
   - Audit write failure when no response sent surfaces 500 error to caller.
@@ -33,18 +46,16 @@ Tests cover:
 
 from __future__ import annotations
 
+import contextlib
 import json
 from pathlib import Path
 from typing import Any
 
-import pytest
-from fastapi.testclient import TestClient
-
 from core_errors import AuditLog, AuditLogEntry, NoopAuditLog
+from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from meridiand._system_audit_middleware import SystemAuditMiddleware
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -114,10 +125,8 @@ async def _invoke(
 
     mw = SystemAuditMiddleware(inner_app, audit_log=middleware._audit_log)
 
-    try:
+    with contextlib.suppress(Exception):
         await mw(scope, receive, send)
-    except Exception:
-        pass
 
     captured_status = next(
         (m["status"] for m in messages if m.get("type") == "http.response.start"), None
@@ -347,41 +356,31 @@ class TestVaultAccesses:
     async def test_get_vault_secret_meta_success_code(self) -> None:
         audit = _CapturingAuditLog()
         mw = _make_middleware(audit)
-        await _invoke(
-            mw, method="GET", path="/v1/vaults/vault_abc/secrets/my_key/meta", status=200
-        )
+        await _invoke(mw, method="GET", path="/v1/vaults/vault_abc/secrets/my_key/meta", status=200)
         assert any(e.code == "vault_secret_meta" for e in audit.entries)
 
     async def test_get_vault_secret_meta_success_event(self) -> None:
         audit = _CapturingAuditLog()
         mw = _make_middleware(audit)
-        await _invoke(
-            mw, method="GET", path="/v1/vaults/vault_abc/secrets/my_key/meta", status=200
-        )
+        await _invoke(mw, method="GET", path="/v1/vaults/vault_abc/secrets/my_key/meta", status=200)
         assert any(e.event == "vault.access.secret.meta.read" for e in audit.entries)
 
     async def test_get_vault_secret_meta_failure_code(self) -> None:
         audit = _CapturingAuditLog()
         mw = _make_middleware(audit)
-        await _invoke(
-            mw, method="GET", path="/v1/vaults/vault_abc/secrets/my_key/meta", status=404
-        )
+        await _invoke(mw, method="GET", path="/v1/vaults/vault_abc/secrets/my_key/meta", status=404)
         assert any(e.code == "vault_secret_meta_failed" for e in audit.entries)
 
     async def test_get_vault_secret_meta_failure_event(self) -> None:
         audit = _CapturingAuditLog()
         mw = _make_middleware(audit)
-        await _invoke(
-            mw, method="GET", path="/v1/vaults/vault_abc/secrets/my_key/meta", status=404
-        )
+        await _invoke(mw, method="GET", path="/v1/vaults/vault_abc/secrets/my_key/meta", status=404)
         assert any(e.event == "vault.access.secret.meta.failed" for e in audit.entries)
 
     async def test_vault_id_with_underscores_matched(self) -> None:
         audit = _CapturingAuditLog()
         mw = _make_middleware(audit)
-        await _invoke(
-            mw, method="POST", path="/v1/vaults/vault_abc123def/secrets", status=201
-        )
+        await _invoke(mw, method="POST", path="/v1/vaults/vault_abc123def/secrets", status=201)
         assert any(e.code == "vault_secret_store" for e in audit.entries)
 
 
@@ -791,9 +790,7 @@ class TestEndToEnd:
         entry = next(e for e in entries if e.get("code") == "capability_skill_create")
         assert entry["level"] == "info"
 
-    def test_post_environments_failure_writes_error_audit_entry(
-        self, storage_root: Path
-    ) -> None:
+    def test_post_environments_failure_writes_error_audit_entry(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         client.post(
             "/v1/environments",
@@ -802,24 +799,18 @@ class TestEndToEnd:
         entries = _read_audit_log(storage_root)
         assert any(e.get("code") == "environment_create_failed" for e in entries)
 
-    def test_post_environments_failure_audit_level_is_error(
-        self, storage_root: Path
-    ) -> None:
+    def test_post_environments_failure_audit_level_is_error(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         client.post(
             "/v1/environments",
             json={"name": "", "backend": "docker"},
         )
         entries = _read_audit_log(storage_root)
-        entry = next(
-            (e for e in entries if e.get("code") == "environment_create_failed"), None
-        )
+        entry = next((e for e in entries if e.get("code") == "environment_create_failed"), None)
         assert entry is not None
         assert entry["level"] == "error"
 
-    def test_post_channel_pair_not_found_writes_error_entry(
-        self, storage_root: Path
-    ) -> None:
+    def test_post_channel_pair_not_found_writes_error_entry(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         client.post("/v1/channels/nonexistent_ch/pair", json={})
         entries = _read_audit_log(storage_root)

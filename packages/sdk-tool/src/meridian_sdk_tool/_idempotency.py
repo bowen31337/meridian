@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import threading
+from typing import TYPE_CHECKING
 
-from ._types import ToolResult
+if TYPE_CHECKING:
+    from ._types import ToolResult
 
 # In-process store keyed by (tool_name, idempotency_key).  Scoped to the
 # Sandbox worker process; long-lived retries across restarts rely on the

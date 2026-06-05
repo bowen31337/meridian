@@ -36,12 +36,16 @@ Tests cover:
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import AsyncIterator
+import json
 from pathlib import Path
 from typing import Any
 
-import pytest
+from meridian_sdk_provider.types import (
+    MessageStopEvent,
+    ModelCallOpts,
+    TextDeltaEvent,
+)
 from meridiand._audit import FileAuditLog
 from meridiand._cluster_extraction import (
     Cluster,
@@ -54,14 +58,9 @@ from meridiand._cluster_extraction import (
     _parse_response,
     extract_cluster,
 )
-from meridian_sdk_provider.types import (
-    MessageStopEvent,
-    ModelCallOpts,
-    TextDeltaEvent,
-)
+import pytest
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -324,7 +323,8 @@ class TestExtractClusterAudit:
             )
         )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.cluster.extracted"
         )
         assert record["level"] == "info"
@@ -339,7 +339,8 @@ class TestExtractClusterAudit:
             )
         )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.cluster.extracted"
         )
         assert record["detail"]["cluster_id"] == "cluster_audit"
@@ -354,7 +355,8 @@ class TestExtractClusterAudit:
             )
         )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.cluster.extracted"
         )
         assert record["detail"]["cluster_size"] == len(cluster.members)
@@ -369,7 +371,8 @@ class TestExtractClusterAudit:
             )
         )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.cluster.extracted"
         )
         assert record["detail"]["skill_name"] == "run_tests"
@@ -422,7 +425,8 @@ class TestExtractClusterAudit:
                 )
             )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.cluster.extract.failed"
         )
         assert record["level"] == "error"
@@ -438,7 +442,8 @@ class TestExtractClusterAudit:
                 )
             )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.cluster.extract.failed"
         )
         assert record["detail"]["cluster_id"] == "cluster_fail"
@@ -454,7 +459,8 @@ class TestExtractClusterAudit:
                 )
             )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.cluster.extract.failed"
         )
         assert "message" in record["detail"] and record["detail"]["message"]
@@ -504,9 +510,7 @@ class TestExtractClusterRouterOpts:
         )
         assert router.last_opts is not None
         msg = router.last_opts.messages[0]
-        assert str(len(cluster.members)) in (
-            msg.content if isinstance(msg.content, str) else ""
-        )
+        assert str(len(cluster.members)) in (msg.content if isinstance(msg.content, str) else "")
 
     def test_user_message_includes_tool_calls(self, storage_root: Path) -> None:
         cluster = _make_cluster(
@@ -571,9 +575,7 @@ class TestBuildUserMessage:
         assert str(len(cluster.members)) in msg
 
     def test_contains_session_id(self) -> None:
-        cluster = _make_cluster(
-            members=[ClusterMember(session_id="sess_unique", tool_calls=[])]
-        )
+        cluster = _make_cluster(members=[ClusterMember(session_id="sess_unique", tool_calls=[])])
         msg = _build_user_message(cluster)
         assert "sess_unique" in msg
 
@@ -586,9 +588,7 @@ class TestBuildUserMessage:
         assert "Glob" in msg
 
     def test_empty_tool_calls_shows_none(self) -> None:
-        cluster = _make_cluster(
-            members=[ClusterMember(session_id="s1", tool_calls=[])]
-        )
+        cluster = _make_cluster(members=[ClusterMember(session_id="s1", tool_calls=[])])
         msg = _build_user_message(cluster)
         assert "(none)" in msg
 

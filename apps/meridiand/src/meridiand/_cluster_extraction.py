@@ -8,9 +8,9 @@ and writes the failure to the audit log before re-raising.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+import json
 from typing import Any
 
 from core_errors import (
@@ -268,4 +268,4 @@ async def extract_cluster(
                     },
                 )
             )
-            raise err
+            raise err from exc

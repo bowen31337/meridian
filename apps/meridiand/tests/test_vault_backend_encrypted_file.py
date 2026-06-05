@@ -30,10 +30,10 @@ Tests cover:
 
 from __future__ import annotations
 
+import contextlib
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
@@ -41,6 +41,7 @@ from meridiand._vault_backend_encrypted_file import (
     EncryptedFileVaultBackend,
     VaultBackendUnlockError,
 )
+import pytest
 
 from tests._otel_shared import otel_exporter as _otel_exporter
 
@@ -89,9 +90,7 @@ def _create_vault(client: TestClient, **overrides) -> dict:
 
 
 def _store_secret(client: TestClient, vault_id: str, **overrides) -> dict:
-    return client.post(
-        f"/v1/vaults/{vault_id}/secrets", json=_secret_body(**overrides)
-    ).json()
+    return client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(**overrides)).json()
 
 
 def _audit_records(storage_root: Path) -> list[dict]:
@@ -166,18 +165,14 @@ class TestUnlockKeyFile:
         backend.unlock_with_key_file(key_file)
         assert backend.is_unlocked
 
-    def test_key_file_emits_unlock_span(
-        self, storage_root: Path, tmp_path: Path
-    ) -> None:
+    def test_key_file_emits_unlock_span(self, storage_root: Path, tmp_path: Path) -> None:
         key_file = _make_age_key_file(tmp_path)
         backend = EncryptedFileVaultBackend(storage_root)
         backend.unlock_with_key_file(key_file)
         span_names = [s.name for s in _otel_exporter.get_finished_spans()]
         assert "vault.backend.unlock" in span_names
 
-    def test_key_file_span_has_auth_attribute(
-        self, storage_root: Path, tmp_path: Path
-    ) -> None:
+    def test_key_file_span_has_auth_attribute(self, storage_root: Path, tmp_path: Path) -> None:
         key_file = _make_age_key_file(tmp_path)
         backend = EncryptedFileVaultBackend(storage_root)
         backend.unlock_with_key_file(key_file)
@@ -185,9 +180,7 @@ class TestUnlockKeyFile:
         span = spans["vault.backend.unlock"]
         assert span.attributes["vault.backend.auth"] == "key_file"
 
-    def test_invalid_key_file_raises_unlock_error(
-        self, storage_root: Path, tmp_path: Path
-    ) -> None:
+    def test_invalid_key_file_raises_unlock_error(self, storage_root: Path, tmp_path: Path) -> None:
         bad_key = tmp_path / "bad.key"
         bad_key.write_text("not-a-valid-age-key\n")
         backend = EncryptedFileVaultBackend(storage_root)
@@ -202,10 +195,8 @@ class TestUnlockKeyFile:
         bad_key = tmp_path / "bad.key"
         bad_key.write_text("not-a-valid-age-key\n")
         backend = EncryptedFileVaultBackend(storage_root)
-        try:
+        with contextlib.suppress(VaultBackendUnlockError):
             backend.unlock_with_key_file(bad_key)
-        except VaultBackendUnlockError:
-            pass
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
         span = spans.get("vault.backend.unlock")
         assert span is not None
@@ -277,9 +268,7 @@ class TestBackendOperations:
         assert refreshed["last_accessed_at"] == "2024-06-01T12:00:00+00:00"
         assert refreshed["requester_counts"] == {"127.0.0.1": 1}
 
-    def test_roundtrip_with_new_backend_instance(
-        self, storage_root: Path
-    ) -> None:
+    def test_roundtrip_with_new_backend_instance(self, storage_root: Path) -> None:
         # Simulate daemon restart: create a new backend instance with the same passphrase.
         b1 = _make_backend(storage_root)
         b1.store_secret("vault_persist", "key1", "value1", "2024-01-01T00:00:00+00:00")
@@ -339,9 +328,7 @@ class TestApiEncryptedFileBackendStore:
         client = _make_client(storage_root)
         vault_id = _create_vault(client)["id"]
         client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="dup2"))
-        body = client.post(
-            f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="dup2")
-        ).json()
+        body = client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="dup2")).json()
         assert body["error"]["code"] == "vault_secret_conflict"
 
     def test_value_not_in_age_file(self, storage_root: Path) -> None:
@@ -455,9 +442,7 @@ class TestApiBackendNotConfigured:
     def test_store_without_backend_error_code(self, storage_root: Path) -> None:
         client = _make_client(storage_root, with_backend=False)
         vault_id = _create_vault(client)["id"]
-        body = client.post(
-            f"/v1/vaults/{vault_id}/secrets", json=_secret_body()
-        ).json()
+        body = client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body()).json()
         assert body["error"]["code"] == "vault_secret_store_failed"
 
     def test_store_without_backend_writes_audit(self, storage_root: Path) -> None:

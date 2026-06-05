@@ -1,11 +1,6 @@
-import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type {
-  Agent,
-  ForgeProposal,
-  Skill,
-  SkillActivation,
-} from "../api/client.js";
+import { useEffect, useRef, useState } from "react";
+import type { Agent, ForgeProposal, Skill, SkillActivation } from "../api/client.js";
 import { createApiClient } from "../api/client.js";
 import { useMeridianApi } from "../api/context.js";
 import { queryKeys } from "../api/query-keys.js";
@@ -27,7 +22,7 @@ function useListSkillVersions(skillId: string | null) {
   const { baseUrl } = useMeridianApi();
   return useQuery({
     queryKey: queryKeys.skills.versions(skillId ?? ""),
-    queryFn: () => createApiClient(baseUrl).listSkillVersions(skillId!),
+    queryFn: () => createApiClient(baseUrl).listSkillVersions(skillId ?? ""),
     enabled: skillId !== null,
   });
 }
@@ -64,10 +59,7 @@ function useListForgeProposals() {
 // AgentActivationRow
 // ---------------------------------------------------------------------------
 
-function findLatestActivation(
-  items: SkillActivation[],
-  skillId: string,
-): SkillActivation | null {
+function findLatestActivation(items: SkillActivation[], skillId: string): SkillActivation | null {
   const matches = items
     .filter((a) => a.skill_id === skillId)
     .sort((a, b) => b.requested_at.localeCompare(a.requested_at));
@@ -95,8 +87,7 @@ function AgentActivationRow({
   }
 
   const requestMutation = useMutation({
-    mutationFn: () =>
-      createApiClient(baseUrl).requestSkillActivation(agent.id, skillId),
+    mutationFn: () => createApiClient(baseUrl).requestSkillActivation(agent.id, skillId),
     onSuccess: invalidate,
     onError: (err) => {
       const message = err instanceof Error ? err.message : "Request failed";
@@ -111,8 +102,7 @@ function AgentActivationRow({
   });
 
   const approveMutation = useMutation({
-    mutationFn: () =>
-      createApiClient(baseUrl).approveSkillActivation(agent.id, skillId),
+    mutationFn: () => createApiClient(baseUrl).approveSkillActivation(agent.id, skillId),
     onSuccess: invalidate,
     onError: (err) => {
       const message = err instanceof Error ? err.message : "Approve failed";
@@ -127,8 +117,7 @@ function AgentActivationRow({
   });
 
   const revokeMutation = useMutation({
-    mutationFn: () =>
-      createApiClient(baseUrl).revokeSkillActivation(agent.id, skillId),
+    mutationFn: () => createApiClient(baseUrl).revokeSkillActivation(agent.id, skillId),
     onSuccess: invalidate,
     onError: (err) => {
       const message = err instanceof Error ? err.message : "Revoke failed";
@@ -142,8 +131,7 @@ function AgentActivationRow({
     },
   });
 
-  const mutationError =
-    requestMutation.error ?? approveMutation.error ?? revokeMutation.error;
+  const mutationError = requestMutation.error ?? approveMutation.error ?? revokeMutation.error;
 
   if (isLoading) {
     return (
@@ -160,13 +148,12 @@ function AgentActivationRow({
       <td>
         {mutationError && (
           <span role="alert" data-testid={`activation-error-${agent.id}`}>
-            {mutationError instanceof Error
-              ? mutationError.message
-              : "Action failed"}
+            {mutationError instanceof Error ? mutationError.message : "Action failed"}
           </span>
         )}
         {status === null && (
           <button
+            type="button"
             onClick={() => requestMutation.mutate()}
             data-testid={`request-activation-${agent.id}`}
           >
@@ -176,12 +163,14 @@ function AgentActivationRow({
         {status === "pending" && (
           <>
             <button
+              type="button"
               onClick={() => approveMutation.mutate()}
               data-testid={`approve-activation-${agent.id}`}
             >
               Approve
             </button>{" "}
             <button
+              type="button"
               onClick={() => revokeMutation.mutate()}
               data-testid={`revoke-activation-${agent.id}`}
             >
@@ -191,6 +180,7 @@ function AgentActivationRow({
         )}
         {status === "active" && (
           <button
+            type="button"
             onClick={() => revokeMutation.mutate()}
             data-testid={`revoke-activation-${agent.id}`}
           >
@@ -199,6 +189,7 @@ function AgentActivationRow({
         )}
         {status === "revoked" && (
           <button
+            type="button"
             onClick={() => requestMutation.mutate()}
             data-testid={`request-activation-${agent.id}`}
           >
@@ -233,8 +224,7 @@ function SkillDetailPanel({ skill }: { skill: Skill }) {
 
   useEffect(() => {
     if (!versionsError || !versionsErr) return;
-    const message =
-      versionsErr instanceof Error ? versionsErr.message : "Failed to load versions";
+    const message = versionsErr instanceof Error ? versionsErr.message : "Failed to load versions";
     auditLog.write({
       level: "error",
       event: "skill_registry.versions.load.failed",
@@ -246,8 +236,7 @@ function SkillDetailPanel({ skill }: { skill: Skill }) {
 
   useEffect(() => {
     if (!agentsError || !agentsErr) return;
-    const message =
-      agentsErr instanceof Error ? agentsErr.message : "Failed to load agents";
+    const message = agentsErr instanceof Error ? agentsErr.message : "Failed to load agents";
     auditLog.write({
       level: "error",
       event: "skill_registry.agents.load.failed",
@@ -262,18 +251,14 @@ function SkillDetailPanel({ skill }: { skill: Skill }) {
 
   return (
     <section data-testid="skill-detail-panel">
-      <h2>
-        {skill.name} — Details
-      </h2>
+      <h2>{skill.name} — Details</h2>
 
       <h3>Version History</h3>
       {versionsLoading ? (
         <p data-testid="versions-loading">Loading versions…</p>
       ) : versionsError ? (
         <p role="alert" data-testid="versions-error">
-          {versionsErr instanceof Error
-            ? versionsErr.message
-            : "Failed to load versions"}
+          {versionsErr instanceof Error ? versionsErr.message : "Failed to load versions"}
         </p>
       ) : versions.length === 0 ? (
         <p data-testid="versions-empty">No versions found.</p>
@@ -307,9 +292,7 @@ function SkillDetailPanel({ skill }: { skill: Skill }) {
         <p data-testid="agents-loading">Loading agents…</p>
       ) : agentsError ? (
         <p role="alert" data-testid="agents-error">
-          {agentsErr instanceof Error
-            ? agentsErr.message
-            : "Failed to load agents"}
+          {agentsErr instanceof Error ? agentsErr.message : "Failed to load agents"}
         </p>
       ) : agents.length === 0 ? (
         <p data-testid="agents-empty">No agents configured.</p>
@@ -324,11 +307,7 @@ function SkillDetailPanel({ skill }: { skill: Skill }) {
           </thead>
           <tbody>
             {agents.map((agent) => (
-              <AgentActivationRow
-                key={agent.id}
-                agent={agent}
-                skillId={skill.id}
-              />
+              <AgentActivationRow key={agent.id} agent={agent} skillId={skill.id} />
             ))}
           </tbody>
         </table>
@@ -354,8 +333,7 @@ function InstalledSkillsPanel({
 
   useEffect(() => {
     if (!isError || !error) return;
-    const message =
-      error instanceof Error ? error.message : "Failed to load skills";
+    const message = error instanceof Error ? error.message : "Failed to load skills";
     auditLog.write({
       level: "error",
       event: "skill_registry.load.failed",
@@ -390,8 +368,7 @@ function InstalledSkillsPanel({
   }
 
   if (isError) {
-    const msg =
-      error instanceof Error ? error.message : "Failed to load skills";
+    const msg = error instanceof Error ? error.message : "Failed to load skills";
     return (
       <p role="alert" data-testid="skills-error">
         {msg}
@@ -405,8 +382,7 @@ function InstalledSkillsPanel({
     return <p data-testid="skills-empty">No skills installed.</p>;
   }
 
-  const selectedSkill =
-    skills.find((s) => s.id === selectedSkillId) ?? null;
+  const selectedSkill = skills.find((s) => s.id === selectedSkillId) ?? null;
 
   return (
     <div data-testid="installed-skills-panel">
@@ -430,6 +406,7 @@ function InstalledSkillsPanel({
             >
               <td>
                 <button
+                  type="button"
                   onClick={() => onSelectSkill(skill.id)}
                   data-testid={`skill-select-${skill.id}`}
                   aria-expanded={skill.id === selectedSkillId}
@@ -490,22 +467,27 @@ function ProposalRow({
               data-testid={`reject-reason-${proposal.id}`}
             />
             <button
+              type="button"
               onClick={handleRejectSubmit}
               data-testid={`confirm-reject-${proposal.id}`}
             >
               Confirm
             </button>{" "}
-            <button onClick={() => setRejectMode(false)}>Cancel</button>
+            <button type="button" onClick={() => setRejectMode(false)}>
+              Cancel
+            </button>
           </span>
         ) : (
           <>
             <button
+              type="button"
               onClick={onApprove}
               data-testid={`approve-proposal-${proposal.id}`}
             >
               Approve
             </button>{" "}
             <button
+              type="button"
               onClick={() => setRejectMode(true)}
               data-testid={`reject-proposal-${proposal.id}`}
             >
@@ -529,8 +511,7 @@ function ForgeProposalsPanel() {
 
   useEffect(() => {
     if (!isError || !error) return;
-    const message =
-      error instanceof Error ? error.message : "Failed to load forge proposals";
+    const message = error instanceof Error ? error.message : "Failed to load forge proposals";
     auditLog.write({
       level: "error",
       event: "skill_registry.forge_proposals.load.failed",
@@ -541,8 +522,7 @@ function ForgeProposalsPanel() {
   }, [isError, error, auditLog]);
 
   const approveMutation = useMutation({
-    mutationFn: (proposalId: string) =>
-      createApiClient(baseUrl).approveForgeProposal(proposalId),
+    mutationFn: (proposalId: string) => createApiClient(baseUrl).approveForgeProposal(proposalId),
     onSuccess: () =>
       queryClient.invalidateQueries({
         queryKey: queryKeys.forgeProposals.list(),
@@ -583,8 +563,7 @@ function ForgeProposalsPanel() {
   }
 
   if (isError) {
-    const msg =
-      error instanceof Error ? error.message : "Failed to load proposals";
+    const msg = error instanceof Error ? error.message : "Failed to load proposals";
     return (
       <p role="alert" data-testid="proposals-error">
         {msg}
@@ -604,9 +583,7 @@ function ForgeProposalsPanel() {
     <div data-testid="proposals-panel">
       {actionError && (
         <p role="alert" data-testid="proposals-action-error">
-          {actionError instanceof Error
-            ? actionError.message
-            : "Action failed"}
+          {actionError instanceof Error ? actionError.message : "Action failed"}
         </p>
       )}
       <table data-testid="proposals-table">
@@ -625,9 +602,7 @@ function ForgeProposalsPanel() {
               key={proposal.id}
               proposal={proposal}
               onApprove={() => approveMutation.mutate(proposal.id)}
-              onReject={(reason) =>
-                rejectMutation.mutate({ proposalId: proposal.id, reason })
-              }
+              onReject={(reason) => rejectMutation.mutate({ proposalId: proposal.id, reason })}
             />
           ))}
         </tbody>
@@ -653,6 +628,7 @@ export function SkillsPage() {
       <h1>Skills</h1>
       <nav data-testid="skills-tabs">
         <button
+          type="button"
           onClick={() => setActiveTab("skills")}
           aria-pressed={activeTab === "skills"}
           data-testid="tab-installed"
@@ -660,6 +636,7 @@ export function SkillsPage() {
           Installed
         </button>{" "}
         <button
+          type="button"
           onClick={() => setActiveTab("proposals")}
           aria-pressed={activeTab === "proposals"}
           data-testid="tab-proposals"
@@ -668,10 +645,7 @@ export function SkillsPage() {
         </button>
       </nav>
       {activeTab === "skills" ? (
-        <InstalledSkillsPanel
-          selectedSkillId={selectedSkillId}
-          onSelectSkill={handleSelectSkill}
-        />
+        <InstalledSkillsPanel selectedSkillId={selectedSkillId} onSelectSkill={handleSelectSkill} />
       ) : (
         <ForgeProposalsPanel />
       )}

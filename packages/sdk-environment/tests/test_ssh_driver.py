@@ -274,23 +274,30 @@ class TestProvision:
         assert driver._connections["env1"] is conn
 
     async def test_asyncssh_unavailable_raises(self) -> None:
-        with patch("sdk_environment._ssh_driver._ASYNCSSH_AVAILABLE", False):
-            with pytest.raises(RuntimeError, match="asyncssh"):
-                await _driver().provision(_provision_req())
+        with (
+            patch("sdk_environment._ssh_driver._ASYNCSSH_AVAILABLE", False),
+            pytest.raises(RuntimeError, match="asyncssh"),
+        ):
+            await _driver().provision(_provision_req())
 
     async def test_connection_failure_propagates(self) -> None:
-        with patch(
-            "sdk_environment._ssh_driver._asyncssh.connect",
-            AsyncMock(side_effect=OSError("connection refused")),
+        with (
+            patch(
+                "sdk_environment._ssh_driver._asyncssh.connect",
+                AsyncMock(side_effect=OSError("connection refused")),
+            ),
+            pytest.raises(OSError, match="connection refused"),
         ):
-            with pytest.raises(OSError, match="connection refused"):
-                await _driver().provision(_provision_req())
+            await _driver().provision(_provision_req())
 
     async def test_mkdir_failure_raises(self) -> None:
         conn = _make_conn(run_result=_make_ssh_result(stderr="permission denied", exit_status=1))
-        with _patch_asyncssh(conn), _patch_rsync(_make_rsync_proc()):
-            with pytest.raises(RuntimeError, match="scratch directory"):
-                await _driver().provision(_provision_req())
+        with (
+            _patch_asyncssh(conn),
+            _patch_rsync(_make_rsync_proc()),
+            pytest.raises(RuntimeError, match="scratch directory"),
+        ):
+            await _driver().provision(_provision_req())
 
 
 # ---------------------------------------------------------------------------
@@ -307,8 +314,8 @@ class TestExecute:
         conn = _make_conn()
         conn.run = AsyncMock(
             side_effect=[
-                _make_ssh_result(),              # provision mkdir
-                _make_ssh_result(stdout="hi"),   # execute
+                _make_ssh_result(),  # provision mkdir
+                _make_ssh_result(stdout="hi"),  # execute
             ]
         )
         with _patch_asyncssh(conn), _patch_rsync(_make_rsync_proc()):
@@ -361,9 +368,7 @@ class TestExecute:
 
     async def test_duration_ms_is_positive_float(self) -> None:
         conn = _make_conn()
-        conn.run = AsyncMock(
-            side_effect=[_make_ssh_result(), _make_ssh_result()]
-        )
+        conn.run = AsyncMock(side_effect=[_make_ssh_result(), _make_ssh_result()])
         with _patch_asyncssh(conn), _patch_rsync(_make_rsync_proc()):
             driver = _driver()
             await driver.provision(_provision_req())
@@ -400,9 +405,7 @@ class TestExecute:
 
     async def test_command_sent_to_remote(self) -> None:
         conn = _make_conn()
-        conn.run = AsyncMock(
-            side_effect=[_make_ssh_result(), _make_ssh_result()]
-        )
+        conn.run = AsyncMock(side_effect=[_make_ssh_result(), _make_ssh_result()])
         with _patch_asyncssh(conn), _patch_rsync(_make_rsync_proc()):
             driver = _driver()
             await driver.provision(_provision_req())
@@ -414,9 +417,7 @@ class TestExecute:
 
     async def test_command_run_in_remote_scratch_dir(self) -> None:
         conn = _make_conn()
-        conn.run = AsyncMock(
-            side_effect=[_make_ssh_result(), _make_ssh_result()]
-        )
+        conn.run = AsyncMock(side_effect=[_make_ssh_result(), _make_ssh_result()])
         with _patch_asyncssh(conn), _patch_rsync(_make_rsync_proc()):
             driver = _driver()
             await driver.provision(_provision_req())
@@ -427,9 +428,7 @@ class TestExecute:
 
     async def test_env_vars_exported_in_command(self) -> None:
         conn = _make_conn()
-        conn.run = AsyncMock(
-            side_effect=[_make_ssh_result(), _make_ssh_result()]
-        )
+        conn.run = AsyncMock(side_effect=[_make_ssh_result(), _make_ssh_result()])
         with _patch_asyncssh(conn), _patch_rsync(_make_rsync_proc()):
             driver = _driver()
             await driver.provision(_provision_req())
@@ -441,9 +440,7 @@ class TestExecute:
 
     async def test_stdin_forwarded(self) -> None:
         conn = _make_conn()
-        conn.run = AsyncMock(
-            side_effect=[_make_ssh_result(), _make_ssh_result()]
-        )
+        conn.run = AsyncMock(side_effect=[_make_ssh_result(), _make_ssh_result()])
         with _patch_asyncssh(conn), _patch_rsync(_make_rsync_proc()):
             driver = _driver()
             await driver.provision(_provision_req())
@@ -453,9 +450,7 @@ class TestExecute:
 
     async def test_none_stdin_becomes_empty_string(self) -> None:
         conn = _make_conn()
-        conn.run = AsyncMock(
-            side_effect=[_make_ssh_result(), _make_ssh_result()]
-        )
+        conn.run = AsyncMock(side_effect=[_make_ssh_result(), _make_ssh_result()])
         with _patch_asyncssh(conn), _patch_rsync(_make_rsync_proc()):
             driver = _driver()
             await driver.provision(_provision_req())
@@ -465,9 +460,7 @@ class TestExecute:
 
     async def test_rsync_invoked_before_command(self) -> None:
         conn = _make_conn()
-        conn.run = AsyncMock(
-            side_effect=[_make_ssh_result(), _make_ssh_result()]
-        )
+        conn.run = AsyncMock(side_effect=[_make_ssh_result(), _make_ssh_result()])
         call_order: list[str] = []
         rsync_proc = _make_rsync_proc()
 
@@ -483,37 +476,39 @@ class TestExecute:
 
         conn.run = _tracked_run
 
-        with _patch_asyncssh(conn):
-            with patch(
+        with (
+            _patch_asyncssh(conn),
+            patch(
                 "sdk_environment._ssh_driver.asyncio.create_subprocess_exec",
                 side_effect=_fake_exec,
-            ):
-                driver = _driver()
-                await driver.provision(_provision_req())
-                call_order.clear()
-                await driver.execute(_execute_req())
+            ),
+        ):
+            driver = _driver()
+            await driver.provision(_provision_req())
+            call_order.clear()
+            await driver.execute(_execute_req())
 
         assert call_order.index("rsync") < call_order.index("ssh_run")
 
     async def test_rsync_uses_known_hosts(self) -> None:
         conn = _make_conn()
-        conn.run = AsyncMock(
-            side_effect=[_make_ssh_result(), _make_ssh_result()]
-        )
+        conn.run = AsyncMock(side_effect=[_make_ssh_result(), _make_ssh_result()])
         captured_cmd: list[str] = []
 
         async def _capture_exec(*args: Any, **kwargs: Any) -> MagicMock:
             captured_cmd.extend(args)
             return _make_rsync_proc()
 
-        with _patch_asyncssh(conn):
-            with patch(
+        with (
+            _patch_asyncssh(conn),
+            patch(
                 "sdk_environment._ssh_driver.asyncio.create_subprocess_exec",
                 side_effect=_capture_exec,
-            ):
-                driver = _driver()
-                await driver.provision(_provision_req())
-                await driver.execute(_execute_req())
+            ),
+        ):
+            driver = _driver()
+            await driver.provision(_provision_req())
+            await driver.execute(_execute_req())
 
         ssh_e_arg = " ".join(captured_cmd)
         assert "UserKnownHostsFile" in ssh_e_arg
@@ -523,7 +518,10 @@ class TestExecute:
     async def test_rsync_failure_raises(self) -> None:
         conn = _make_conn()
         conn.run = AsyncMock(return_value=_make_ssh_result())
-        with _patch_asyncssh(conn), _patch_rsync(_make_rsync_proc(returncode=1, stderr=b"no such file")):
+        with (
+            _patch_asyncssh(conn),
+            _patch_rsync(_make_rsync_proc(returncode=1, stderr=b"no such file")),
+        ):
             driver = _driver()
             await driver.provision(_provision_req())
             with pytest.raises(RuntimeError, match="rsync failed"):
@@ -531,9 +529,7 @@ class TestExecute:
 
     async def test_timeout_seconds_used_from_request(self) -> None:
         conn = _make_conn()
-        conn.run = AsyncMock(
-            side_effect=[_make_ssh_result(), _make_ssh_result()]
-        )
+        conn.run = AsyncMock(side_effect=[_make_ssh_result(), _make_ssh_result()])
         with _patch_asyncssh(conn), _patch_rsync(_make_rsync_proc()):
             driver = _driver(timeout_s=99.0)
             await driver.provision(_provision_req())
@@ -547,12 +543,14 @@ class TestExecute:
         with _patch_asyncssh(conn), _patch_rsync(_make_rsync_proc()):
             driver = _driver(timeout_s=0.001)
             await driver.provision(_provision_req())
-            with patch(
-                "sdk_environment._ssh_driver.asyncio.wait_for",
-                AsyncMock(side_effect=asyncio.TimeoutError()),
+            with (
+                patch(
+                    "sdk_environment._ssh_driver.asyncio.wait_for",
+                    AsyncMock(side_effect=TimeoutError()),
+                ),
+                pytest.raises(asyncio.TimeoutError),
             ):
-                with pytest.raises(asyncio.TimeoutError):
-                    await driver.execute(_execute_req())
+                await driver.execute(_execute_req())
 
 
 # ---------------------------------------------------------------------------
@@ -563,9 +561,7 @@ class TestExecute:
 class TestReclaim:
     async def test_closes_connection(self) -> None:
         conn = _make_conn()
-        conn.run = AsyncMock(
-            side_effect=[_make_ssh_result(), _make_ssh_result()]
-        )
+        conn.run = AsyncMock(side_effect=[_make_ssh_result(), _make_ssh_result()])
         with _patch_asyncssh(conn), _patch_rsync(_make_rsync_proc()):
             driver = _driver()
             await driver.provision(_provision_req())
@@ -574,9 +570,7 @@ class TestReclaim:
 
     async def test_removes_remote_scratch_dir(self) -> None:
         conn = _make_conn()
-        conn.run = AsyncMock(
-            side_effect=[_make_ssh_result(), _make_ssh_result()]
-        )
+        conn.run = AsyncMock(side_effect=[_make_ssh_result(), _make_ssh_result()])
         with _patch_asyncssh(conn), _patch_rsync(_make_rsync_proc()):
             driver = _driver()
             await driver.provision(_provision_req())
@@ -587,9 +581,7 @@ class TestReclaim:
 
     async def test_removes_connection_from_pool(self) -> None:
         conn = _make_conn()
-        conn.run = AsyncMock(
-            side_effect=[_make_ssh_result(), _make_ssh_result()]
-        )
+        conn.run = AsyncMock(side_effect=[_make_ssh_result(), _make_ssh_result()])
         with _patch_asyncssh(conn), _patch_rsync(_make_rsync_proc()):
             driver = _driver()
             await driver.provision(_provision_req())
@@ -602,9 +594,7 @@ class TestReclaim:
 
     async def test_closes_connection_even_if_rm_fails(self) -> None:
         conn = _make_conn()
-        conn.run = AsyncMock(
-            side_effect=[_make_ssh_result(), RuntimeError("rm failed")]
-        )
+        conn.run = AsyncMock(side_effect=[_make_ssh_result(), RuntimeError("rm failed")])
         with _patch_asyncssh(conn), _patch_rsync(_make_rsync_proc()):
             driver = _driver()
             await driver.provision(_provision_req())
@@ -624,13 +614,16 @@ class TestAuthentication:
         key_file.write_text("---BEGIN---\nfake_pem\n---END---\n")
         conn = _make_conn()
 
-        with _patch_asyncssh(conn) as mock_connect, _patch_rsync(_make_rsync_proc()):
-            with patch(
+        with (
+            _patch_asyncssh(conn) as mock_connect,
+            _patch_rsync(_make_rsync_proc()),
+            patch(
                 "sdk_environment._ssh_driver._asyncssh.import_private_key",
                 return_value="imported_key",
-            ):
-                driver = _driver(private_key_path=str(key_file))
-                await driver.provision(_provision_req())
+            ),
+        ):
+            driver = _driver(private_key_path=str(key_file))
+            await driver.provision(_provision_req())
 
         kwargs = mock_connect.call_args.kwargs
         assert "client_keys" in kwargs
@@ -641,13 +634,16 @@ class TestAuthentication:
         vault = MagicMock()
         vault.get_secret.return_value = {"value": "vault_pem"}
 
-        with _patch_asyncssh(conn) as mock_connect, _patch_rsync(_make_rsync_proc()):
-            with patch(
+        with (
+            _patch_asyncssh(conn) as mock_connect,
+            _patch_rsync(_make_rsync_proc()),
+            patch(
                 "sdk_environment._ssh_driver._asyncssh.import_private_key",
                 return_value="vault_key",
-            ) as mock_import:
-                driver = _driver(vault=vault, vault_id="vid", secret_name="key")
-                await driver.provision(_provision_req())
+            ) as mock_import,
+        ):
+            driver = _driver(vault=vault, vault_id="vid", secret_name="key")
+            await driver.provision(_provision_req())
 
         mock_import.assert_called_once_with("vault_pem")
         kwargs = mock_connect.call_args.kwargs
@@ -661,18 +657,21 @@ class TestAuthentication:
         vault.get_secret.return_value = {"value": "vault_pem"}
         imported_keys: list[str] = []
 
-        with _patch_asyncssh(conn), _patch_rsync(_make_rsync_proc()):
-            with patch(
+        with (
+            _patch_asyncssh(conn),
+            _patch_rsync(_make_rsync_proc()),
+            patch(
                 "sdk_environment._ssh_driver._asyncssh.import_private_key",
                 side_effect=lambda pem: imported_keys.append(pem) or pem,
-            ):
-                driver = _driver(
-                    vault=vault,
-                    vault_id="vid",
-                    secret_name="key",
-                    private_key_path=str(key_file),
-                )
-                await driver.provision(_provision_req())
+            ),
+        ):
+            driver = _driver(
+                vault=vault,
+                vault_id="vid",
+                secret_name="key",
+                private_key_path=str(key_file),
+            )
+            await driver.provision(_provision_req())
 
         # Only the vault PEM should have been imported
         assert imported_keys == ["vault_pem"]
@@ -686,28 +685,28 @@ class TestAuthentication:
 
     async def test_rsync_uses_private_key_path(self) -> None:
         conn = _make_conn()
-        conn.run = AsyncMock(
-            side_effect=[_make_ssh_result(), _make_ssh_result()]
-        )
+        conn.run = AsyncMock(side_effect=[_make_ssh_result(), _make_ssh_result()])
         captured_cmd: list[str] = []
 
         async def _capture_exec(*args: Any, **kwargs: Any) -> MagicMock:
             captured_cmd.extend(args)
             return _make_rsync_proc()
 
-        with _patch_asyncssh(conn):
-            with patch(
+        with (
+            _patch_asyncssh(conn),
+            patch(
                 "sdk_environment._ssh_driver.asyncio.create_subprocess_exec",
                 side_effect=_capture_exec,
-            ):
-                with patch("builtins.open", mock_open(read_data="fake_pem")):
-                    with patch(
-                        "sdk_environment._ssh_driver._asyncssh.import_private_key",
-                        return_value="imported",
-                    ):
-                        driver = _driver(private_key_path="/home/user/.ssh/id_rsa")
-                        await driver.provision(_provision_req())
-                        await driver.execute(_execute_req())
+            ),
+            patch("builtins.open", mock_open(read_data="fake_pem")),
+            patch(
+                "sdk_environment._ssh_driver._asyncssh.import_private_key",
+                return_value="imported",
+            ),
+        ):
+            driver = _driver(private_key_path="/home/user/.ssh/id_rsa")
+            await driver.provision(_provision_req())
+            await driver.execute(_execute_req())
 
         ssh_e_arg = " ".join(captured_cmd)
         assert "/home/user/.ssh/id_rsa" in ssh_e_arg
@@ -720,25 +719,23 @@ class TestAuthentication:
 
 
 class TestRsyncSshOptions:
-    async def _capture_rsync_cmd(
-        self, driver: SshBackendDriver, conn: MagicMock
-    ) -> list[str]:
-        conn.run = AsyncMock(
-            side_effect=[_make_ssh_result(), _make_ssh_result()]
-        )
+    async def _capture_rsync_cmd(self, driver: SshBackendDriver, conn: MagicMock) -> list[str]:
+        conn.run = AsyncMock(side_effect=[_make_ssh_result(), _make_ssh_result()])
         captured: list[str] = []
 
         async def _capture_exec(*args: Any, **kwargs: Any) -> MagicMock:
             captured.extend(args)
             return _make_rsync_proc()
 
-        with _patch_asyncssh(conn):
-            with patch(
+        with (
+            _patch_asyncssh(conn),
+            patch(
                 "sdk_environment._ssh_driver.asyncio.create_subprocess_exec",
                 side_effect=_capture_exec,
-            ):
-                await driver.provision(_provision_req())
-                await driver.execute(_execute_req())
+            ),
+        ):
+            await driver.provision(_provision_req())
+            await driver.execute(_execute_req())
 
         return captured
 
@@ -763,14 +760,16 @@ class TestRsyncSshOptions:
             captured.extend(args)
             return _make_rsync_proc()
 
-        with _patch_asyncssh(conn):
-            with patch(
+        with (
+            _patch_asyncssh(conn),
+            patch(
                 "sdk_environment._ssh_driver.asyncio.create_subprocess_exec",
                 side_effect=_capture_exec,
-            ):
-                driver = _driver(rsync_binary="/usr/local/bin/rsync")
-                await driver.provision(_provision_req())
-                await driver.execute(_execute_req())
+            ),
+        ):
+            driver = _driver(rsync_binary="/usr/local/bin/rsync")
+            await driver.provision(_provision_req())
+            await driver.execute(_execute_req())
 
         assert captured[0] == "/usr/local/bin/rsync"
 
@@ -793,9 +792,9 @@ class TestRuntimeIntegration:
         conn = _make_conn()
         conn.run = AsyncMock(
             side_effect=[
-                _make_ssh_result(),                      # provision mkdir
-                _make_ssh_result(stdout="ok"),           # execute
-                _make_ssh_result(),                      # reclaim rm
+                _make_ssh_result(),  # provision mkdir
+                _make_ssh_result(stdout="ok"),  # execute
+                _make_ssh_result(),  # reclaim rm
             ]
         )
         driver = _driver()
@@ -871,9 +870,7 @@ class TestRuntimeIntegration:
         self, mock_span: MockSpan, audit_log: CapturingAuditLog
     ) -> None:
         conn = _make_conn()
-        conn.run = AsyncMock(
-            side_effect=[_make_ssh_result(), _make_ssh_result()]
-        )
+        conn.run = AsyncMock(side_effect=[_make_ssh_result(), _make_ssh_result()])
         driver = _driver()
         rt = EnvironmentRuntime()
         rt.register(driver)
@@ -892,7 +889,7 @@ class TestRuntimeIntegration:
         conn = _make_conn()
         conn.run = AsyncMock(
             side_effect=[
-                _make_ssh_result(),              # provision mkdir
+                _make_ssh_result(),  # provision mkdir
                 RuntimeError("rm: permission denied"),  # reclaim rm
             ]
         )

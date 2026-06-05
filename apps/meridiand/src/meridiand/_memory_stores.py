@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
-import uuid
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any, Literal
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -17,8 +17,6 @@ from core_errors import (
 )
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-
 from meridian_kb_indexer import Chunk
 from meridian_sdk_provider import (
     Message,
@@ -26,8 +24,8 @@ from meridian_sdk_provider import (
     ModelRouter,
     TextDeltaEvent,
 )
-
-from storage_event_log import EventLogRuntime, EventLogWriter
+from pydantic import BaseModel
+from storage_event_log import EventLogRuntime
 
 from ._kb import KbStore
 
@@ -62,9 +60,7 @@ class MemoryStoreCreateError(MeridianError):
 
 class MemoryStoreInvalidRequestError(MeridianError):
     def __init__(self, *, message: str, timestamp: str) -> None:
-        super().__init__(
-            code="memory_store_invalid_request", message=message, timestamp=timestamp
-        )
+        super().__init__(code="memory_store_invalid_request", message=message, timestamp=timestamp)
 
     def http_status(self) -> int:
         return 422
@@ -72,9 +68,7 @@ class MemoryStoreInvalidRequestError(MeridianError):
 
 class MemoryStoreNotFoundError(MeridianError):
     def __init__(self, *, message: str, timestamp: str) -> None:
-        super().__init__(
-            code="memory_store_not_found", message=message, timestamp=timestamp
-        )
+        super().__init__(code="memory_store_not_found", message=message, timestamp=timestamp)
 
     def http_status(self) -> int:
         return 404
@@ -263,8 +257,7 @@ async def _classify_memory(
         )
 
     candidate_lines = "\n".join(
-        f"{i + 1}. [key={c['file_path']!r}]: {c['content']}"
-        for i, c in enumerate(candidates)
+        f"{i + 1}. [key={c['file_path']!r}]: {c['content']}" for i, c in enumerate(candidates)
     )
     user_text = (
         f"New memory (key: {incoming_key!r}):\n{incoming_content}\n\n"
@@ -395,7 +388,7 @@ def make_memory_stores_router(
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=store_record, status_code=201)
 
@@ -479,7 +472,7 @@ def make_memory_stores_router(
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(
             content={
@@ -557,7 +550,7 @@ def make_memory_stores_router(
                             message=f"Memory dialectic classification failed: {exc}",
                             timestamp=_now(),
                             cause=exc,
-                        )
+                        ) from exc
 
                     dialectic_label = result.label
                     dialectic_match_key = result.match_key
@@ -574,13 +567,15 @@ def make_memory_stores_router(
                         kb_store.upsert_chunks(
                             body.key,
                             scope,
-                            [Chunk(
-                                file_path=body.key,
-                                kind="text",
-                                content=effective_content,
-                                start_line=0,
-                                end_line=0,
-                            )],
+                            [
+                                Chunk(
+                                    file_path=body.key,
+                                    kind="text",
+                                    content=effective_content,
+                                    start_line=0,
+                                    end_line=0,
+                                )
+                            ],
                         )
                         action = "merged"
 
@@ -589,24 +584,28 @@ def make_memory_stores_router(
                         kb_store.upsert_chunks(
                             body.key,
                             scope,
-                            [Chunk(
-                                file_path=body.key,
-                                kind="text",
-                                content=effective_content,
-                                start_line=0,
-                                end_line=0,
-                            )],
+                            [
+                                Chunk(
+                                    file_path=body.key,
+                                    kind="text",
+                                    content=effective_content,
+                                    start_line=0,
+                                    end_line=0,
+                                )
+                            ],
                         )
                         # Provenance edge: record what was superseded.
                         prov_dir = stores_dir / store_id / "provenance"
                         prov_dir.mkdir(parents=True, exist_ok=True)
                         (prov_dir / f"{body.key}.json").write_text(
-                            json.dumps({
-                                "key": body.key,
-                                "superseded_at": now,
-                                "superseded_match_key": result.match_key,
-                                "explanation": result.explanation,
-                            })
+                            json.dumps(
+                                {
+                                    "key": body.key,
+                                    "superseded_at": now,
+                                    "superseded_match_key": result.match_key,
+                                    "explanation": result.explanation,
+                                }
+                            )
                         )
                         action = "superseded"
 
@@ -616,13 +615,15 @@ def make_memory_stores_router(
                         kb_store.upsert_chunks(
                             body.key,
                             scope,
-                            [Chunk(
-                                file_path=body.key,
-                                kind="text",
-                                content=effective_content,
-                                start_line=0,
-                                end_line=0,
-                            )],
+                            [
+                                Chunk(
+                                    file_path=body.key,
+                                    kind="text",
+                                    content=effective_content,
+                                    start_line=0,
+                                    end_line=0,
+                                )
+                            ],
                         )
                         action = "updated" if was_present else "inserted"
 
@@ -633,13 +634,15 @@ def make_memory_stores_router(
                     kb_store.upsert_chunks(
                         body.key,
                         scope,
-                        [Chunk(
-                            file_path=body.key,
-                            kind="text",
-                            content=effective_content,
-                            start_line=0,
-                            end_line=0,
-                        )],
+                        [
+                            Chunk(
+                                file_path=body.key,
+                                kind="text",
+                                content=effective_content,
+                                start_line=0,
+                                end_line=0,
+                            )
+                        ],
                     )
                     action = "updated" if was_present else "inserted"
 
@@ -677,7 +680,7 @@ def make_memory_stores_router(
                                 },
                             )
                         )
-                        raise err3
+                        raise err3 from exc
 
             except MemoryStoreNotFoundError as err:
                 record_error(span, err)
@@ -733,7 +736,7 @@ def make_memory_stores_router(
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(
             content={

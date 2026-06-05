@@ -2,13 +2,8 @@
 # Audit log
 from ._audit import AuditLog, NoopAuditLog
 
-# Secret-ref substitution
-from ._secret_refs import (
-    SecretRefNotFoundError,
-    SecretRefResolveError,
-    SecretRefVaultNotFoundError,
-    substitute_secret_refs,
-)
+# Contract
+from ._contract import ToolDispatcher
 
 # Dispatchers
 from ._dispatchers import (
@@ -18,10 +13,6 @@ from ._dispatchers import (
     McpDispatcher,
     SubprocessDispatcher,
 )
-from .fake import FakeSandboxAdapter, write_sandbox_fixture
-
-# Contract
-from ._contract import ToolDispatcher
 
 # MCP client — tool discovery and stdio transport utilities
 from ._mcp_client import (
@@ -33,6 +24,14 @@ from ._mcp_client import (
 
 # Runtime
 from ._runtime import RuntimeOptions, Sandbox, default_sandbox
+
+# Secret-ref substitution
+from ._secret_refs import (
+    SecretRefNotFoundError,
+    SecretRefResolveError,
+    SecretRefVaultNotFoundError,
+    substitute_secret_refs,
+)
 
 # Telemetry
 from ._telemetry import (
@@ -63,6 +62,7 @@ from ._types import (
 
 # Version
 from ._version import SANDBOX_SDK_VERSION
+from .fake import FakeSandboxAdapter, write_sandbox_fixture
 
 __all__ = [
     # Types

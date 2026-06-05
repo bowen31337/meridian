@@ -254,12 +254,8 @@ def _sync_search(
 
         # 3. Glob scope filter applied to both candidate lists
         if scope:
-            bm25_rows = [
-                r for r in bm25_rows if _scope_matches(r["file_path"], scope, workspace)
-            ]
-            vec_rows = [
-                r for r in vec_rows if _scope_matches(r["file_path"], scope, workspace)
-            ]
+            bm25_rows = [r for r in bm25_rows if _scope_matches(r["file_path"], scope, workspace)]
+            vec_rows = [r for r in vec_rows if _scope_matches(r["file_path"], scope, workspace)]
 
         # 4. Hybrid RRF when vector results are present; BM25-only otherwise
         if vec_rows:

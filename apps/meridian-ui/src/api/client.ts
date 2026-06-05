@@ -119,7 +119,11 @@ export interface AgentVersion {
   instructions: string;
   model_routing: Record<string, unknown>;
   skills: string[];
-  tools: Array<{ name: string; description?: string | null; input_schema?: Record<string, unknown> | null }>;
+  tools: Array<{
+    name: string;
+    description?: string | null;
+    input_schema?: Record<string, unknown> | null;
+  }>;
   default_environment_id: string | null;
   hooks: string[];
   budgets: Record<string, unknown>;
@@ -279,7 +283,10 @@ export interface ApiClient {
 export function createApiClient(baseUrl: string): ApiClient {
   return {
     listSessions: (params) =>
-      request<SessionList>(baseUrl, `/sessions${toQuery(params as Record<string, number | undefined>)}`),
+      request<SessionList>(
+        baseUrl,
+        `/sessions${toQuery(params as Record<string, number | undefined>)}`,
+      ),
     createSession: (body) =>
       request<Session>(baseUrl, "/sessions", {
         method: "POST",
@@ -330,8 +337,7 @@ export function createApiClient(baseUrl: string): ApiClient {
         `/v1/agents/${encodeURIComponent(agentId)}/skills/${encodeURIComponent(skillId)}`,
         { method: "DELETE" },
       ),
-    listForgeProposals: () =>
-      request<ForgeProposalList>(baseUrl, "/v1/x/skill_forge/proposals"),
+    listForgeProposals: () => request<ForgeProposalList>(baseUrl, "/v1/x/skill_forge/proposals"),
     approveForgeProposal: (proposalId) =>
       request<SkillVersion>(
         baseUrl,

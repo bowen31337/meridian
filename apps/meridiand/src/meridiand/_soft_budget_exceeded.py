@@ -139,7 +139,9 @@ def make_soft_budget_exceeded_router(
                 raise
             except Exception as exc:
                 err = SoftBudgetExceededSessionError(
-                    message=f"Soft budget exceeded handling failed for session {session_id!r}: {exc}",
+                    message=(
+                        f"Soft budget exceeded handling failed for session {session_id!r}: {exc}"
+                    ),
                     timestamp=_now(),
                     cause=exc,
                 )
@@ -156,7 +158,7 @@ def make_soft_budget_exceeded_router(
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(
             content={

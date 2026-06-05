@@ -86,6 +86,6 @@ def make_readyz_router(*, audit_log: AuditLog, state: ReadyzState) -> APIRouter:
                         detail={"message": err.message},
                     )
                 )
-                raise err
+                raise err from exc
 
     return router

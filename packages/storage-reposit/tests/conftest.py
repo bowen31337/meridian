@@ -6,8 +6,8 @@ OTel is mocked with a lightweight MockSpan / MockTracer pair.
 
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import AsyncIterator
+import sqlite3
 from typing import Any
 
 import pytest

@@ -20,11 +20,12 @@ never escalates beyond those declared capabilities.
 from __future__ import annotations
 
 import asyncio
-import json
-import uuid
+import contextlib
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -56,9 +57,7 @@ class CronFireError(MeridianError):
         timestamp: str,
         cause: BaseException | None = None,
     ) -> None:
-        super().__init__(
-            code="cron_fire_failed", message=message, timestamp=timestamp, cause=cause
-        )
+        super().__init__(code="cron_fire_failed", message=message, timestamp=timestamp, cause=cause)
 
     def http_status(self) -> int:
         return 500
@@ -163,7 +162,7 @@ async def fire_cron_trigger(
                     },
                 )
             )
-            raise err
+            raise err from exc
 
     return fire_id
 
@@ -237,12 +236,9 @@ async def run_cron_scheduler_loop(
 
                 if trigger_type == "timestamp":
                     # One-shot trigger: always fire when the time arrives.
-                    try:
-                        await fire_cron_trigger(
-                            resource, fires_dir=fires_dir, audit_log=audit_log
-                        )
-                    except CronFireError:
-                        pass  # already logged inside fire_cron_trigger
+                    # CronFireError is already logged inside fire_cron_trigger.
+                    with contextlib.suppress(CronFireError):
+                        await fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log)
                     resource["status"] = "fired"
                     resource["fired_at"] = now_dt.isoformat()
                     resource["next_fire_at"] = None
@@ -256,24 +252,19 @@ async def run_cron_scheduler_loop(
                         continue  # malformed interval; skip silently
 
                     # Always fire for the current due slot.
-                    try:
-                        await fire_cron_trigger(
-                            resource, fires_dir=fires_dir, audit_log=audit_log
-                        )
-                    except CronFireError:
-                        pass  # already logged inside fire_cron_trigger
+                    # CronFireError is already logged inside fire_cron_trigger.
+                    with contextlib.suppress(CronFireError):
+                        await fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log)
 
                     new_next = next_fire_dt + delta
 
                     if policy == "catch_up":
                         # Fire for every additionally missed slot.
                         while new_next <= now_dt:
-                            try:
+                            with contextlib.suppress(CronFireError):
                                 await fire_cron_trigger(
                                     resource, fires_dir=fires_dir, audit_log=audit_log
                                 )
-                            except CronFireError:
-                                pass
                             new_next += delta
                     else:
                         # Skip missed slots; advance to the next future slot.

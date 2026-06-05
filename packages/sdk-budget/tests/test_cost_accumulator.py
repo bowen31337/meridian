@@ -37,24 +37,19 @@ Covers:
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import MagicMock
 
-import pytest
-from core_errors import AuditLog, AuditLogEntry
 from opentelemetry.trace import StatusCode
-
+import pytest
 from sdk_budget import (
     CostAccumulator,
     CostAccumulatorError,
     CostAccumulatorOptions,
-    ModelPricing,
     PriceBook,
     ScopeCounters,
 )
 
 from .conftest import CapturingAuditLog, MockSpan
-
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers
@@ -165,60 +160,127 @@ class TestSpanAndInvocationEvent:
 class TestCounterAccumulation:
     def test_accumulates_input_tokens(self, mock_span: MockSpan) -> None:
         acc = make_accumulator()
-        acc.accumulate(scope="session", scope_id="s1", provider="openai", model="gpt-4o",
-                       prompt_tokens=100, completion_tokens=0)
-        result = acc.accumulate(scope="session", scope_id="s1", provider="openai", model="gpt-4o",
-                                prompt_tokens=200, completion_tokens=0)
+        acc.accumulate(
+            scope="session",
+            scope_id="s1",
+            provider="openai",
+            model="gpt-4o",
+            prompt_tokens=100,
+            completion_tokens=0,
+        )
+        result = acc.accumulate(
+            scope="session",
+            scope_id="s1",
+            provider="openai",
+            model="gpt-4o",
+            prompt_tokens=200,
+            completion_tokens=0,
+        )
         assert result.input_tokens == 300
 
     def test_accumulates_output_tokens(self, mock_span: MockSpan) -> None:
         acc = make_accumulator()
-        acc.accumulate(scope="session", scope_id="s1", provider="openai", model="gpt-4o",
-                       prompt_tokens=0, completion_tokens=50)
-        result = acc.accumulate(scope="session", scope_id="s1", provider="openai", model="gpt-4o",
-                                prompt_tokens=0, completion_tokens=75)
+        acc.accumulate(
+            scope="session",
+            scope_id="s1",
+            provider="openai",
+            model="gpt-4o",
+            prompt_tokens=0,
+            completion_tokens=50,
+        )
+        result = acc.accumulate(
+            scope="session",
+            scope_id="s1",
+            provider="openai",
+            model="gpt-4o",
+            prompt_tokens=0,
+            completion_tokens=75,
+        )
         assert result.output_tokens == 125
 
     def test_accumulates_cache_tokens(self, mock_span: MockSpan) -> None:
         acc = make_accumulator()
-        acc.accumulate(scope="session", scope_id="s1", provider="openai", model="gpt-4o",
-                       prompt_tokens=0, completion_tokens=0,
-                       cache_creation_tokens=100, cache_read_tokens=50)
-        result = acc.accumulate(scope="session", scope_id="s1", provider="openai", model="gpt-4o",
-                                prompt_tokens=0, completion_tokens=0,
-                                cache_creation_tokens=200, cache_read_tokens=25)
+        acc.accumulate(
+            scope="session",
+            scope_id="s1",
+            provider="openai",
+            model="gpt-4o",
+            prompt_tokens=0,
+            completion_tokens=0,
+            cache_creation_tokens=100,
+            cache_read_tokens=50,
+        )
+        result = acc.accumulate(
+            scope="session",
+            scope_id="s1",
+            provider="openai",
+            model="gpt-4o",
+            prompt_tokens=0,
+            completion_tokens=0,
+            cache_creation_tokens=200,
+            cache_read_tokens=25,
+        )
         assert result.cache_tokens == 375
 
     def test_accumulates_dollars(self, mock_span: MockSpan) -> None:
         acc = make_accumulator()
         # call 1: 1000 prompt → $2.50
-        acc.accumulate(scope="session", scope_id="s1", provider="openai", model="gpt-4o",
-                       prompt_tokens=1000, completion_tokens=0)
+        acc.accumulate(
+            scope="session",
+            scope_id="s1",
+            provider="openai",
+            model="gpt-4o",
+            prompt_tokens=1000,
+            completion_tokens=0,
+        )
         # call 2: 500 completion → $5.00
-        result = acc.accumulate(scope="session", scope_id="s1", provider="openai", model="gpt-4o",
-                                prompt_tokens=0, completion_tokens=500)
+        result = acc.accumulate(
+            scope="session",
+            scope_id="s1",
+            provider="openai",
+            model="gpt-4o",
+            prompt_tokens=0,
+            completion_tokens=500,
+        )
         assert result.dollars == pytest.approx(7.50)
 
     def test_returns_updated_snapshot(self, mock_span: MockSpan) -> None:
         acc = make_accumulator()
-        result = acc.accumulate(scope="run", scope_id="r1", provider="openai", model="gpt-4o",
-                                prompt_tokens=100, completion_tokens=50)
+        result = acc.accumulate(
+            scope="run",
+            scope_id="r1",
+            provider="openai",
+            model="gpt-4o",
+            prompt_tokens=100,
+            completion_tokens=50,
+        )
         assert isinstance(result, ScopeCounters)
         assert result.input_tokens == 100
         assert result.output_tokens == 50
 
     def test_unknown_provider_model_yields_zero_dollars(self, mock_span: MockSpan) -> None:
         acc = make_accumulator()
-        result = acc.accumulate(scope="session", scope_id="s1",
-                                provider="mystery", model="unknown",
-                                prompt_tokens=1_000_000, completion_tokens=1_000_000)
+        result = acc.accumulate(
+            scope="session",
+            scope_id="s1",
+            provider="mystery",
+            model="unknown",
+            prompt_tokens=1_000_000,
+            completion_tokens=1_000_000,
+        )
         assert result.dollars == 0.0
         assert result.input_tokens == 1_000_000
 
     def test_cache_tokens_default_to_zero(self, mock_span: MockSpan) -> None:
         acc = make_accumulator()
-        result = acc.accumulate(scope="session", scope_id="s1", provider="openai", model="gpt-4o",
-                                prompt_tokens=0, completion_tokens=0)
+        result = acc.accumulate(
+            scope="session",
+            scope_id="s1",
+            provider="openai",
+            model="gpt-4o",
+            prompt_tokens=0,
+            completion_tokens=0,
+        )
         assert result.cache_tokens == 0
 
 
@@ -230,20 +292,50 @@ class TestCounterAccumulation:
 class TestScopeIsolation:
     def test_different_scope_ids_tracked_independently(self, mock_span: MockSpan) -> None:
         acc = make_accumulator()
-        acc.accumulate(scope="session", scope_id="s1", provider="openai", model="gpt-4o",
-                       prompt_tokens=100, completion_tokens=0)
-        result_s2 = acc.accumulate(scope="session", scope_id="s2", provider="openai", model="gpt-4o",
-                                   prompt_tokens=200, completion_tokens=0)
+        acc.accumulate(
+            scope="session",
+            scope_id="s1",
+            provider="openai",
+            model="gpt-4o",
+            prompt_tokens=100,
+            completion_tokens=0,
+        )
+        result_s2 = acc.accumulate(
+            scope="session",
+            scope_id="s2",
+            provider="openai",
+            model="gpt-4o",
+            prompt_tokens=200,
+            completion_tokens=0,
+        )
         assert result_s2.input_tokens == 200
 
     def test_agent_session_run_scopes_independent(self, mock_span: MockSpan) -> None:
         acc = make_accumulator()
-        acc.accumulate(scope="agent", scope_id="id1", provider="openai", model="gpt-4o",
-                       prompt_tokens=10, completion_tokens=0)
-        acc.accumulate(scope="session", scope_id="id1", provider="openai", model="gpt-4o",
-                       prompt_tokens=20, completion_tokens=0)
-        acc.accumulate(scope="run", scope_id="id1", provider="openai", model="gpt-4o",
-                       prompt_tokens=30, completion_tokens=0)
+        acc.accumulate(
+            scope="agent",
+            scope_id="id1",
+            provider="openai",
+            model="gpt-4o",
+            prompt_tokens=10,
+            completion_tokens=0,
+        )
+        acc.accumulate(
+            scope="session",
+            scope_id="id1",
+            provider="openai",
+            model="gpt-4o",
+            prompt_tokens=20,
+            completion_tokens=0,
+        )
+        acc.accumulate(
+            scope="run",
+            scope_id="id1",
+            provider="openai",
+            model="gpt-4o",
+            prompt_tokens=30,
+            completion_tokens=0,
+        )
         assert acc.snapshot("agent", "id1").input_tokens == 10
         assert acc.snapshot("session", "id1").input_tokens == 20
         assert acc.snapshot("run", "id1").input_tokens == 30
@@ -285,16 +377,28 @@ class TestSnapshot:
 
     def test_reflects_accumulated_state(self, mock_span: MockSpan) -> None:
         acc = make_accumulator()
-        acc.accumulate(scope="session", scope_id="s1", provider="openai", model="gpt-4o",
-                       prompt_tokens=500, completion_tokens=250)
+        acc.accumulate(
+            scope="session",
+            scope_id="s1",
+            provider="openai",
+            model="gpt-4o",
+            prompt_tokens=500,
+            completion_tokens=250,
+        )
         snap = acc.snapshot("session", "s1")
         assert snap.input_tokens == 500
         assert snap.output_tokens == 250
 
     def test_returns_copy_mutations_do_not_affect_state(self, mock_span: MockSpan) -> None:
         acc = make_accumulator()
-        acc.accumulate(scope="session", scope_id="s1", provider="openai", model="gpt-4o",
-                       prompt_tokens=100, completion_tokens=0)
+        acc.accumulate(
+            scope="session",
+            scope_id="s1",
+            provider="openai",
+            model="gpt-4o",
+            prompt_tokens=100,
+            completion_tokens=0,
+        )
         snap = acc.snapshot("session", "s1")
         snap.input_tokens = 9999
         assert acc.snapshot("session", "s1").input_tokens == 100
@@ -314,37 +418,71 @@ class TestFailurePath:
     def test_raises_cost_accumulator_error(self, mock_span: MockSpan) -> None:
         acc = CostAccumulator(self._broken_price_book())
         with pytest.raises(CostAccumulatorError):
-            acc.accumulate(scope="session", scope_id="s1", provider="openai", model="gpt-4o",
-                           prompt_tokens=100, completion_tokens=0)
+            acc.accumulate(
+                scope="session",
+                scope_id="s1",
+                provider="openai",
+                model="gpt-4o",
+                prompt_tokens=100,
+                completion_tokens=0,
+            )
 
     def test_error_code_is_cost_accumulate_error(self, mock_span: MockSpan) -> None:
         acc = CostAccumulator(self._broken_price_book())
         with pytest.raises(CostAccumulatorError) as exc_info:
-            acc.accumulate(scope="session", scope_id="s1", provider="openai", model="gpt-4o",
-                           prompt_tokens=100, completion_tokens=0)
+            acc.accumulate(
+                scope="session",
+                scope_id="s1",
+                provider="openai",
+                model="gpt-4o",
+                prompt_tokens=100,
+                completion_tokens=0,
+            )
         assert exc_info.value.code == "cost_accumulate_error"
 
     def test_span_marked_error_on_failure(self, mock_span: MockSpan) -> None:
         acc = CostAccumulator(self._broken_price_book())
         with pytest.raises(CostAccumulatorError):
-            acc.accumulate(scope="session", scope_id="s1", provider="openai", model="gpt-4o",
-                           prompt_tokens=100, completion_tokens=0)
+            acc.accumulate(
+                scope="session",
+                scope_id="s1",
+                provider="openai",
+                model="gpt-4o",
+                prompt_tokens=100,
+                completion_tokens=0,
+            )
         assert mock_span.status is not None
         assert mock_span.status.status_code == StatusCode.ERROR
 
     def test_failure_event_attached_on_failure(self, mock_span: MockSpan) -> None:
         acc = CostAccumulator(self._broken_price_book())
         with pytest.raises(CostAccumulatorError):
-            acc.accumulate(scope="session", scope_id="s1", provider="openai", model="gpt-4o",
-                           prompt_tokens=100, completion_tokens=0)
+            acc.accumulate(
+                scope="session",
+                scope_id="s1",
+                provider="openai",
+                model="gpt-4o",
+                prompt_tokens=100,
+                completion_tokens=0,
+            )
         failure_events = [e for e in mock_span.events if e[0] == "cost.accumulate.failure"]
         assert len(failure_events) == 1
 
-    def test_audit_log_written_on_failure(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
-        acc = CostAccumulator(self._broken_price_book(), CostAccumulatorOptions(audit_log=audit_log))
+    def test_audit_log_written_on_failure(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
+        acc = CostAccumulator(
+            self._broken_price_book(), CostAccumulatorOptions(audit_log=audit_log)
+        )
         with pytest.raises(CostAccumulatorError):
-            acc.accumulate(scope="session", scope_id="s1", provider="openai", model="gpt-4o",
-                           prompt_tokens=100, completion_tokens=0)
+            acc.accumulate(
+                scope="session",
+                scope_id="s1",
+                provider="openai",
+                model="gpt-4o",
+                prompt_tokens=100,
+                completion_tokens=0,
+            )
         assert len(audit_log.entries) == 1
         entry = audit_log.entries[0]
         assert entry.level == "error"
@@ -354,8 +492,14 @@ class TestFailurePath:
     def test_span_ends_on_failure(self, mock_span: MockSpan) -> None:
         acc = CostAccumulator(self._broken_price_book())
         with pytest.raises(CostAccumulatorError):
-            acc.accumulate(scope="session", scope_id="s1", provider="openai", model="gpt-4o",
-                           prompt_tokens=100, completion_tokens=0)
+            acc.accumulate(
+                scope="session",
+                scope_id="s1",
+                provider="openai",
+                model="gpt-4o",
+                prompt_tokens=100,
+                completion_tokens=0,
+            )
         assert mock_span.ended is True
 
 
@@ -365,7 +509,15 @@ class TestFailurePath:
 
 
 def test_default_options_no_audit_side_effects(mock_span: MockSpan) -> None:
-    acc = CostAccumulator(MagicMock(spec=PriceBook, **{"cost_for_delta.side_effect": RuntimeError("x")}))
+    acc = CostAccumulator(
+        MagicMock(spec=PriceBook, **{"cost_for_delta.side_effect": RuntimeError("x")})
+    )
     with pytest.raises(CostAccumulatorError):
-        acc.accumulate(scope="session", scope_id="s1", provider="openai", model="gpt-4o",
-                       prompt_tokens=0, completion_tokens=0)
+        acc.accumulate(
+            scope="session",
+            scope_id="s1",
+            provider="openai",
+            model="gpt-4o",
+            prompt_tokens=0,
+            completion_tokens=0,
+        )

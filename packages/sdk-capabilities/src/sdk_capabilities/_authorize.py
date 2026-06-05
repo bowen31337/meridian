@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import re
 from collections.abc import Mapping
 from datetime import UTC, datetime
+import re
 from typing import Any
 
 from opentelemetry.trace import Status, StatusCode

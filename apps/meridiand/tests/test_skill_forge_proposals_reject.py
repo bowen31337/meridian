@@ -45,7 +45,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
@@ -56,7 +55,6 @@ from meridiand._skill_forge_proposals import (
 )
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -137,9 +135,7 @@ class TestRejectSuccess:
         resp = _reject(client)
         assert resp.json()["status"] == "REJECTED"
 
-    def test_response_rejection_reason_matches_request(
-        self, storage_root: Path
-    ) -> None:
+    def test_response_rejection_reason_matches_request(self, storage_root: Path) -> None:
         _write_proposal(storage_root)
         client = _make_client(storage_root)
         resp = _reject(client, reason="Too vague.")
@@ -219,7 +215,8 @@ class TestRejectNotFound:
         client = _make_client(storage_root)
         _reject(client, proposal_id="skillver_missing")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.reject.failed"
         )
         assert record["level"] == "error"
@@ -228,7 +225,8 @@ class TestRejectNotFound:
         client = _make_client(storage_root)
         _reject(client, proposal_id="skillver_missing")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.reject.failed"
         )
         assert record["code"] == "skill_forge_proposal_not_found"
@@ -237,7 +235,8 @@ class TestRejectNotFound:
         client = _make_client(storage_root)
         _reject(client, proposal_id="skillver_missing")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.reject.failed"
         )
         assert record["detail"]["proposal_id"] == "skillver_missing"
@@ -246,7 +245,8 @@ class TestRejectNotFound:
         client = _make_client(storage_root)
         _reject(client, proposal_id="skillver_missing")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.reject.failed"
         )
         assert record["detail"]["message"]
@@ -291,7 +291,8 @@ class TestRejectAlreadyPromoted:
         client = _make_client(storage_root)
         _reject(client)
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.reject.failed"
         )
         assert record["level"] == "error"
@@ -301,7 +302,8 @@ class TestRejectAlreadyPromoted:
         client = _make_client(storage_root)
         _reject(client)
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.reject.failed"
         )
         assert record["code"] == "skill_forge_proposal_already_promoted"
@@ -324,8 +326,7 @@ class TestRejectAlreadyRejected:
         client = _make_client(storage_root)
         _reject(client, reason="Updated reason.")
         assert (
-            _read_proposal(storage_root, "skillver_abc123")["rejection_reason"]
-            == "Updated reason."
+            _read_proposal(storage_root, "skillver_abc123")["rejection_reason"] == "Updated reason."
         )
 
 
@@ -347,7 +348,8 @@ class TestAuditSuccess:
         client = _make_client(storage_root)
         _reject(client)
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.rejected"
         )
         assert record["level"] == "info"
@@ -357,7 +359,8 @@ class TestAuditSuccess:
         client = _make_client(storage_root)
         _reject(client, proposal_id="skillver_abc123")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.rejected"
         )
         assert record["detail"]["proposal_id"] == "skillver_abc123"
@@ -367,7 +370,8 @@ class TestAuditSuccess:
         client = _make_client(storage_root)
         _reject(client)
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.rejected"
         )
         assert record["detail"]["skill_id"] == "skill_audit"
@@ -377,7 +381,8 @@ class TestAuditSuccess:
         client = _make_client(storage_root)
         _reject(client, reason="Audit reason check.")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.rejected"
         )
         assert record["detail"]["reason"] == "Audit reason check."
@@ -454,8 +459,10 @@ class TestRouterWiring:
         assert resp.status_code != 404 or "not_found" not in resp.text
 
     def test_route_absent_without_storage_root(self) -> None:
+        import tempfile
+
         from meridiand._audit import FileAuditLog
-        import tempfile, os
+
         with tempfile.TemporaryDirectory() as tmp:
             app = create_app(FileAuditLog(Path(tmp)), storage_root=None)
             client = TestClient(app, raise_server_exceptions=False)
@@ -497,13 +504,9 @@ class TestErrorClasses:
         assert err.code == "skill_forge_proposal_already_promoted"
 
     def test_reject_error_http_status(self) -> None:
-        err = SkillForgeProposalRejectError(
-            message="boom", timestamp="2024-01-01T00:00:00+00:00"
-        )
+        err = SkillForgeProposalRejectError(message="boom", timestamp="2024-01-01T00:00:00+00:00")
         assert err.http_status() == 500
 
     def test_reject_error_code(self) -> None:
-        err = SkillForgeProposalRejectError(
-            message="boom", timestamp="2024-01-01T00:00:00+00:00"
-        )
+        err = SkillForgeProposalRejectError(message="boom", timestamp="2024-01-01T00:00:00+00:00")
         assert err.code == "skill_forge_proposal_reject_failed"

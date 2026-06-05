@@ -66,6 +66,6 @@ def make_healthz_router(*, audit_log: AuditLog) -> APIRouter:
                         detail={"message": err.message},
                     )
                 )
-                raise err
+                raise err from exc
 
     return router

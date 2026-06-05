@@ -1,4 +1,4 @@
-import React from "react";
+import type React from "react";
 import { defineWidget } from "../contract.js";
 import type { WidgetProps } from "../contract.js";
 
@@ -41,18 +41,21 @@ function TableWidgetImpl({ props }: WidgetProps<TableProps>): React.ReactElement
   const caption = props.caption as string | undefined;
 
   return (
-    <table
-      data-widget-kind="meridian.table"
-      style={{ borderCollapse: "collapse", width: "100%" }}
-    >
-      {caption != null && <caption style={{ textAlign: "left", marginBottom: 4 }}>{caption}</caption>}
+    <table data-widget-kind="meridian.table" style={{ borderCollapse: "collapse", width: "100%" }}>
+      {caption != null && (
+        <caption style={{ textAlign: "left", marginBottom: 4 }}>{caption}</caption>
+      )}
       <thead>
         <tr>
           {columns.map((col) => (
             <th
               key={col}
               scope="col"
-              style={{ textAlign: "left", padding: "6px 8px", borderBottom: "2px solid currentColor" }}
+              style={{
+                textAlign: "left",
+                padding: "6px 8px",
+                borderBottom: "2px solid currentColor",
+              }}
             >
               {col}
             </th>
@@ -64,10 +67,7 @@ function TableWidgetImpl({ props }: WidgetProps<TableProps>): React.ReactElement
           // biome-ignore lint/suspicious/noArrayIndexKey: row order is stable within a canvas op
           <tr key={rowIdx}>
             {columns.map((col, colIdx) => (
-              <td
-                key={col}
-                style={{ padding: "6px 8px", borderBottom: "1px solid currentColor" }}
-              >
+              <td key={col} style={{ padding: "6px 8px", borderBottom: "1px solid currentColor" }}>
                 {row[colIdx] !== undefined && row[colIdx] !== null ? String(row[colIdx]) : ""}
               </td>
             ))}

@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
+import sys
 
 import click
 
 from ._audit import write_audit
-from ._client import DaemonClient, DaemonError
-from ._resource import _client, _run, make_crud_group
+from ._client import DaemonError
+from ._resource import _client, make_crud_group
 from ._telemetry import get_tracer, record_failure, record_invocation_event
 
 files = make_crud_group("files")
@@ -48,7 +48,12 @@ def _upload(ctx: click.Context, path: Path, name: str | None) -> None:
         write_audit(
             "info",
             f"{span_name}.invoked",
-            {"resource": resource, "operation": operation, "file.path": str(path), "file.name": stored_name},
+            {
+                "resource": resource,
+                "operation": operation,
+                "file.path": str(path),
+                "file.name": stored_name,
+            },
         )
 
         try:

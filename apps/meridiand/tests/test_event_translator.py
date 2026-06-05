@@ -70,9 +70,7 @@ from meridian_sdk_provider.types import (
     ToolInputDeltaEvent,
     ToolUseStartEvent,
 )
-
 from meridiand._event_translator import ModelEventTranslator
-
 
 # ---------------------------------------------------------------------------
 # TextDeltaEvent
@@ -208,7 +206,7 @@ class TestToolInputDeltaTranslation:
     def test_tool_input_delta_without_prior_start_ignored(self) -> None:
         t = ModelEventTranslator()
         # No ToolUseStartEvent; should not raise
-        pairs = t.translate(ToolInputDeltaEvent(id="tu_1", partial_json='{}'))
+        pairs = t.translate(ToolInputDeltaEvent(id="tu_1", partial_json="{}"))
         assert pairs == []
 
 
@@ -220,7 +218,9 @@ class TestToolInputDeltaTranslation:
 class TestMessageStopTranslation:
     def test_message_stop_emits_model_call_completed(self) -> None:
         t = ModelEventTranslator()
-        pairs = t.translate(MessageStopEvent(stop_reason="end_turn", input_tokens=10, output_tokens=5))
+        pairs = t.translate(
+            MessageStopEvent(stop_reason="end_turn", input_tokens=10, output_tokens=5)
+        )
         assert len(pairs) == 1
         assert pairs[0][0] == "model_call.completed"
 
@@ -254,9 +254,9 @@ class TestMessageStopTranslation:
 
     def test_message_stop_data_has_cache_read_tokens(self) -> None:
         t = ModelEventTranslator()
-        _, data = t.translate(
-            MessageStopEvent(stop_reason="end_turn", cache_read_input_tokens=3)
-        )[0]
+        _, data = t.translate(MessageStopEvent(stop_reason="end_turn", cache_read_input_tokens=3))[
+            0
+        ]
         assert data["cache_read_tokens"] == 3
 
     def test_message_stop_carries_model_call_number(self) -> None:

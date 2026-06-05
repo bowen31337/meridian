@@ -10,12 +10,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 from click.testing import CliRunner
-
 from meridian_cli.__main__ import cli
 from meridian_cli._client import DaemonClient
-
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -23,7 +21,7 @@ from meridian_cli._client import DaemonClient
 
 
 def _invoke(mock_client: MagicMock) -> object:
-    runner = CliRunner(mix_stderr=False)
+    runner = CliRunner()
     with patch("meridian_cli.__main__.client_from_env", return_value=mock_client):
         return runner.invoke(cli, ["meridiantui"], catch_exceptions=False)
 

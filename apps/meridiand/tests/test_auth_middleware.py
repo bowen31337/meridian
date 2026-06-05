@@ -22,7 +22,8 @@ Tests cover:
   - Span carries auth.check.allowed event on success.
   - Span carries auth.check.rejected event on rejection.
   - AuthMiddleware is registered in create_app.
-  - AuthMiddleware is the second outermost middleware in create_app (ErrorEnvelopeMiddleware is outermost).
+  - AuthMiddleware is the second outermost middleware in create_app
+    (ErrorEnvelopeMiddleware is outermost).
 """
 
 from __future__ import annotations
@@ -30,15 +31,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
-import pytest
-
-from core_errors import AuditLogEntry, NoopAuditLog, AuditLog
+from core_errors import AuditLog, AuditLogEntry, NoopAuditLog
 from meridiand._app import create_app
 from meridiand._auth_middleware import AuthMiddleware
 from meridiand._config import AuthConfig
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -79,9 +77,7 @@ async def _invoke(
 
     await middleware(scope, receive, send)
 
-    status = next(
-        (m["status"] for m in messages if m.get("type") == "http.response.start"), None
-    )
+    status = next((m["status"] for m in messages if m.get("type") == "http.response.start"), None)
     body = next(
         (m.get("body", b"") for m in messages if m.get("type") == "http.response.body"), b""
     )

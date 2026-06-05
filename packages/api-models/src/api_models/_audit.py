@@ -6,7 +6,8 @@ from ._types import AuditLogEntry
 
 
 class AuditLog(ABC):
-    """Write interface injected by the host application. All models API failures are recorded here."""
+    """Write interface injected by the host application. All models API failures are
+    recorded here."""
 
     @abstractmethod
     def write(self, entry: AuditLogEntry) -> None: ...

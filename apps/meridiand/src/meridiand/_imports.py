@@ -18,12 +18,12 @@ Every invocation:
 from __future__ import annotations
 
 import contextlib
+from datetime import UTC, datetime
 import hashlib
 import json
-import uuid
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -131,9 +131,7 @@ _CONSERVATIVE_TOOL_CAPS: dict[str, Any] = {
     "sandboxed": True,
 }
 
-_KNOWN_HANDLER_KINDS = frozenset(
-    {"http", "subprocess", "mcp", "container", "in_process"}
-)
+_KNOWN_HANDLER_KINDS = frozenset({"http", "subprocess", "mcp", "container", "in_process"})
 
 
 class OpenClawToolRecord(BaseModel):
@@ -280,9 +278,7 @@ class HermesInstallImportRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _translate_openclaw(
-    rec: OpenClawRecord, *, now: str
-) -> tuple[dict[str, Any], list[str]]:
+def _translate_openclaw(rec: OpenClawRecord, *, now: str) -> tuple[dict[str, Any], list[str]]:
     """Translate one OpenClaw record to a Meridian channel record.
 
     Returns (channel_record, lossy_fields).  Lossy fields are symbolic names
@@ -383,7 +379,9 @@ def _translate_hermes(
     tools_data = list(rec.tools)
     tests_data = list(rec.tests) if rec.tests else []
 
-    version_id = _skill_version_id(skill_id, rec.instructions, tools_data, tests_data, rec.source_url)
+    version_id = _skill_version_id(
+        skill_id, rec.instructions, tools_data, tests_data, rec.source_url
+    )
 
     meta: dict[str, Any] = {}
     meta["hermes_id"] = rec.id
@@ -438,7 +436,9 @@ def _openclaw_checklist(
 ) -> list[str]:
     items: list[str] = []
     needs_vault_ref = [
-        (i, records[i]) for i, l in enumerate(lossy_per_record) if "token_vault_ref_missing" in l
+        (i, records[i])
+        for i, lossy in enumerate(lossy_per_record)
+        if "token_vault_ref_missing" in lossy
     ]
     if needs_vault_ref:
         ids = ", ".join(ch["id"] for ch in channel_records)
@@ -446,25 +446,29 @@ def _openclaw_checklist(
             f"Assign config.token_vault_ref to {len(needs_vault_ref)} imported channel(s) "
             f"before activating them ({ids})"
         )
-    needs_webhook = [i for i, l in enumerate(lossy_per_record) if "webhook_url" in l]
+    needs_webhook = [i for i, lossy in enumerate(lossy_per_record) if "webhook_url" in lossy]
     if needs_webhook:
         items.append(
             f"Validate webhook_url for {len(needs_webhook)} channel(s) — URLs may be stale"
         )
-    remapped_kinds = [(i, records[i].kind) for i, l in enumerate(lossy_per_record) if "kind_remapped_to_generic" in l]
+    remapped_kinds = [
+        (i, records[i].kind)
+        for i, lossy in enumerate(lossy_per_record)
+        if "kind_remapped_to_generic" in lossy
+    ]
     for i, orig_kind in remapped_kinds:
         items.append(
             f"Channel {channel_records[i]['id']}: kind '{orig_kind}' is not a recognized "
             "Meridian driver — assigned 'generic'; assign the correct driver kind manually"
         )
-    with_meta = [i for i, l in enumerate(lossy_per_record) if "metadata" in l]
+    with_meta = [i for i, lossy in enumerate(lossy_per_record) if "metadata" in lossy]
     if with_meta:
         items.append(
             f"Review openclaw_meta_* fields in metadata for {len(with_meta)} channel(s) "
             "— non-standard keys are stored verbatim"
         )
     total = len(records)
-    lossy_count = sum(1 for l in lossy_per_record if l)
+    lossy_count = sum(1 for lossy in lossy_per_record if lossy)
     items.append(
         f"Imported {total} channel(s) from OpenClaw; "
         f"{lossy_count} had lossy field mappings requiring review"
@@ -627,7 +631,7 @@ def _openclaw_install_checklist(
 
     if results["memory_stores"]["imported"]:
         items.append(
-            f"Memory store created from MEMORY.md (scope=agent, tagged from:openclaw); "
+            "Memory store created from MEMORY.md (scope=agent, tagged from:openclaw); "
             "write content via POST /v1/memory_stores/{store_id}/write to index entries"
         )
 
@@ -645,9 +649,7 @@ def _openclaw_install_checklist(
 
     missing_handler = [rec.name for rec in body.tools if rec.handler_kind is None]
     if missing_handler:
-        items.append(
-            f"Tool(s) {missing_handler} had no handler_kind — assign a handler before use"
-        )
+        items.append(f"Tool(s) {missing_handler} had no handler_kind — assign a handler before use")
 
     totals = [
         f"channels={results['channels']['imported']}",
@@ -665,33 +667,41 @@ def _hermes_checklist(
     lossy_per_record: list[list[str]],
 ) -> list[str]:
     items: list[str] = []
-    with_version_tag = [(i, records[i].version_tag) for i, l in enumerate(lossy_per_record) if "version_tag" in l]
+    with_version_tag = [
+        (i, records[i].version_tag)
+        for i, lossy in enumerate(lossy_per_record)
+        if "version_tag" in lossy
+    ]
     if with_version_tag:
         items.append(
             f"Version tag not preserved for {len(with_version_tag)} skill(s) — "
             "all imported as version_number=1; original tags stored in metadata.hermes_version_tag"
         )
-    with_tags = [i for i, l in enumerate(lossy_per_record) if "tags" in l]
+    with_tags = [i for i, lossy in enumerate(lossy_per_record) if "tags" in lossy]
     if with_tags:
         items.append(
             f"{len(with_tags)} skill(s) had tags in Hermes — stored under metadata.hermes_tags; "
             "no native tags field in Meridian"
         )
-    public_skills = [(i, records[i].name) for i, l in enumerate(lossy_per_record) if "is_public" in l and records[i].is_public]
+    public_skills = [
+        (i, records[i].name)
+        for i, lossy in enumerate(lossy_per_record)
+        if "is_public" in lossy and records[i].is_public
+    ]
     if public_skills:
         names = ", ".join(name for _, name in public_skills)
         items.append(
             f"Skill(s) marked public in Hermes ({names}) — "
             "visibility is not a Meridian skill concept; review sharing policy"
         )
-    with_meta = [i for i, l in enumerate(lossy_per_record) if "metadata" in l]
+    with_meta = [i for i, lossy in enumerate(lossy_per_record) if "metadata" in lossy]
     if with_meta:
         items.append(
             f"Review hermes_meta_* fields in metadata for {len(with_meta)} skill(s) "
             "— non-standard keys are stored verbatim"
         )
     total = len(records)
-    lossy_count = sum(1 for l in lossy_per_record if l)
+    lossy_count = sum(1 for lossy in lossy_per_record if lossy)
     items.append(
         f"Imported {total} skill(s) from Hermes; "
         f"{lossy_count} had lossy field mappings requiring review"
@@ -711,9 +721,7 @@ _VALID_TRIGGER_TYPES = frozenset(
 )
 
 
-def _translate_hermes_env(
-    rec: HermesEnvRecord, *, now: str
-) -> tuple[dict[str, Any], list[str]]:
+def _translate_hermes_env(rec: HermesEnvRecord, *, now: str) -> tuple[dict[str, Any], list[str]]:
     lossy: list[str] = []
     env_id = f"env_{uuid.uuid4().hex}"
 
@@ -872,9 +880,7 @@ def _translate_hermes_user_profile(
     return profile_record, lossy
 
 
-def _translate_hermes_cron(
-    rec: HermesCronRecord, *, now: str
-) -> tuple[dict[str, Any], list[str]]:
+def _translate_hermes_cron(rec: HermesCronRecord, *, now: str) -> tuple[dict[str, Any], list[str]]:
     lossy: list[str] = []
     cron_id = f"cron_{uuid.uuid4().hex}"
 
@@ -921,9 +927,7 @@ def _translate_hermes_cron(
     return cron_record, lossy
 
 
-def _translate_hermes_acp(
-    rec: HermesAcpRecord, *, now: str
-) -> tuple[dict[str, Any], list[str]]:
+def _translate_hermes_acp(rec: HermesAcpRecord, *, now: str) -> tuple[dict[str, Any], list[str]]:
     lossy: list[str] = []
 
     if not rec.peer_id.strip():
@@ -971,9 +975,7 @@ def _install_checklist(
         )
 
     env_unknown_backends = [
-        rec.backend
-        for rec in body.environments
-        if rec.backend not in _KNOWN_BACKENDS
+        rec.backend for rec in body.environments if rec.backend not in _KNOWN_BACKENDS
     ]
     if env_unknown_backends:
         unique = sorted(set(env_unknown_backends))
@@ -1138,14 +1140,14 @@ def make_imports_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
             # ----------------------------------------------------------------
             # Phase 3: Finalize audit log
             # ----------------------------------------------------------------
             checklist = _openclaw_checklist(body.records, channel_records, lossy_per_record)
             import_audit.write_checklist(checklist)
-            lossy_count = sum(1 for l in lossy_per_record if l)
+            lossy_count = sum(1 for lossy in lossy_per_record if lossy)
             import_audit.write_completed(total=len(channel_records), lossy_count=lossy_count)
 
         return JSONResponse(
@@ -1162,12 +1164,7 @@ def make_imports_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter
     async def import_openclaw_install(body: OpenClawInstallImportRequest) -> JSONResponse:  # noqa: C901
         now = _now()
         tracer = get_tracer()
-        total_records = (
-            len(body.channels)
-            + len(body.sessions)
-            + len(body.memory)
-            + len(body.tools)
-        )
+        total_records = len(body.channels) + len(body.sessions) + len(body.memory) + len(body.tools)
         import_audit = ImportAuditLog(storage_root, source="openclaw_install", timestamp=now)
 
         with tracer.start_as_current_span(
@@ -1188,7 +1185,12 @@ def make_imports_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter
             import_audit.write_started(record_count=total_records, ts=now)
 
             results: dict[str, Any] = {
-                "channels": {"imported": 0, "lossy_count": 0, "ids": [], "needs_vault_ref_count": 0},
+                "channels": {
+                    "imported": 0,
+                    "lossy_count": 0,
+                    "ids": [],
+                    "needs_vault_ref_count": 0,
+                },
                 "sessions": {"imported": 0, "lossy_count": 0, "ids": []},
                 "memory_stores": {"imported": 0, "lossy_count": 0, "ids": []},
                 "tools": {"imported": 0, "lossy_count": 0, "ids": []},
@@ -1230,7 +1232,11 @@ def make_imports_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter
                             seq=seq,
                         ) from exc
                     import_audit.write_record_translated(
-                        seq=seq, source_id=rec.id, target_id=cr["id"], kind="channel", lossy_fields=lossy
+                        seq=seq,
+                        source_id=rec.id,
+                        target_id=cr["id"],
+                        kind="channel",
+                        lossy_fields=lossy,
                     )
                     channel_records.append(cr)
                     channel_lossy.append(lossy)
@@ -1299,7 +1305,7 @@ def make_imports_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter
             # --- tools ---
             tool_records: list[dict[str, Any]] = []
             tool_lossy: list[list[str]] = []
-            seq_offset += (1 if body.memory else 0)
+            seq_offset += 1 if body.memory else 0
             try:
                 for seq, rec in enumerate(body.tools):
                     if not rec.id.strip():
@@ -1397,21 +1403,19 @@ def make_imports_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter
                     cause=exc,
                 )
                 _fail(err2, event="import.openclaw_install.failed")
-                raise err2
+                raise err2 from exc
 
             # ----------------------------------------------------------------
             # Phase 3: Populate results and finalize audit log
             # ----------------------------------------------------------------
-            needs_vault = sum(
-                1 for l in channel_lossy if "token_vault_ref_missing" in l
-            )
+            needs_vault = sum(1 for lossy in channel_lossy if "token_vault_ref_missing" in lossy)
             results["channels"]["imported"] = len(channel_records)
-            results["channels"]["lossy_count"] = sum(1 for l in channel_lossy if l)
+            results["channels"]["lossy_count"] = sum(1 for lossy in channel_lossy if lossy)
             results["channels"]["ids"] = [ch["id"] for ch in channel_records]
             results["channels"]["needs_vault_ref_count"] = needs_vault
 
             results["sessions"]["imported"] = len(session_records)
-            results["sessions"]["lossy_count"] = sum(1 for l in session_lossy if l)
+            results["sessions"]["lossy_count"] = sum(1 for lossy in session_lossy if lossy)
             results["sessions"]["ids"] = [s["session_id"] for s in session_records]
 
             if memory_store_record is not None:
@@ -1420,7 +1424,7 @@ def make_imports_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter
                 results["memory_stores"]["ids"] = [memory_store_record["id"]]
 
             results["tools"]["imported"] = len(tool_records)
-            results["tools"]["lossy_count"] = sum(1 for l in tool_lossy if l)
+            results["tools"]["lossy_count"] = sum(1 for lossy in tool_lossy if lossy)
             results["tools"]["ids"] = [t["id"] for t in tool_records]
 
             checklist = _openclaw_install_checklist(body, results)
@@ -1524,7 +1528,9 @@ def make_imports_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter
             try:
                 skills_dir.mkdir(parents=True, exist_ok=True)
                 versions_dir.mkdir(parents=True, exist_ok=True)
-                for skill_record, version_record in zip(skill_records, version_records):
+                for skill_record, version_record in zip(
+                    skill_records, version_records, strict=False
+                ):
                     vpath = versions_dir / f"{version_record['id']}.json"
                     vpath.write_text(json.dumps(version_record))
                     written.append(vpath)
@@ -1554,14 +1560,14 @@ def make_imports_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
             # ----------------------------------------------------------------
             # Phase 3: Finalize audit log
             # ----------------------------------------------------------------
             checklist = _hermes_checklist(body.records, skill_records, lossy_per_record)
             import_audit.write_checklist(checklist)
-            lossy_count = sum(1 for l in lossy_per_record if l)
+            lossy_count = sum(1 for lossy in lossy_per_record if lossy)
             import_audit.write_completed(total=len(skill_records), lossy_count=lossy_count)
 
         return JSONResponse(
@@ -1610,11 +1616,19 @@ def make_imports_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter
             results: dict[str, Any] = {
                 "skills": {"imported": 0, "lossy_count": 0, "ids": []},
                 "environments": {"imported": 0, "lossy_count": 0, "ids": []},
-                "providers": {"imported": 0, "lossy_count": 0, "fragment_path": "providers-imported.json"},
+                "providers": {
+                    "imported": 0,
+                    "lossy_count": 0,
+                    "fragment_path": "providers-imported.json",
+                },
                 "sessions": {"imported": 0, "lossy_count": 0, "ids": []},
                 "user_profiles": {"imported": 0, "lossy_count": 0, "ids": []},
                 "cron": {"imported": 0, "lossy_count": 0, "ids": []},
-                "acp_registry": {"imported": 0, "lossy_count": 0, "fragment_path": "acp-peers-imported.json"},
+                "acp_registry": {
+                    "imported": 0,
+                    "lossy_count": 0,
+                    "fragment_path": "acp-peers-imported.json",
+                },
             }
             all_written: list[Path] = []
 
@@ -1656,7 +1670,11 @@ def make_imports_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter
                             seq=seq,
                         ) from exc
                     import_audit.write_record_translated(
-                        seq=seq, source_id=rec.id, target_id=sr["id"], kind="skill", lossy_fields=lossy
+                        seq=seq,
+                        source_id=rec.id,
+                        target_id=sr["id"],
+                        kind="skill",
+                        lossy_fields=lossy,
                     )
                     skill_records.append(sr)
                     version_records.append(vr)
@@ -1871,7 +1889,7 @@ def make_imports_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter
                 if skill_records:
                     skills_dir.mkdir(parents=True, exist_ok=True)
                     versions_dir.mkdir(parents=True, exist_ok=True)
-                    for sr, vr in zip(skill_records, version_records):
+                    for sr, vr in zip(skill_records, version_records, strict=False):
                         vpath = versions_dir / f"{vr['id']}.json"
                         vpath.write_text(json.dumps(vr))
                         all_written.append(vpath)
@@ -1909,7 +1927,12 @@ def make_imports_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter
                         all_written.append(tpath)
                         if sr["events"]:
                             elog_path = sess_dir / "events.ndjson"
-                            lines = "\n".join(json.dumps(ev, separators=(",", ":")) for ev in sr["events"]) + "\n"
+                            lines = (
+                                "\n".join(
+                                    json.dumps(ev, separators=(",", ":")) for ev in sr["events"]
+                                )
+                                + "\n"
+                            )
                             elog_path.write_text(lines)
                             all_written.append(elog_path)
 
@@ -1945,36 +1968,36 @@ def make_imports_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter
                     cause=exc,
                 )
                 _fail(err2, event="import.hermes_install.failed")
-                raise err2
+                raise err2 from exc
 
             # ----------------------------------------------------------------
             # Phase 3: Populate results and finalize audit log
             # ----------------------------------------------------------------
             results["skills"]["imported"] = len(skill_records)
-            results["skills"]["lossy_count"] = sum(1 for l in skill_lossy if l)
+            results["skills"]["lossy_count"] = sum(1 for lossy in skill_lossy if lossy)
             results["skills"]["ids"] = [s["id"] for s in skill_records]
 
             results["environments"]["imported"] = len(env_records)
-            results["environments"]["lossy_count"] = sum(1 for l in env_lossy if l)
+            results["environments"]["lossy_count"] = sum(1 for lossy in env_lossy if lossy)
             results["environments"]["ids"] = [e["id"] for e in env_records]
 
             results["providers"]["imported"] = len(provider_records)
-            results["providers"]["lossy_count"] = sum(1 for l in provider_lossy if l)
+            results["providers"]["lossy_count"] = sum(1 for lossy in provider_lossy if lossy)
 
             results["sessions"]["imported"] = len(session_records)
-            results["sessions"]["lossy_count"] = sum(1 for l in session_lossy if l)
+            results["sessions"]["lossy_count"] = sum(1 for lossy in session_lossy if lossy)
             results["sessions"]["ids"] = [s["session_id"] for s in session_records]
 
             results["user_profiles"]["imported"] = len(profile_records)
-            results["user_profiles"]["lossy_count"] = sum(1 for l in profile_lossy if l)
+            results["user_profiles"]["lossy_count"] = sum(1 for lossy in profile_lossy if lossy)
             results["user_profiles"]["ids"] = [p["id"] for p in profile_records]
 
             results["cron"]["imported"] = len(cron_records)
-            results["cron"]["lossy_count"] = sum(1 for l in cron_lossy if l)
+            results["cron"]["lossy_count"] = sum(1 for lossy in cron_lossy if lossy)
             results["cron"]["ids"] = [c["id"] for c in cron_records]
 
             results["acp_registry"]["imported"] = len(acp_records)
-            results["acp_registry"]["lossy_count"] = sum(1 for l in acp_lossy if l)
+            results["acp_registry"]["lossy_count"] = sum(1 for lossy in acp_lossy if lossy)
 
             checklist = _install_checklist(body, results)
             import_audit.write_checklist(checklist)

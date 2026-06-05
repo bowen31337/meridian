@@ -33,7 +33,6 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
@@ -41,7 +40,6 @@ from storage_event_log import LocalEventLogWriter
 from storage_reposit import LocalEventLogReader
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -102,55 +100,77 @@ class TestBudgetExceededResponse:
         assert resp.status_code == 200
 
     def test_response_has_session_id(self, storage_root: Path) -> None:
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/sess2/budget-exceeded", json=_VALID_BODY
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post("/v1/x/sessions/sess2/budget-exceeded", json=_VALID_BODY)
+            .json()
+        )
         assert body["session_id"] == "sess2"
 
     def test_response_after_is_terminated(self, storage_root: Path) -> None:
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/sess3/budget-exceeded", json=_VALID_BODY
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post("/v1/x/sessions/sess3/budget-exceeded", json=_VALID_BODY)
+            .json()
+        )
         assert body["after"] == "terminated"
 
     def test_response_reason_is_budget_exceeded(self, storage_root: Path) -> None:
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/sess4/budget-exceeded", json=_VALID_BODY
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post("/v1/x/sessions/sess4/budget-exceeded", json=_VALID_BODY)
+            .json()
+        )
         assert body["reason"] == "budget_exceeded"
 
     def test_response_before_defaults_to_created(self, storage_root: Path) -> None:
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/sess5/budget-exceeded", json=_VALID_BODY
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post("/v1/x/sessions/sess5/budget-exceeded", json=_VALID_BODY)
+            .json()
+        )
         assert body["before"] == "created"
 
     def test_response_before_reflects_prior_phase(self, storage_root: Path) -> None:
         _seed_phase(storage_root, "sess6", "running")
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/sess6/budget-exceeded", json=_VALID_BODY
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post("/v1/x/sessions/sess6/budget-exceeded", json=_VALID_BODY)
+            .json()
+        )
         assert body["before"] == "running"
 
     def test_response_dimension_matches_request(self, storage_root: Path) -> None:
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/sess7/budget-exceeded",
-            json={"dimension": "input_tokens", "limit": 1000.0, "actual": 1500.0},
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post(
+                "/v1/x/sessions/sess7/budget-exceeded",
+                json={"dimension": "input_tokens", "limit": 1000.0, "actual": 1500.0},
+            )
+            .json()
+        )
         assert body["dimension"] == "input_tokens"
 
     def test_response_limit_matches_request(self, storage_root: Path) -> None:
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/sess8/budget-exceeded",
-            json={"dimension": "dollars", "limit": 5.0, "actual": 7.0},
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post(
+                "/v1/x/sessions/sess8/budget-exceeded",
+                json={"dimension": "dollars", "limit": 5.0, "actual": 7.0},
+            )
+            .json()
+        )
         assert body["limit"] == 5.0
 
     def test_response_actual_matches_request(self, storage_root: Path) -> None:
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/sess9/budget-exceeded",
-            json={"dimension": "dollars", "limit": 5.0, "actual": 7.0},
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post(
+                "/v1/x/sessions/sess9/budget-exceeded",
+                json={"dimension": "dollars", "limit": 5.0, "actual": 7.0},
+            )
+            .json()
+        )
         assert body["actual"] == 7.0
 
 
@@ -161,9 +181,7 @@ class TestBudgetExceededResponse:
 
 class TestBudgetExceededEventLog:
     def test_budget_exceeded_event_written(self, storage_root: Path) -> None:
-        _make_client(storage_root).post(
-            "/v1/x/sessions/ev-sess1/budget-exceeded", json=_VALID_BODY
-        )
+        _make_client(storage_root).post("/v1/x/sessions/ev-sess1/budget-exceeded", json=_VALID_BODY)
         events = _read_events(storage_root, "ev-sess1")
         assert any(e.type == "budget.exceeded" for e in events)
 
@@ -195,40 +213,30 @@ class TestBudgetExceededEventLog:
         assert ev.data["actual"] == 9.0
 
     def test_budget_exceeded_event_has_session_id(self, storage_root: Path) -> None:
-        _make_client(storage_root).post(
-            "/v1/x/sessions/ev-sess5/budget-exceeded", json=_VALID_BODY
-        )
+        _make_client(storage_root).post("/v1/x/sessions/ev-sess5/budget-exceeded", json=_VALID_BODY)
         events = _read_events(storage_root, "ev-sess5")
         ev = next(e for e in events if e.type == "budget.exceeded")
         assert ev.data["session_id"] == "ev-sess5"
 
     def test_budget_exceeded_event_has_timestamp(self, storage_root: Path) -> None:
-        _make_client(storage_root).post(
-            "/v1/x/sessions/ev-sess6/budget-exceeded", json=_VALID_BODY
-        )
+        _make_client(storage_root).post("/v1/x/sessions/ev-sess6/budget-exceeded", json=_VALID_BODY)
         events = _read_events(storage_root, "ev-sess6")
         ev = next(e for e in events if e.type == "budget.exceeded")
         assert "timestamp" in ev.data
 
     def test_phase_change_event_written(self, storage_root: Path) -> None:
-        _make_client(storage_root).post(
-            "/v1/x/sessions/ev-sess7/budget-exceeded", json=_VALID_BODY
-        )
+        _make_client(storage_root).post("/v1/x/sessions/ev-sess7/budget-exceeded", json=_VALID_BODY)
         events = _read_events(storage_root, "ev-sess7")
         assert any(e.type == "session.phase_change" for e in events)
 
     def test_phase_change_after_is_terminated(self, storage_root: Path) -> None:
-        _make_client(storage_root).post(
-            "/v1/x/sessions/ev-sess8/budget-exceeded", json=_VALID_BODY
-        )
+        _make_client(storage_root).post("/v1/x/sessions/ev-sess8/budget-exceeded", json=_VALID_BODY)
         events = _read_events(storage_root, "ev-sess8")
         change = next(e for e in events if e.type == "session.phase_change")
         assert change.data["after"] == "terminated"
 
     def test_phase_change_reason_is_budget_exceeded(self, storage_root: Path) -> None:
-        _make_client(storage_root).post(
-            "/v1/x/sessions/ev-sess9/budget-exceeded", json=_VALID_BODY
-        )
+        _make_client(storage_root).post("/v1/x/sessions/ev-sess9/budget-exceeded", json=_VALID_BODY)
         events = _read_events(storage_root, "ev-sess9")
         change = next(e for e in events if e.type == "session.phase_change")
         assert change.data["reason"] == "budget_exceeded"
@@ -293,9 +301,7 @@ class TestBudgetExceededFailure:
         failing_writer.append.side_effect = OSError("disk full")
         app = create_app(audit, storage_root=storage_root, event_log=failing_writer)
         client = TestClient(app, raise_server_exceptions=False)
-        body = client.post(
-            "/v1/x/sessions/fail-sess2/budget-exceeded", json=_VALID_BODY
-        ).json()
+        body = client.post("/v1/x/sessions/fail-sess2/budget-exceeded", json=_VALID_BODY).json()
         assert body["error"]["code"] == "budget_exceeded_session_failed"
 
     def test_write_failure_error_message_non_empty(self, storage_root: Path) -> None:
@@ -304,9 +310,7 @@ class TestBudgetExceededFailure:
         failing_writer.append.side_effect = OSError("disk full")
         app = create_app(audit, storage_root=storage_root, event_log=failing_writer)
         client = TestClient(app, raise_server_exceptions=False)
-        body = client.post(
-            "/v1/x/sessions/fail-sess3/budget-exceeded", json=_VALID_BODY
-        ).json()
+        body = client.post("/v1/x/sessions/fail-sess3/budget-exceeded", json=_VALID_BODY).json()
         assert len(body["error"]["message"]) > 0
 
     def test_write_failure_writes_audit_entry(self, storage_root: Path) -> None:
@@ -409,16 +413,12 @@ class TestBudgetExceededRouterWiring:
         audit = FileAuditLog(storage_root)
         app = create_app(audit)
         client = TestClient(app, raise_server_exceptions=False)
-        resp = client.post(
-            "/v1/x/sessions/any/budget-exceeded", json=_VALID_BODY
-        )
+        resp = client.post("/v1/x/sessions/any/budget-exceeded", json=_VALID_BODY)
         assert resp.status_code == 404
 
     def test_no_event_log_returns_404(self, storage_root: Path) -> None:
         audit = FileAuditLog(storage_root)
         app = create_app(audit, storage_root=storage_root)
         client = TestClient(app, raise_server_exceptions=False)
-        resp = client.post(
-            "/v1/x/sessions/any/budget-exceeded", json=_VALID_BODY
-        )
+        resp = client.post("/v1/x/sessions/any/budget-exceeded", json=_VALID_BODY)
         assert resp.status_code == 404

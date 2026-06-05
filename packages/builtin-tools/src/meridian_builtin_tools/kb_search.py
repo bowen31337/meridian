@@ -89,8 +89,7 @@ _INPUT_SCHEMA: dict[str, Any] = {
             "minimum": 1,
             "maximum": _MAX_LIMIT,
             "description": (
-                f"Maximum number of results to return "
-                f"(default {_DEFAULT_LIMIT}, max {_MAX_LIMIT})."
+                f"Maximum number of results to return (default {_DEFAULT_LIMIT}, max {_MAX_LIMIT})."
             ),
         },
     },
@@ -210,9 +209,7 @@ async def kb_search_tool(args: dict[str, Any], ctx: ToolContext) -> dict[str, An
     limit: int = min(int(args.get("limit", _DEFAULT_LIMIT)), _MAX_LIMIT)
 
     db_path = _resolve_db_path(ctx.workspace)
-    results = await asyncio.to_thread(
-        _sync_search, db_path, query, scope, limit, ctx.workspace
-    )
+    results = await asyncio.to_thread(_sync_search, db_path, query, scope, limit, ctx.workspace)
 
     _record_invocation(query, scope, len(results))
 

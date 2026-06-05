@@ -44,12 +44,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from meridiand._audit import FileAuditLog
 from meridiand._harness_pool import HarnessPool, HarnessPoolError
+import pytest
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Fake phase reader
@@ -581,17 +580,19 @@ class TestHarnessPoolOtel:
         # session.run_span should share trace_id with the stored session traceparent.
         session_id = "sess-trace-cont"
         fake_trace_id = "aa" * 16  # 32 hex chars
-        fake_span_id = "bb" * 8   # 16 hex chars
+        fake_span_id = "bb" * 8  # 16 hex chars
         fake_traceparent = f"00-{fake_trace_id}-{fake_span_id}-01"
 
         session_dir = tmp_path / "sessions" / session_id
         session_dir.mkdir(parents=True, exist_ok=True)
         (session_dir / "manifest.json").write_text(
-            json.dumps({
-                "session_id": session_id,
-                "status": "active",
-                "traceparent": fake_traceparent,
-            })
+            json.dumps(
+                {
+                    "session_id": session_id,
+                    "status": "active",
+                    "traceparent": fake_traceparent,
+                }
+            )
         )
 
         pool = _make_pool(tmp_path)

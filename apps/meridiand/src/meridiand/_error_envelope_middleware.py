@@ -1,11 +1,18 @@
 from __future__ import annotations
 
-import json
+import contextlib
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any
 
-from core_errors import AuditLog, AuditLogEntry, MeridianError, StructuredEvent, record_invocation_event
+from core_errors import (
+    AuditLog,
+    AuditLogEntry,
+    MeridianError,
+    StructuredEvent,
+    record_invocation_event,
+)
 from opentelemetry.trace import Status, StatusCode
 from sdk_sandbox import ExecutionContext
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -81,7 +88,8 @@ class ErrorEnvelopeMiddleware:
             )
 
         if self._hooks_dir is not None:
-            try:
+            # on_error hooks must never block the error response.
+            with contextlib.suppress(Exception):
                 await dispatch_hooks(
                     "on_error",
                     {"error_code": exc.code, "error_message": exc.message},
@@ -89,8 +97,6 @@ class ErrorEnvelopeMiddleware:
                     hooks_dir=self._hooks_dir,
                     audit_log=self._audit_log,
                 )
-            except Exception:
-                pass  # on_error hooks must never block the error response
 
         try:
             await self._send_envelope(send, exc.http_status(), exc.code, exc.message, {})
@@ -139,7 +145,8 @@ class ErrorEnvelopeMiddleware:
             )
 
         if self._hooks_dir is not None:
-            try:
+            # on_error hooks must never block the error response.
+            with contextlib.suppress(Exception):
                 await dispatch_hooks(
                     "on_error",
                     {"error_code": code, "error_message": str(exc)},
@@ -147,8 +154,6 @@ class ErrorEnvelopeMiddleware:
                     hooks_dir=self._hooks_dir,
                     audit_log=self._audit_log,
                 )
-            except Exception:
-                pass  # on_error hooks must never block the error response
 
         try:
             await self._send_envelope(send, 500, code, message, {})

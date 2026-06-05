@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import datetime
 import json
+from pathlib import Path
 import subprocess
 import sys
-from pathlib import Path
 
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
@@ -44,7 +44,10 @@ def main() -> int:
     with _tracer.start_as_current_span("sdk_ts.gen") as span:
         try:
             if not _SPEC.exists():
-                msg = f"openapi spec not found: {_SPEC} — run 'make codegen' step by step or export_openapi.py first"
+                msg = (
+                    f"openapi spec not found: {_SPEC} — run 'make codegen'"
+                    " step by step or export_openapi.py first"
+                )
                 print(f"error: {msg}", file=sys.stderr)
                 span.set_status(Status(StatusCode.ERROR, msg))
                 _audit("error", "sdk_ts.gen.failed", {"error": msg})

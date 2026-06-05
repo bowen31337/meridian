@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from meridian_sdk_tool import ToolContext
 
 from meridian_builtin_tools.canvas import SUPPORTED_KINDS, _reset_sequence_counters, canvas_op_tool
-from meridian_sdk_tool import ToolContext
 
 _CTX = ToolContext(workspace="/workspace", session_id="sess_canvas_test")
 _CTX2 = ToolContext(workspace="/workspace", session_id="sess_canvas_other")
@@ -212,8 +212,9 @@ async def test_invalid_kind_writes_audit_log() -> None:
 
     # We need a tool instance that targets our temp audit log.
     # Recreate one with the same implementation but a custom audit path.
-    from meridian_builtin_tools.canvas import _INPUT_SCHEMA, _OUTPUT_SCHEMA, _next_sequence
     from meridian_sdk_tool import meridian_tool
+
+    from meridian_builtin_tools.canvas import _INPUT_SCHEMA, _OUTPUT_SCHEMA, _next_sequence
 
     @meridian_tool(
         name="canvas_op",

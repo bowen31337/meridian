@@ -267,9 +267,9 @@ class TestProvision:
 
     async def test_custom_workspace_mount_target(self) -> None:
         with _patch_docker() as mock_exec:
-            await _driver(
-                workspace_path="/host/ws", workspace_mount_target="/app"
-            ).provision(_provision_req())
+            await _driver(workspace_path="/host/ws", workspace_mount_target="/app").provision(
+                _provision_req()
+            )
         args = list(mock_exec.call_args.args)
         vol_idx = args.index("--volume")
         assert "/app" in args[vol_idx + 1]
@@ -299,7 +299,7 @@ class TestProvision:
             await _driver(env_passthrough=("MY_TOKEN",)).provision(_provision_req())
         args = list(mock_exec.call_args.args)
         env_pairs = [args[i + 1] for i, a in enumerate(args) if a == "--env"]
-        assert any("MY_TOKEN=secret123" == p for p in env_pairs)
+        assert any(p == "MY_TOKEN=secret123" for p in env_pairs)
 
     async def test_env_passthrough_absent_var_omitted(self, monkeypatch: Any) -> None:
         monkeypatch.delenv("ABSENT_VAR", raising=False)
@@ -317,26 +317,32 @@ class TestProvision:
         assert "env1" in driver._containers["env1"]
 
     async def test_docker_run_failure_raises(self) -> None:
-        with _patch_docker(_make_proc(returncode=1, stderr=b"image not found")):
-            with pytest.raises(RuntimeError, match="docker run failed"):
-                await _driver().provision(_provision_req())
+        with (
+            _patch_docker(_make_proc(returncode=1, stderr=b"image not found")),
+            pytest.raises(RuntimeError, match="docker run failed"),
+        ):
+            await _driver().provision(_provision_req())
 
     async def test_docker_run_failure_message_includes_stderr(self) -> None:
-        with _patch_docker(_make_proc(returncode=1, stderr=b"no such image")):
-            with pytest.raises(RuntimeError, match="no such image"):
-                await _driver().provision(_provision_req())
+        with (
+            _patch_docker(_make_proc(returncode=1, stderr=b"no such image")),
+            pytest.raises(RuntimeError, match="no such image"),
+        ):
+            await _driver().provision(_provision_req())
 
     async def test_timeout_propagates(self) -> None:
-        with patch(
-            "sdk_environment._docker_driver.asyncio.create_subprocess_exec",
-            AsyncMock(return_value=_make_proc()),
-        ):
-            with patch(
+        with (
+            patch(
+                "sdk_environment._docker_driver.asyncio.create_subprocess_exec",
+                AsyncMock(return_value=_make_proc()),
+            ),
+            patch(
                 "sdk_environment._docker_driver.asyncio.wait_for",
-                AsyncMock(side_effect=asyncio.TimeoutError()),
-            ):
-                with pytest.raises(asyncio.TimeoutError):
-                    await _driver().provision(_provision_req())
+                AsyncMock(side_effect=TimeoutError()),
+            ),
+            pytest.raises(asyncio.TimeoutError),
+        ):
+            await _driver().provision(_provision_req())
 
 
 # ---------------------------------------------------------------------------
@@ -405,7 +411,9 @@ class TestExecute:
             captured.append(list(args))
             return _make_proc()
 
-        with patch("sdk_environment._docker_driver.asyncio.create_subprocess_exec", side_effect=_capture):
+        with patch(
+            "sdk_environment._docker_driver.asyncio.create_subprocess_exec", side_effect=_capture
+        ):
             await driver.provision(_provision_req())
             await driver.execute(_execute_req())
 
@@ -421,7 +429,9 @@ class TestExecute:
             captured.append(list(args))
             return _make_proc()
 
-        with patch("sdk_environment._docker_driver.asyncio.create_subprocess_exec", side_effect=_capture):
+        with patch(
+            "sdk_environment._docker_driver.asyncio.create_subprocess_exec", side_effect=_capture
+        ):
             await driver.provision(_provision_req())
             await driver.execute(_execute_req())
 
@@ -436,7 +446,9 @@ class TestExecute:
             captured.append(list(args))
             return _make_proc()
 
-        with patch("sdk_environment._docker_driver.asyncio.create_subprocess_exec", side_effect=_capture):
+        with patch(
+            "sdk_environment._docker_driver.asyncio.create_subprocess_exec", side_effect=_capture
+        ):
             await driver.provision(_provision_req())
             await driver.execute(_execute_req(command=("python", "script.py")))
 
@@ -452,13 +464,15 @@ class TestExecute:
             captured.append(list(args))
             return _make_proc()
 
-        with patch("sdk_environment._docker_driver.asyncio.create_subprocess_exec", side_effect=_capture):
+        with patch(
+            "sdk_environment._docker_driver.asyncio.create_subprocess_exec", side_effect=_capture
+        ):
             await driver.provision(_provision_req())
             await driver.execute(_execute_req(env={"MY_VAR": "my_val"}))
 
         exec_cmd = captured[1]
         env_pairs = [exec_cmd[i + 1] for i, a in enumerate(exec_cmd) if a == "--env"]
-        assert any("MY_VAR=my_val" == p for p in env_pairs)
+        assert any(p == "MY_VAR=my_val" for p in env_pairs)
 
     async def test_stdin_forwarded_to_communicate(self) -> None:
         driver = _driver()
@@ -496,7 +510,9 @@ class TestExecute:
             captured.append(list(args))
             return _make_proc()
 
-        with patch("sdk_environment._docker_driver.asyncio.create_subprocess_exec", side_effect=_capture):
+        with patch(
+            "sdk_environment._docker_driver.asyncio.create_subprocess_exec", side_effect=_capture
+        ):
             await driver.provision(_provision_req())
             await driver.execute(_execute_req())
 
@@ -513,7 +529,9 @@ class TestExecute:
             captured.append(list(args))
             return _make_proc()
 
-        with patch("sdk_environment._docker_driver.asyncio.create_subprocess_exec", side_effect=_capture):
+        with patch(
+            "sdk_environment._docker_driver.asyncio.create_subprocess_exec", side_effect=_capture
+        ):
             await driver.provision(_provision_req())
             await driver.execute(_execute_req())
 
@@ -534,16 +552,18 @@ class TestExecute:
         with _patch_docker():
             await driver.provision(_provision_req())
 
-        with patch(
-            "sdk_environment._docker_driver.asyncio.create_subprocess_exec",
-            AsyncMock(return_value=_make_proc()),
-        ):
-            with patch(
+        with (
+            patch(
+                "sdk_environment._docker_driver.asyncio.create_subprocess_exec",
+                AsyncMock(return_value=_make_proc()),
+            ),
+            patch(
                 "sdk_environment._docker_driver.asyncio.wait_for",
-                AsyncMock(side_effect=asyncio.TimeoutError()),
-            ):
-                with pytest.raises(asyncio.TimeoutError):
-                    await driver.execute(_execute_req())
+                AsyncMock(side_effect=TimeoutError()),
+            ),
+            pytest.raises(asyncio.TimeoutError),
+        ):
+            await driver.execute(_execute_req())
 
     async def test_interactive_flag_on_exec(self) -> None:
         driver = _driver()
@@ -553,7 +573,9 @@ class TestExecute:
             captured.append(list(args))
             return _make_proc()
 
-        with patch("sdk_environment._docker_driver.asyncio.create_subprocess_exec", side_effect=_capture):
+        with patch(
+            "sdk_environment._docker_driver.asyncio.create_subprocess_exec", side_effect=_capture
+        ):
             await driver.provision(_provision_req())
             await driver.execute(_execute_req())
 
@@ -575,7 +597,9 @@ class TestReclaim:
             captured.append(list(args))
             return _make_proc()
 
-        with patch("sdk_environment._docker_driver.asyncio.create_subprocess_exec", side_effect=_capture):
+        with patch(
+            "sdk_environment._docker_driver.asyncio.create_subprocess_exec", side_effect=_capture
+        ):
             await driver.provision(_provision_req())
             await driver.reclaim(_reclaim_req())
 
@@ -592,7 +616,9 @@ class TestReclaim:
             captured.append(list(args))
             return _make_proc()
 
-        with patch("sdk_environment._docker_driver.asyncio.create_subprocess_exec", side_effect=_capture):
+        with patch(
+            "sdk_environment._docker_driver.asyncio.create_subprocess_exec", side_effect=_capture
+        ):
             await driver.provision(_provision_req())
             await driver.reclaim(_reclaim_req())
 
@@ -624,16 +650,18 @@ class TestReclaim:
         with _patch_docker():
             await driver.provision(_provision_req())
 
-        with patch(
-            "sdk_environment._docker_driver.asyncio.create_subprocess_exec",
-            AsyncMock(return_value=_make_proc()),
-        ):
-            with patch(
+        with (
+            patch(
+                "sdk_environment._docker_driver.asyncio.create_subprocess_exec",
+                AsyncMock(return_value=_make_proc()),
+            ),
+            patch(
                 "sdk_environment._docker_driver.asyncio.wait_for",
-                AsyncMock(side_effect=asyncio.TimeoutError()),
-            ):
-                with pytest.raises(asyncio.TimeoutError):
-                    await driver.reclaim(_reclaim_req())
+                AsyncMock(side_effect=TimeoutError()),
+            ),
+            pytest.raises(asyncio.TimeoutError),
+        ):
+            await driver.reclaim(_reclaim_req())
 
 
 # ---------------------------------------------------------------------------
@@ -651,7 +679,9 @@ class TestRuntimeIntegration:
         opts = _make_options(audit_log)
         kind = DockerBackendDriver.KIND
 
-        provision_req = ProvisionRequest(environment_id="env1", environment_kind=kind, session_id="s1")
+        provision_req = ProvisionRequest(
+            environment_id="env1", environment_kind=kind, session_id="s1"
+        )
         execute_req = ExecuteRequest(
             environment_id="env1",
             environment_kind=kind,
@@ -662,9 +692,9 @@ class TestRuntimeIntegration:
 
         with _patch_docker(
             procs=[
-                _make_proc(),               # provision: docker run
-                _make_proc(stdout=b"ok"),   # execute: docker exec
-                _make_proc(),               # reclaim: docker rm -f
+                _make_proc(),  # provision: docker run
+                _make_proc(stdout=b"ok"),  # execute: docker exec
+                _make_proc(),  # reclaim: docker rm -f
             ]
         ):
             await rt.provision(provision_req, opts)
@@ -684,12 +714,14 @@ class TestRuntimeIntegration:
         kind = DockerBackendDriver.KIND
         opts = _make_options(audit_log)
 
-        with _patch_docker(_make_proc(returncode=1, stderr=b"no such image")):
-            with pytest.raises(EnvironmentFailure) as exc_info:
-                await rt.provision(
-                    ProvisionRequest(environment_id="env1", environment_kind=kind, session_id="s1"),
-                    opts,
-                )
+        with (
+            _patch_docker(_make_proc(returncode=1, stderr=b"no such image")),
+            pytest.raises(EnvironmentFailure) as exc_info,
+        ):
+            await rt.provision(
+                ProvisionRequest(environment_id="env1", environment_kind=kind, session_id="s1"),
+                opts,
+            )
 
         assert exc_info.value.code == "ENV_PROVISION_FAILED"
         assert len(audit_log.entries) == 1
@@ -706,7 +738,9 @@ class TestRuntimeIntegration:
         kind = DockerBackendDriver.KIND
         opts = _make_options(audit_log)
 
-        provision_req = ProvisionRequest(environment_id="env1", environment_kind=kind, session_id="s1")
+        provision_req = ProvisionRequest(
+            environment_id="env1", environment_kind=kind, session_id="s1"
+        )
         execute_req = ExecuteRequest(
             environment_id="env1",
             environment_kind=kind,
@@ -716,10 +750,12 @@ class TestRuntimeIntegration:
 
         with patch(
             "sdk_environment._docker_driver.asyncio.create_subprocess_exec",
-            AsyncMock(side_effect=[
-                _make_proc(),     # provision succeeds
-                Exception("docker exec exploded"),  # execute fails
-            ]),
+            AsyncMock(
+                side_effect=[
+                    _make_proc(),  # provision succeeds
+                    Exception("docker exec exploded"),  # execute fails
+                ]
+            ),
         ):
             await rt.provision(provision_req, opts)
             with pytest.raises(EnvironmentFailure) as exc_info:
@@ -738,7 +774,9 @@ class TestRuntimeIntegration:
         kind = DockerBackendDriver.KIND
         opts = _make_options(audit_log)
 
-        provision_req = ProvisionRequest(environment_id="env1", environment_kind=kind, session_id="s1")
+        provision_req = ProvisionRequest(
+            environment_id="env1", environment_kind=kind, session_id="s1"
+        )
         execute_req = ExecuteRequest(
             environment_id="env1",
             environment_kind=kind,
@@ -760,7 +798,9 @@ class TestRuntimeIntegration:
             captured.append(list(args))
             return _make_proc()
 
-        with patch("sdk_environment._docker_driver.asyncio.create_subprocess_exec", side_effect=_capture):
+        with patch(
+            "sdk_environment._docker_driver.asyncio.create_subprocess_exec", side_effect=_capture
+        ):
             await driver.provision(_provision_req())
 
         assert captured[0][0] == "/usr/local/bin/docker"

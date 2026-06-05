@@ -1,4 +1,4 @@
-import React from "react";
+import type React from "react";
 import { defineWidget } from "../contract.js";
 import type { WidgetProps } from "../contract.js";
 

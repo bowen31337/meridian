@@ -11,11 +11,11 @@ log before re-raising.
 
 from __future__ import annotations
 
-import json
-import uuid
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -139,16 +139,10 @@ def compute_precision_metric(
             }
 
             precision_dir.mkdir(parents=True, exist_ok=True)
-            (precision_dir / f"{metric_id}_precision.json").write_text(
-                json.dumps(metric_record)
-            )
+            (precision_dir / f"{metric_id}_precision.json").write_text(json.dumps(metric_record))
 
-            span.set_attribute(
-                "skill_forge.precision.total_proposals", total_proposals
-            )
-            span.set_attribute(
-                "skill_forge.precision.approved_count", approved_count
-            )
+            span.set_attribute("skill_forge.precision.total_proposals", total_proposals)
+            span.set_attribute("skill_forge.precision.approved_count", approved_count)
             span.set_attribute("skill_forge.precision.precision", precision)
             span.set_attribute("skill_forge.precision_metric.success", True)
 
@@ -204,6 +198,6 @@ def compute_precision_metric(
                     },
                 )
             )
-            raise err2
+            raise err2 from exc
 
     return metric_record

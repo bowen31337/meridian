@@ -12,13 +12,11 @@ from meridian_sdk_provider import (
     ModelRouter,
     ModelRoutingPolicy,
     ModelRoutingRule,
-    ProviderCapabilities,
-    ProviderRegistry,
     ProviderRateLimitError,
+    ProviderRegistry,
 )
 from meridian_sdk_provider.registry import _ProviderSlot
 from tests.conftest import CollectingAuditLog, FakeProvider, make_opts
-
 
 # ─── _ProviderSlot unit tests ──────────────────────────────────────────────────
 

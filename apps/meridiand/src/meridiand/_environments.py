@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
-import uuid
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -50,9 +50,7 @@ class EnvironmentCreateError(MeridianError):
 
 class EnvironmentInvalidRequestError(MeridianError):
     def __init__(self, *, message: str, timestamp: str) -> None:
-        super().__init__(
-            code="environment_invalid_request", message=message, timestamp=timestamp
-        )
+        super().__init__(code="environment_invalid_request", message=message, timestamp=timestamp)
 
     def http_status(self) -> int:
         return 422
@@ -360,7 +358,7 @@ def make_environments_router(*, audit_log: AuditLog, storage_root: Path) -> APIR
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=env_record, status_code=201)
 
@@ -404,7 +402,7 @@ def make_environments_router(*, audit_log: AuditLog, storage_root: Path) -> APIR
                         detail={"message": err2.message},
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content={"items": items}, status_code=200)
 
@@ -429,9 +427,7 @@ def make_environments_router(*, audit_log: AuditLog, storage_root: Path) -> APIR
             try:
                 env_file = envs_dir / f"{environment_id}.json"
                 if not env_file.exists():
-                    raise EnvironmentNotFoundError(
-                        environment_id=environment_id, timestamp=now
-                    )
+                    raise EnvironmentNotFoundError(environment_id=environment_id, timestamp=now)
                 env_record = json.loads(env_file.read_text())
 
             except EnvironmentNotFoundError as err:
@@ -469,7 +465,7 @@ def make_environments_router(*, audit_log: AuditLog, storage_root: Path) -> APIR
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=env_record, status_code=200)
 
@@ -500,9 +496,7 @@ def make_environments_router(*, audit_log: AuditLog, storage_root: Path) -> APIR
 
                 env_file = envs_dir / f"{environment_id}.json"
                 if not env_file.exists():
-                    raise EnvironmentNotFoundError(
-                        environment_id=environment_id, timestamp=now
-                    )
+                    raise EnvironmentNotFoundError(environment_id=environment_id, timestamp=now)
 
                 env_record = json.loads(env_file.read_text())
 
@@ -556,7 +550,7 @@ def make_environments_router(*, audit_log: AuditLog, storage_root: Path) -> APIR
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=env_record, status_code=200)
 
@@ -581,14 +575,10 @@ def make_environments_router(*, audit_log: AuditLog, storage_root: Path) -> APIR
             try:
                 env_file = envs_dir / f"{environment_id}.json"
                 if not env_file.exists():
-                    raise EnvironmentNotFoundError(
-                        environment_id=environment_id, timestamp=now
-                    )
+                    raise EnvironmentNotFoundError(environment_id=environment_id, timestamp=now)
 
                 if _referenced_by_agent(environment_id, agents_dir):
-                    raise EnvironmentInUseError(
-                        environment_id=environment_id, timestamp=now
-                    )
+                    raise EnvironmentInUseError(environment_id=environment_id, timestamp=now)
 
                 env_file.unlink()
 

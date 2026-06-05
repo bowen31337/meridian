@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import json
-import uuid
 from collections.abc import AsyncIterator
+import contextlib
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -57,9 +58,7 @@ class MessagesInferError(MeridianError):
         http_status_code: int = 502,
         cause: BaseException | None = None,
     ) -> None:
-        super().__init__(
-            code="inference_error", message=message, timestamp=timestamp, cause=cause
-        )
+        super().__init__(code="inference_error", message=message, timestamp=timestamp, cause=cause)
         self._http_status_code = http_status_code
 
     def http_status(self) -> int:
@@ -131,10 +130,8 @@ async def _collect(
         content.append({"type": "text", "text": "".join(text_parts)})
     for block in tool_blocks:
         joined = "".join(tool_json.get(block["id"], []))
-        try:
+        with contextlib.suppress(json.JSONDecodeError, ValueError):
             block["input"] = json.loads(joined) if joined else {}
-        except (json.JSONDecodeError, ValueError):
-            pass
         content.append(block)
 
     return {
@@ -182,7 +179,11 @@ def make_messages_router(
                 if hooks_dir is not None:
                     await dispatch_hooks(
                         "on_model_call",
-                        {"session_id": session_id, "model": body.model, "max_tokens": body.max_tokens},
+                        {
+                            "session_id": session_id,
+                            "model": body.model,
+                            "max_tokens": body.max_tokens,
+                        },
                         ExecutionContext(session_id=session_id),
                         hooks_dir=hooks_dir,
                         audit_log=audit_log,
@@ -215,7 +216,7 @@ def make_messages_router(
                         detail={"model": body.model, "message": err.message},
                     )
                 )
-                raise err
+                raise err from exc
             except Exception as exc:
                 err = MessagesInferError(
                     message=f"Unexpected inference error: {exc}",
@@ -233,7 +234,7 @@ def make_messages_router(
                         detail={"model": body.model, "message": err.message},
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(content=response, status_code=200)
 

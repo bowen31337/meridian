@@ -31,20 +31,17 @@ from __future__ import annotations
 
 import base64
 import json
-import stat
 from pathlib import Path
+import stat
 from unittest.mock import patch
 
-import pytest
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
-
 from core_errors import AuditLogEntry
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from meridiand._audit import AuditSignFailedError, FileAuditLog
 from meridiand._config import AuditSigningConfig, MeridianConfig
 from meridiand._services import init_services
 from meridiand._signing import DaemonSigningKey
-
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -244,9 +241,11 @@ def test_file_audit_log_sign_failure_writes_failure_entry(tmp_path):
     signing_key = DaemonSigningKey(tmp_path)
     log = FileAuditLog(tmp_path, signing_key=signing_key)
 
-    with patch.object(signing_key, "sign", side_effect=RuntimeError("key exploded")):
-        with pytest.raises(AuditSignFailedError):
-            log.write(_make_entry())
+    with (
+        patch.object(signing_key, "sign", side_effect=RuntimeError("key exploded")),
+        pytest.raises(AuditSignFailedError),
+    ):
+        log.write(_make_entry())
 
     lines = _read_ndjson_lines(tmp_path / "audit.ndjson")
     assert len(lines) == 1
@@ -262,9 +261,11 @@ def test_file_audit_log_sign_failure_raises_audit_sign_failed_error(tmp_path):
     signing_key = DaemonSigningKey(tmp_path)
     log = FileAuditLog(tmp_path, signing_key=signing_key)
 
-    with patch.object(signing_key, "sign", side_effect=ValueError("bad key")):
-        with pytest.raises(AuditSignFailedError) as exc_info:
-            log.write(_make_entry())
+    with (
+        patch.object(signing_key, "sign", side_effect=ValueError("bad key")),
+        pytest.raises(AuditSignFailedError) as exc_info,
+    ):
+        log.write(_make_entry())
 
     assert exc_info.value.code == "audit_sign_failed"
 

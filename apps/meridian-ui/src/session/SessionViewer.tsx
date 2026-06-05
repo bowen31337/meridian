@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import type React from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { SessionEvent } from "../api/client.js";
 import { useMeridianApi } from "../api/context.js";
 import { getTracer, recordInvocationEvent, recordStreamError } from "./telemetry.js";
@@ -73,8 +74,8 @@ const PHASE_LABELS: Record<SessionPhase, string> = {
 };
 
 function derivePhase(events: SessionEvent[]): SessionPhase {
-  if (events.length === 0) return "idle";
   const last = events[events.length - 1];
+  if (last === undefined) return "idle";
   switch (last.kind) {
     case "message": {
       const p = last.payload as Partial<MessagePayload>;
@@ -124,10 +125,12 @@ function ContentBlocksView({ blocks }: { blocks: ContentBlock[] }) {
     <>
       {blocks.map((block, i) => {
         if (block.type === "thinking") {
+          // biome-ignore lint/suspicious/noArrayIndexKey: content blocks are a static, append-only list and are never reordered
           return <ThinkingBlockView key={i} thinking={(block as ThinkingBlock).thinking} />;
         }
         if (block.type === "text") {
           return (
+            // biome-ignore lint/suspicious/noArrayIndexKey: content blocks are a static, append-only list and are never reordered
             <p key={i} data-testid={`text-block-${i}`}>
               {(block as TextBlock).text}
             </p>
@@ -136,12 +139,13 @@ function ContentBlocksView({ blocks }: { blocks: ContentBlock[] }) {
         if (block.type === "tool_use") {
           const tb = block as ToolUseBlock;
           return (
-            <div key={i} data-testid={`inline-tool-use-${tb.id}`}>
+            <div key={tb.id} data-testid={`inline-tool-use-${tb.id}`}>
               <em>Tool use: {tb.name}</em>
             </div>
           );
         }
         return (
+          // biome-ignore lint/suspicious/noArrayIndexKey: content blocks are a static, append-only list and are never reordered
           <div key={i} data-testid={`unknown-block-${i}`}>
             <pre>{JSON.stringify(block, null, 2)}</pre>
           </div>
@@ -181,10 +185,7 @@ function ToolCallBlock({
   const resultPayload = resultEvent?.payload as Partial<ToolResultPayload> | undefined;
 
   return (
-    <div
-      data-testid={`tool-call-${payload.tool_call_id ?? event.id}`}
-      data-kind="tool_call"
-    >
+    <div data-testid={`tool-call-${payload.tool_call_id ?? event.id}`} data-kind="tool_call">
       <strong data-testid="tool-call-name">{payload.name ?? "(unknown)"}</strong>
       <pre data-testid="tool-call-input">{JSON.stringify(payload.input ?? {}, null, 2)}</pre>
       {resultPayload !== undefined && (
@@ -192,9 +193,7 @@ function ToolCallBlock({
           data-testid={`tool-result-${payload.tool_call_id ?? event.id}`}
           data-kind="tool_result"
         >
-          {resultPayload.is_error && (
-            <span data-testid="tool-result-error-badge">Error</span>
-          )}
+          {resultPayload.is_error && <span data-testid="tool-result-error-badge">Error</span>}
           <pre data-testid="tool-result-content">
             {typeof resultPayload.content === "string"
               ? resultPayload.content

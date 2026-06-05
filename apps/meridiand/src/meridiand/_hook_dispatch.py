@@ -31,14 +31,13 @@ recoverable         : harness treats the triggering model call error as recovera
 
 from __future__ import annotations
 
-import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any, Literal
 
-import sdk_sandbox as _sb
 from core_errors import (
     AuditLog,
     AuditLogEntry,
@@ -48,6 +47,7 @@ from core_errors import (
     record_error,
     record_invocation_event,
 )
+import sdk_sandbox as _sb
 
 from ._metrics_registry import hook_invocations_total
 
@@ -253,9 +253,7 @@ def _matches_filter(hook: dict[str, Any], context: _sb.ExecutionContext) -> bool
     if match_filter is None:
         return True
     session_id_filter = match_filter.get("session_id")
-    if session_id_filter is not None and session_id_filter != context.session_id:
-        return False
-    return True
+    return not (session_id_filter is not None and session_id_filter != context.session_id)
 
 
 # ---------------------------------------------------------------------------

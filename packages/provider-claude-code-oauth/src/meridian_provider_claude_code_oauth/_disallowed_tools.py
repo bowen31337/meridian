@@ -11,9 +11,11 @@ from __future__ import annotations
 # All tool names that Claude Code exposes as built-ins.  Passed as
 # ``disallowed_tools`` in every subprocess call payload so the CLI refuses to
 # invoke them on behalf of the model.
-ALL_CLAUDE_CODE_BUILTIN_TOOLS: frozenset[str] = frozenset({
-    "Bash",
-    "Edit",
-    "Read",
-    "Write",
-})
+ALL_CLAUDE_CODE_BUILTIN_TOOLS: frozenset[str] = frozenset(
+    {
+        "Bash",
+        "Edit",
+        "Read",
+        "Write",
+    }
+)

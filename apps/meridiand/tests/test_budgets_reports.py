@@ -18,13 +18,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
+import pytest
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -49,7 +48,11 @@ def _write_events(storage_root: Path, session_id: str, events: list[dict]) -> No
 def _write_manifest(storage_root: Path, session_id: str, agent_id: str | None) -> None:
     session_dir = storage_root / "sessions" / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
-    manifest = {"session_id": session_id, "agent_id": agent_id, "created_at": "2026-01-01T00:00:00+00:00"}
+    manifest = {
+        "session_id": session_id,
+        "agent_id": agent_id,
+        "created_at": "2026-01-01T00:00:00+00:00",
+    }
     (session_dir / "manifest.json").write_text(json.dumps(manifest))
 
 
@@ -102,7 +105,9 @@ def _audit_records(storage_root: Path) -> list[dict]:
 class TestGroupByAgent:
     def test_single_session_single_agent(self, storage_root: Path) -> None:
         _write_manifest(storage_root, "sess-a1", "agent-1")
-        _write_events(storage_root, "sess-a1", [_usage_delta(0, prompt_tokens=200, completion_tokens=100)])
+        _write_events(
+            storage_root, "sess-a1", [_usage_delta(0, prompt_tokens=200, completion_tokens=100)]
+        )
         resp = _make_client(storage_root).get("/v1/x/budgets/reports?group_by=agent")
         assert resp.status_code == 200
         body = resp.json()
@@ -237,7 +242,9 @@ class TestGroupByModel:
         assert len(items) == 1
         assert items[0]["input_tokens"] == 150
 
-    def test_delta_without_provider_model_groups_under_empty_strings(self, storage_root: Path) -> None:
+    def test_delta_without_provider_model_groups_under_empty_strings(
+        self, storage_root: Path
+    ) -> None:
         events_dir = storage_root / "events" / "2026" / "01" / "01"
         events_dir.mkdir(parents=True, exist_ok=True)
         record = {
@@ -416,7 +423,9 @@ class TestOtelSpan:
 
 
 class TestAuditLogOnFailure:
-    def test_failure_writes_audit_entry(self, storage_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_failure_writes_audit_entry(
+        self, storage_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         import meridiand._budgets_reports as _mod
 
         def _boom(*_a: object, **_kw: object) -> list:

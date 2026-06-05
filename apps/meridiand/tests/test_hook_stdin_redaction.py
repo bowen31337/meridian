@@ -3,7 +3,8 @@ Hook stdin redaction conformance suite.
 
 Tests cover:
   - redact_vault_refs: vault ref without secret.read declaration is left unsubstituted.
-  - redact_vault_refs: plaintext secret value does NOT reach hook stdin when undeclared (Risk R7 CI assertion).
+  - redact_vault_refs: plaintext secret value does NOT reach hook stdin when undeclared
+    (Risk R7 CI assertion).
   - redact_vault_refs: vault ref with secret.read declaration is resolved to plaintext.
   - redact_vault_refs: non-vault-ref strings are passed through unchanged.
   - redact_vault_refs: non-string scalar values (int, bool, None) pass through unchanged.
@@ -21,27 +22,27 @@ Tests cover:
   - redact_vault_refs: raises HookStdinRedactionError on failure.
   - redact_vault_refs: HookStdinRedactionError.code is "hook_stdin_redaction_failed".
   - redact_vault_refs: no audit log does not crash (NoopAuditLog fallback).
-  - redact_vault_refs: agent_id forwarded to resolver; audit.secret_access carries requester_agent_id.
-  - redact_vault_refs: tool_call_id forwarded to resolver; audit.secret_access carries requester_tool_call_id.
-  - redact_vault_refs: audit.secret_access requester fields are None when agent_id/tool_call_id not provided.
+  - redact_vault_refs: agent_id forwarded to resolver; audit.secret_access carries
+    requester_agent_id.
+  - redact_vault_refs: tool_call_id forwarded to resolver; audit.secret_access carries
+    requester_tool_call_id.
+  - redact_vault_refs: audit.secret_access requester fields are None when
+    agent_id/tool_call_id not provided.
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
-import pytest
 from core_errors import AuditLog, AuditLogEntry, NoopAuditLog
-from opentelemetry.trace import StatusCode
-
 from meridiand._hook_stdin_redaction import HookStdinRedactionError, redact_vault_refs
 from meridiand._secret_ref import SecretRefResolver
 from meridiand._vault_backend_os_keychain import OsKeychainVaultBackend
+from opentelemetry.trace import StatusCode
+import pytest
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers

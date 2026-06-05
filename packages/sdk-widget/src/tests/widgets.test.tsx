@@ -12,12 +12,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuditLog } from "../audit.js";
 import { WidgetRegistry } from "../pipeline.js";
 import type { ContentBlockCanvasOp } from "../types.js";
-import { ALL_WIDGETS } from "../widgets/registry.js";
 import { CodeWidget } from "../widgets/code.js";
 import { FormWidget } from "../widgets/form.js";
 import { ImageWidget } from "../widgets/image.js";
 import { MarkdownWidget } from "../widgets/markdown.js";
 import { ProgressWidget } from "../widgets/progress.js";
+import { ALL_WIDGETS } from "../widgets/registry.js";
 import { TableWidget } from "../widgets/table.js";
 import { TextWidget } from "../widgets/text.js";
 
@@ -124,7 +124,9 @@ describe("TextWidget (meridian.text)", () => {
   });
 
   it("renders the text prop", () => {
-    render(registry.renderCanvasOp(makeBlock("meridian.text", { text: "hello world" }), { auditLog }));
+    render(
+      registry.renderCanvasOp(makeBlock("meridian.text", { text: "hello world" }), { auditLog }),
+    );
     expect(screen.getByText("hello world")).toBeTruthy();
   });
 
@@ -265,10 +267,9 @@ describe("CodeWidget (meridian.code)", () => {
 
   it("sets data-language attribute on <pre>", () => {
     const { container } = render(
-      registry.renderCanvasOp(
-        makeBlock("meridian.code", { code: "x = 1", language: "python" }),
-        { auditLog },
-      ),
+      registry.renderCanvasOp(makeBlock("meridian.code", { code: "x = 1", language: "python" }), {
+        auditLog,
+      }),
     );
     const pre = container.querySelector("pre");
     expect(pre?.getAttribute("data-language")).toBe("python");
@@ -276,18 +277,15 @@ describe("CodeWidget (meridian.code)", () => {
 
   it("renders filename when provided", () => {
     render(
-      registry.renderCanvasOp(
-        makeBlock("meridian.code", { code: "x = 1", filename: "main.py" }),
-        { auditLog },
-      ),
+      registry.renderCanvasOp(makeBlock("meridian.code", { code: "x = 1", filename: "main.py" }), {
+        auditLog,
+      }),
     );
     expect(screen.getByTestId("code-filename").textContent).toBe("main.py");
   });
 
   it("omits filename element when not provided", () => {
-    render(
-      registry.renderCanvasOp(makeBlock("meridian.code", { code: "x = 1" }), { auditLog }),
-    );
+    render(registry.renderCanvasOp(makeBlock("meridian.code", { code: "x = 1" }), { auditLog }));
     expect(screen.queryByTestId("code-filename")).toBeNull();
   });
 
@@ -337,10 +335,9 @@ describe("ImageWidget (meridian.image)", () => {
 
   it("omits figcaption when caption is not provided", () => {
     render(
-      registry.renderCanvasOp(
-        makeBlock("meridian.image", { src: "https://example.com/x.png" }),
-        { auditLog },
-      ),
+      registry.renderCanvasOp(makeBlock("meridian.image", { src: "https://example.com/x.png" }), {
+        auditLog,
+      }),
     );
     expect(screen.queryByTestId("image-caption")).toBeNull();
   });
@@ -369,7 +366,10 @@ describe("TableWidget (meridian.table)", () => {
       registry.renderCanvasOp(
         makeBlock("meridian.table", {
           columns: ["Name", "Score"],
-          rows: [["Alice", 95], ["Bob", 87]],
+          rows: [
+            ["Alice", 95],
+            ["Bob", 87],
+          ],
         }),
         { auditLog },
       ),
@@ -383,7 +383,10 @@ describe("TableWidget (meridian.table)", () => {
       registry.renderCanvasOp(
         makeBlock("meridian.table", {
           columns: ["Name", "Score"],
-          rows: [["Alice", 95], ["Bob", 87]],
+          rows: [
+            ["Alice", 95],
+            ["Bob", 87],
+          ],
         }),
         { auditLog },
       ),
@@ -427,10 +430,7 @@ describe("ProgressWidget (meridian.progress)", () => {
 
   it("renders a <progress> element with value and max", () => {
     const { container } = render(
-      registry.renderCanvasOp(
-        makeBlock("meridian.progress", { value: 40, max: 80 }),
-        { auditLog },
-      ),
+      registry.renderCanvasOp(makeBlock("meridian.progress", { value: 40, max: 80 }), { auditLog }),
     );
     const bar = container.querySelector("progress") as HTMLProgressElement;
     expect(bar.value).toBe(40);

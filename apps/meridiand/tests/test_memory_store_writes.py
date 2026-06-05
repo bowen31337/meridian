@@ -31,13 +31,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -92,9 +90,7 @@ class TestMemoryStoreWriteSuccess:
         client = _make_client(storage_root)
         store_id = _create_store(client)
         client.post(f"/v1/memory_stores/{store_id}/write", json=_write_body(key="k1"))
-        body = client.post(
-            f"/v1/memory_stores/{store_id}/write", json=_write_body(key="k1")
-        ).json()
+        body = client.post(f"/v1/memory_stores/{store_id}/write", json=_write_body(key="k1")).json()
         assert body["action"] == "updated"
 
     def test_default_embedder_id_is_hash_128(self, storage_root: Path) -> None:
@@ -230,9 +226,7 @@ class TestMemoryStoreWriteRetrieval:
 class TestMemoryStoreWriteNotFound:
     def test_unknown_store_returns_404(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        resp = client.post(
-            "/v1/memory_stores/memstore_doesnotexist/write", json=_write_body()
-        )
+        resp = client.post("/v1/memory_stores/memstore_doesnotexist/write", json=_write_body())
         assert resp.status_code == 404
 
     def test_not_found_error_code(self, storage_root: Path) -> None:
@@ -266,8 +260,7 @@ class TestMemoryStoreWriteAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/memory_stores/memstore_missing/write", json=_write_body())
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "memory_store.write.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "memory_store.write.failed"
         )
         assert record["level"] == "error"
 
@@ -275,8 +268,7 @@ class TestMemoryStoreWriteAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/memory_stores/memstore_missing/write", json=_write_body())
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "memory_store.write.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "memory_store.write.failed"
         )
         assert record["code"] == "memory_store_not_found"
 
@@ -284,19 +276,15 @@ class TestMemoryStoreWriteAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/memory_stores/memstore_missing/write", json=_write_body())
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "memory_store.write.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "memory_store.write.failed"
         )
         assert record["detail"]["memory_store_id"] == "memstore_missing"
 
     def test_failure_audit_detail_has_key(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        client.post(
-            "/v1/memory_stores/memstore_missing/write", json=_write_body(key="my_key")
-        )
+        client.post("/v1/memory_stores/memstore_missing/write", json=_write_body(key="my_key"))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "memory_store.write.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "memory_store.write.failed"
         )
         assert record["detail"]["key"] == "my_key"
 
@@ -304,8 +292,7 @@ class TestMemoryStoreWriteAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/memory_stores/memstore_missing/write", json=_write_body())
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "memory_store.write.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "memory_store.write.failed"
         )
         assert len(record["detail"]["message"]) > 0
 
@@ -361,9 +348,7 @@ class TestMemoryStoreWriteOtel:
         client = self._client(storage_root)
         store_id = _create_store(client)
         _otel_exporter.clear()
-        client.post(
-            f"/v1/memory_stores/{store_id}/write", json=_write_body(key="span_key")
-        )
+        client.post(f"/v1/memory_stores/{store_id}/write", json=_write_body(key="span_key"))
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
         span = spans.get("memory_store.write")
         assert span is not None

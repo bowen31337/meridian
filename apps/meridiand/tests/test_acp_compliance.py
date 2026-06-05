@@ -23,13 +23,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
+from core_errors import HandlerOptions, install_error_handler
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from meridiand._acp_compliance import make_acp_compliance_router
 from meridiand._app import create_app
-from meridiand._acp_compliance import AcpComplianceError, make_acp_compliance_router
 from meridiand._audit import FileAuditLog
-from core_errors import HandlerOptions, install_error_handler
 
 from tests._otel_shared import otel_exporter as _otel_exporter
 
@@ -173,8 +172,7 @@ class TestAcpComplianceFailure:
         client = _make_client(storage_root, suite_fn=_failing_suite)
         client.post("/v1/x/ci/acp-compliance")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "ci.acp.compliance.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "ci.acp.compliance.failed"
         )
         assert record["level"] == "error"
 
@@ -182,8 +180,7 @@ class TestAcpComplianceFailure:
         client = _make_client(storage_root, suite_fn=_failing_suite)
         client.post("/v1/x/ci/acp-compliance")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "ci.acp.compliance.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "ci.acp.compliance.failed"
         )
         assert record["code"] == "acp_compliance_failed"
 
@@ -191,8 +188,7 @@ class TestAcpComplianceFailure:
         client = _make_client(storage_root, suite_fn=_failing_suite)
         client.post("/v1/x/ci/acp-compliance")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "ci.acp.compliance.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "ci.acp.compliance.failed"
         )
         assert "run_id" in record["detail"]
         assert isinstance(record["detail"]["run_id"], str)
@@ -201,8 +197,7 @@ class TestAcpComplianceFailure:
         client = _make_client(storage_root, suite_fn=_failing_suite)
         client.post("/v1/x/ci/acp-compliance")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "ci.acp.compliance.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "ci.acp.compliance.failed"
         )
         assert record["detail"]["failed_test"] == "message_delivery"
 
@@ -210,8 +205,7 @@ class TestAcpComplianceFailure:
         client = _make_client(storage_root, suite_fn=_failing_suite)
         client.post("/v1/x/ci/acp-compliance")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "ci.acp.compliance.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "ci.acp.compliance.failed"
         )
         assert isinstance(record["detail"]["tests"], list)
         assert len(record["detail"]["tests"]) > 0
@@ -226,16 +220,12 @@ class TestAcpComplianceOtel:
     def setup_method(self) -> None:
         _otel_exporter.clear()
 
-    def _make_client(
-        self, storage_root: Path, suite_fn=None
-    ) -> TestClient:
+    def _make_client(self, storage_root: Path, suite_fn=None) -> TestClient:
         audit = FileAuditLog(storage_root)
         if suite_fn is not None:
             app = FastAPI()
             install_error_handler(app, HandlerOptions(audit_log=audit))
-            app.include_router(
-                make_acp_compliance_router(audit_log=audit, suite_fn=suite_fn)
-            )
+            app.include_router(make_acp_compliance_router(audit_log=audit, suite_fn=suite_fn))
         else:
             app = create_app(audit, acp_targets=_DEFAULT_TARGETS)
         return TestClient(app, raise_server_exceptions=False)

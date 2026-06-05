@@ -11,6 +11,7 @@ audit entry is written, and the error is surfaced to the caller.
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
@@ -147,10 +148,8 @@ class BudgetOverrunDiscipline:
                     timestamp=ts,
                     cause=exc,
                 )
-                try:
+                with contextlib.suppress(Exception):
                     record_soft_overrun_failure(span, err)
-                except Exception:
-                    pass
                 self._opts.audit_log.write(
                     AuditLogEntry(
                         level="error",
@@ -247,10 +246,8 @@ class BudgetOverrunDiscipline:
                     timestamp=ts,
                     cause=exc,
                 )
-                try:
+                with contextlib.suppress(Exception):
                     record_hard_transition_failure(span, err2)
-                except Exception:
-                    pass
                 self._opts.audit_log.write(
                     AuditLogEntry(
                         level="error",

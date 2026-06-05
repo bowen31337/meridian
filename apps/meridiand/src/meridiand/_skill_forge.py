@@ -17,12 +17,13 @@ it), and writes the failure to the audit log before re-raising.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+from datetime import UTC, datetime
 import hashlib
 import json
-import uuid
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -94,8 +95,7 @@ class SkillForgeProposalError(MeridianError):
 class SkillForgeProvider(Protocol):
     """Processes a skill-forge job; returns the forged result as a string."""
 
-    async def forge(self, skill: dict[str, Any], job_type: str) -> str:
-        ...
+    async def forge(self, skill: dict[str, Any], job_type: str) -> str: ...
 
 
 class NoopSkillForgeProvider:
@@ -229,10 +229,9 @@ async def run_skill_forge_job(
             job["status"] = "failed"
             job["failed_at"] = err.timestamp
             job["error"] = err.message
-            try:
+            # best-effort; don't shadow the original error
+            with contextlib.suppress(OSError):
                 job_file.write_text(json.dumps(job))
-            except OSError:
-                pass  # best-effort; don't shadow the original error
 
             audit_log.write(
                 AuditLogEntry(
@@ -249,7 +248,7 @@ async def run_skill_forge_job(
                     },
                 )
             )
-            raise err
+            raise err from exc
 
     return run_id
 
@@ -471,15 +470,13 @@ async def build_skill_version_proposal(
                     },
                 )
             )
-            raise err2
+            raise err2 from exc
 
         # Proposal stored successfully; compute A/B efficacy metric on its test
         # cases.  SkillEfficacyError propagates to the caller with its own audit
         # entry already written by compare_proposal_trajectories.
         assert proposal_record is not None  # guaranteed: we raised on any failure above
-        _eff_dir = (
-            efficacy_dir if efficacy_dir is not None else proposals_dir.parent / "efficacy"
-        )
+        _eff_dir = efficacy_dir if efficacy_dir is not None else proposals_dir.parent / "efficacy"
         await compare_proposal_trajectories(
             proposal=proposal_record,
             efficacy_dir=_eff_dir,
@@ -538,7 +535,8 @@ async def run_skill_forge_loop(
                 if not _limiter.try_acquire():
                     break  # budget exhausted; defer remaining jobs to next tick
 
-                try:
+                # already logged inside run_skill_forge_job
+                with contextlib.suppress(SkillForgeRunError):
                     await run_skill_forge_job(
                         job,
                         jobs_dir=jobs_dir,
@@ -546,7 +544,5 @@ async def run_skill_forge_loop(
                         provider=_provider,
                         audit_log=audit_log,
                     )
-                except SkillForgeRunError:
-                    pass  # already logged inside run_skill_forge_job
 
         await asyncio.sleep(check_interval_seconds)

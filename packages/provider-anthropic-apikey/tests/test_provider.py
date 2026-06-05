@@ -9,9 +9,6 @@ from unittest.mock import AsyncMock, MagicMock
 import anthropic
 import httpx
 import pytest
-from opentelemetry.trace import StatusCode
-
-from meridian_provider_anthropic_apikey.provider import AnthropicApiKeyProvider
 from meridian_sdk_provider import ModelProvider
 from meridian_sdk_provider.errors import (
     ProviderCallError,
@@ -29,6 +26,9 @@ from meridian_sdk_provider.types import (
     ToolInputDeltaEvent,
     ToolUseStartEvent,
 )
+from opentelemetry.trace import StatusCode
+
+from meridian_provider_anthropic_apikey.provider import AnthropicApiKeyProvider
 
 _API_KEY = "sk-ant-test-key"
 _MOCK_REQUEST = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
@@ -81,9 +81,7 @@ class MockTracer:
 @pytest.fixture()
 def mock_tracer(monkeypatch: pytest.MonkeyPatch) -> MockTracer:
     tracer = MockTracer()
-    monkeypatch.setattr(
-        "meridian_provider_anthropic_apikey.provider.get_tracer", lambda: tracer
-    )
+    monkeypatch.setattr("meridian_provider_anthropic_apikey.provider.get_tracer", lambda: tracer)
     return tracer
 
 
@@ -271,6 +269,7 @@ def _connection_error() -> anthropic.APIConnectionError:
 class CollectingAuditLog:
     def __init__(self) -> None:
         from meridian_sdk_provider.audit import AuditLogEntry
+
         self.entries: list[AuditLogEntry] = []
 
     def write(self, entry: Any) -> None:
@@ -310,8 +309,7 @@ def _make_provider(
     mock_messages: Any = MagicMock()
     mock_messages.create = _create
     mock_messages.count_tokens = AsyncMock(
-        return_value=count_tokens_result
-        or SimpleNamespace(input_tokens=20)
+        return_value=count_tokens_result or SimpleNamespace(input_tokens=20)
     )
 
     mock_client: Any = MagicMock()
@@ -445,7 +443,15 @@ class TestCallStreamingEvents:
         assert texts == ["A", "B"]
 
     async def test_ping_events_ignored(self, mock_span: MockSpan) -> None:
-        raw = [_msg_start(), _ping(), _block_start_text(), _text_delta(), _block_stop(), _msg_delta(), _msg_stop()]
+        raw = [
+            _msg_start(),
+            _ping(),
+            _block_start_text(),
+            _text_delta(),
+            _block_stop(),
+            _msg_delta(),
+            _msg_stop(),
+        ]
         provider = _make_provider(events=raw)
         events = [e async for e in provider.call(_make_opts())]
         types = {type(e).__name__ for e in events}
@@ -632,7 +638,12 @@ class TestCallThinkingEvents:
         mock_client.messages = mock_messages
 
         provider = AnthropicApiKeyProvider(_API_KEY, name="test-anthropic", _client=mock_client)
-        [e async for e in provider.call(_make_opts(enable_thinking=True, thinking_budget_tokens=4000))]
+        [
+            e
+            async for e in provider.call(
+                _make_opts(enable_thinking=True, thinking_budget_tokens=4000)
+            )
+        ]
         assert captured[0]["thinking"] == {"type": "enabled", "budget_tokens": 4000}
 
     async def test_no_thinking_key_without_enable(self, mock_span: MockSpan) -> None:
@@ -836,9 +847,7 @@ class TestCallOTelSpan:
 class TestCountTokens:
     async def test_returns_token_count(self) -> None:
         provider = _make_provider(count_tokens_result=SimpleNamespace(input_tokens=77))
-        result = await provider.count_tokens(
-            ModelCountReq(model="claude-sonnet-4-6", messages=[])
-        )
+        result = await provider.count_tokens(ModelCountReq(model="claude-sonnet-4-6", messages=[]))
         assert result.input_tokens == 77
 
     async def test_count_tokens_with_system_forwarded(self) -> None:
@@ -1054,9 +1063,7 @@ class TestCacheMetrics:
         assert cm[1]["cache.hit"] is True
         assert cm[1]["cache.read_tokens"] == 300
 
-    async def test_cache_metrics_hit_false_when_no_read_tokens(
-        self, mock_span: MockSpan
-    ) -> None:
+    async def test_cache_metrics_hit_false_when_no_read_tokens(self, mock_span: MockSpan) -> None:
         raw = [
             _msg_start_with_cache(cache_creation=80, cache_read=0),
             _block_start_text(),

@@ -25,16 +25,12 @@ Tests cover:
 
 from __future__ import annotations
 
-import json
 from collections.abc import AsyncIterator
+import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
-from meridiand._app import create_app
-from meridiand._audit import FileAuditLog
 from meridian_sdk_provider import (
-    Message,
     ModelCallOpts,
     ModelCountReq,
     ModelRouter,
@@ -45,9 +41,10 @@ from meridian_sdk_provider import (
 )
 from meridian_sdk_provider.protocol import ProviderCapabilities
 from meridian_sdk_provider.types import MessageStartEvent, MessageStopEvent, ModelEvent
+from meridiand._app import create_app
+from meridiand._audit import FileAuditLog
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Stub provider
@@ -79,30 +76,38 @@ class _StubProvider:
 
 
 _LABEL_RESPONSES: dict[str, str] = {
-    "duplicate": json.dumps({
-        "label": "duplicate",
-        "match_key": "existing_key",
-        "merged_content": None,
-        "explanation": "Same information.",
-    }),
-    "refinement": json.dumps({
-        "label": "refinement",
-        "match_key": "existing_key",
-        "merged_content": "merged alpha beta",
-        "explanation": "New info compatible.",
-    }),
-    "contradiction": json.dumps({
-        "label": "contradiction",
-        "match_key": "existing_key",
-        "merged_content": None,
-        "explanation": "Contradicts existing.",
-    }),
-    "net-new": json.dumps({
-        "label": "net-new",
-        "match_key": None,
-        "merged_content": None,
-        "explanation": "No similar memories.",
-    }),
+    "duplicate": json.dumps(
+        {
+            "label": "duplicate",
+            "match_key": "existing_key",
+            "merged_content": None,
+            "explanation": "Same information.",
+        }
+    ),
+    "refinement": json.dumps(
+        {
+            "label": "refinement",
+            "match_key": "existing_key",
+            "merged_content": "merged alpha beta",
+            "explanation": "New info compatible.",
+        }
+    ),
+    "contradiction": json.dumps(
+        {
+            "label": "contradiction",
+            "match_key": "existing_key",
+            "merged_content": None,
+            "explanation": "Contradicts existing.",
+        }
+    ),
+    "net-new": json.dumps(
+        {
+            "label": "net-new",
+            "match_key": None,
+            "merged_content": None,
+            "explanation": "No similar memories.",
+        }
+    ),
 }
 
 
@@ -453,9 +458,7 @@ class TestDialecticClassificationFailure:
         _seed_existing(client, store_id)
         _write_resp(client, store_id, key="k_new", dialectic=True)
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "memory_store.write.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "memory_store.write.failed"
         )
         assert record["code"] == "memory_store_dialectic_failed"
 
@@ -465,9 +468,7 @@ class TestDialecticClassificationFailure:
         _seed_existing(client, store_id)
         _write_resp(client, store_id, key="k_new", dialectic=True)
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "memory_store.write.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "memory_store.write.failed"
         )
         assert record["detail"]["key"] == "k_new"
 

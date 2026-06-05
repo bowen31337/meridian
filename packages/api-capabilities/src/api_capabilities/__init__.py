@@ -1,11 +1,10 @@
 # Routes
-from ._routes import make_router
+# Audit
+from ._audit import AuditLog, NoopAuditLog
 
 # Registry
 from ._registry import CapabilityRegistry
-
-# Audit
-from ._audit import AuditLog, NoopAuditLog
+from ._routes import make_router
 
 # Types
 from ._types import (

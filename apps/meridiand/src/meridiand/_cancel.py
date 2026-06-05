@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 
 from core_errors import (
@@ -143,7 +143,7 @@ def make_cancel_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(
             content={

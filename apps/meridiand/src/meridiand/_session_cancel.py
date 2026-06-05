@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any
 
@@ -269,7 +269,7 @@ def make_session_cancel_router(
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(
             content={

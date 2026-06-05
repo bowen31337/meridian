@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
+import re
 
 from ._types import Capability, CapabilityParseError, CapabilitySet
 

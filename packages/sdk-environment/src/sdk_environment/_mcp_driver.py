@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import time
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from ._contract import EnvironmentDriver
 from ._types import (
@@ -16,12 +17,15 @@ from ._types import (
     ReclaimRequest,
 )
 
+if TYPE_CHECKING:
+    import httpx
+
 try:
     import httpx as _httpx
-
-    _HTTPX_AVAILABLE = True
 except ImportError:
-    _HTTPX_AVAILABLE = False
+    _httpx = None
+
+_HTTPX_AVAILABLE = _httpx is not None
 
 _MCP_PROTOCOL_VERSION = "2024-11-05"
 _PROCESS_GRACE_S = 2.0
@@ -46,8 +50,8 @@ async def _stdio_read_response(
     for _ in range(_MAX_SKIP_LINES):
         try:
             raw = await asyncio.wait_for(reader.readline(), timeout=timeout_s)
-        except asyncio.TimeoutError:
-            raise ValueError(f"Timed out waiting for MCP response id={request_id!r}")
+        except TimeoutError:
+            raise ValueError(f"Timed out waiting for MCP response id={request_id!r}") from None
         if not raw:
             raise ValueError("MCP server closed stdout before sending a response")
         line = raw.strip()
@@ -59,9 +63,7 @@ async def _stdio_read_response(
             continue
         if msg.get("id") == request_id:
             return msg
-    raise ValueError(
-        f"No response with id={request_id!r} found after {_MAX_SKIP_LINES} lines"
-    )
+    raise ValueError(f"No response with id={request_id!r} found after {_MAX_SKIP_LINES} lines")
 
 
 async def _stdio_handshake(proc: asyncio.subprocess.Process, timeout_s: float) -> None:
@@ -89,9 +91,7 @@ async def _stdio_handshake(proc: asyncio.subprocess.Process, timeout_s: float) -
         err = resp["error"]
         raise ValueError(f"MCP initialize failed: {err.get('message', resp)}")
 
-    notif = json.dumps(
-        {"jsonrpc": "2.0", "method": "notifications/initialized"}
-    ).encode()
+    notif = json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}).encode()
     proc.stdin.write(notif + b"\n")
     await proc.stdin.drain()
 
@@ -107,7 +107,7 @@ async def _stdio_close(proc: asyncio.subprocess.Process) -> None:
         pass
     try:
         await asyncio.wait_for(proc.wait(), timeout=_PROCESS_GRACE_S)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
 
 
@@ -203,8 +203,7 @@ class McpBackendDriver(EnvironmentDriver):
         """
         if not request.command:
             raise ValueError(
-                "McpBackendDriver: command must be non-empty; "
-                "command[0] is the MCP tool name"
+                "McpBackendDriver: command must be non-empty; command[0] is the MCP tool name"
             )
         tool_name = request.command[0]
         if request.stdin:
@@ -235,9 +234,7 @@ class McpBackendDriver(EnvironmentDriver):
         is_error: bool = bool(result.get("isError", False))
         raw_content: list[dict[str, Any]] | None = result.get("content")
         content_blocks: list[dict[str, Any]] = raw_content if raw_content is not None else []
-        text = "\n".join(
-            b.get("text", "") for b in content_blocks if b.get("type") == "text"
-        )
+        text = "\n".join(b.get("text", "") for b in content_blocks if b.get("type") == "text")
         if not text and raw_content is None:
             # No content key at all — surface the whole result as text fallback
             text = str(result) if result else ""
@@ -264,9 +261,7 @@ class McpBackendDriver(EnvironmentDriver):
         timeout_s: float,
     ) -> dict[str, Any]:
         if not self._command:
-            raise ValueError(
-                "McpBackendDriver with transport='stdio' requires a non-empty command"
-            )
+            raise ValueError("McpBackendDriver with transport='stdio' requires a non-empty command")
         import os
 
         proc_env = {**os.environ, **(env or {})} if env else None
@@ -320,6 +315,7 @@ class McpBackendDriver(EnvironmentDriver):
                 "httpx is required for McpBackendDriver with transport='sse'. "
                 "Install with: pip install 'meridian-sdk-environment[http]'"
             )
+        assert _httpx is not None
         if not self._server_url:
             raise ValueError(
                 "McpBackendDriver with transport='sse' requires a non-empty server_url"
@@ -331,7 +327,7 @@ class McpBackendDriver(EnvironmentDriver):
         call_future: asyncio.Future[dict[str, Any]] = loop.create_future()
         message_url_ref: list[str] = []  # single-element mutable box for closure
 
-        async def _sse_reader(client: _httpx.AsyncClient) -> None:
+        async def _sse_reader(client: httpx.AsyncClient) -> None:
             event_type: str | None = None
             data_lines: list[str] = []
             async with client.stream(
@@ -404,9 +400,7 @@ class McpBackendDriver(EnvironmentDriver):
                 init_resp = await asyncio.wait_for(init_future, timeout_s)
                 if "error" in init_resp:
                     err = init_resp["error"]
-                    raise ValueError(
-                        f"MCP initialize failed: {err.get('message', init_resp)}"
-                    )
+                    raise ValueError(f"MCP initialize failed: {err.get('message', init_resp)}")
 
                 # Step 4: notifications/initialized (no response expected)
                 await client.post(
@@ -432,10 +426,8 @@ class McpBackendDriver(EnvironmentDriver):
 
             finally:
                 reader_task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
                     await reader_task
-                except (asyncio.CancelledError, Exception):
-                    pass
 
     # ------------------------------------------------------------------
     # EnvironmentDriver
@@ -444,9 +436,7 @@ class McpBackendDriver(EnvironmentDriver):
     async def provision(self, request: ProvisionRequest) -> None:
         # on_demand=True: each execute is self-contained; validate config eagerly.
         if self._transport == "stdio" and not self._command:
-            raise ValueError(
-                "McpBackendDriver with transport='stdio' requires a non-empty command"
-            )
+            raise ValueError("McpBackendDriver with transport='stdio' requires a non-empty command")
         if self._transport == "sse" and not self._server_url:
             raise ValueError(
                 "McpBackendDriver with transport='sse' requires a non-empty server_url"

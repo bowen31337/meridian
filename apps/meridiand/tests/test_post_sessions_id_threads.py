@@ -14,7 +14,8 @@ Tests cover:
   - Returns 422 when branch_of_event_seq is missing from the request body.
   - On success, audit log entry is written with event "session.thread.created".
   - On success, audit detail includes session_id, thread_id, and branch_of_event_seq.
-  - On failure (session not found), audit log entry is written with event "session.thread.create.failed".
+  - On failure (session not found), audit log entry is written with event
+    "session.thread.create.failed".
   - On failure, error message is surfaced in response body.
   - OTel span "session.thread.create" is emitted on success.
   - OTel span has session.id attribute.
@@ -28,14 +29,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from storage_event_log import EventLogWriter, LocalEventLogWriter
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers

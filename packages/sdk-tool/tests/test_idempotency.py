@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
-from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -12,6 +11,8 @@ from meridian_sdk_tool import ToolContext, meridian_tool
 from meridian_sdk_tool._idempotency import cache_result, clear, get_cached_result
 from meridian_sdk_tool._types import ToolResult
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Fixtures

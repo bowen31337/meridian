@@ -41,6 +41,9 @@ export type WidgetComponent<TProps = Record<string, unknown>> = React.FC<WidgetP
 export function defineWidget<TProps = Record<string, unknown>>(
   render: React.FC<WidgetProps<TProps>>,
   manifest: WidgetManifest,
-): WidgetComponent<TProps> {
-  return Object.assign(render, { manifest }) as WidgetComponent<TProps>;
+): WidgetComponent {
+  // The widget-specific TProps only types the render implementation; once
+  // registered, components are stored and rendered type-erased (props are
+  // validated at runtime against the manifest's propsSchema).
+  return Object.assign(render, { manifest }) as unknown as WidgetComponent;
 }

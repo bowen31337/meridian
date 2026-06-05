@@ -11,20 +11,17 @@ Covers:
 
 from __future__ import annotations
 
-import json
-import sys
 from pathlib import Path
+import sys
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from opentelemetry.trace import StatusCode
-
+import pytest
 from sdk_sandbox import (
     ExecutionContext,
     McpHandler,
     McpToolSpec,
-    SandboxResult,
     ToolDefinition,
     ToolDispatcher,
     discover_mcp_tools,
@@ -32,10 +29,6 @@ from sdk_sandbox import (
     discover_mcp_tools_stdio,
 )
 from sdk_sandbox._dispatchers import McpDispatcher
-from sdk_sandbox._mcp_client import (
-    _stdio_handshake,  # noqa: PLC2701 – tested directly
-    _stdio_read_response,
-)
 
 from .conftest import CapturingAuditLog, MockSpan, MockTracer
 
@@ -254,7 +247,9 @@ class TestMcpStdioDispatch:
         assert mock_span.attributes["session.id"] == "sess-mcp"
         assert mock_span.attributes["mcp.transport"] == "stdio"
 
-    async def test_success_span_command_attribute(self, tmp_path: Path, mock_span: MockSpan) -> None:
+    async def test_success_span_command_attribute(
+        self, tmp_path: Path, mock_span: MockSpan
+    ) -> None:
         cmd = _write_server(tmp_path, "echo_server", _MCP_ECHO_SERVER)
         await McpDispatcher().dispatch(_tool(_stdio_handler(cmd)), {}, CTX)
         assert "mcp.command" in mock_span.attributes
@@ -331,26 +326,20 @@ class TestMcpStdioDispatch:
     # command not found
 
     async def test_command_not_found_returns_is_error(self, mock_span: MockSpan) -> None:
-        handler = McpHandler(
-            tool_name="echo", transport="stdio", command=("/no/such/mcp_server",)
-        )
+        handler = McpHandler(tool_name="echo", transport="stdio", command=("/no/such/mcp_server",))
         result = await McpDispatcher().dispatch(_tool(handler), {}, CTX)
         assert result.is_error is True
         assert result.error_code == "mcp_stdio_command_not_found"
 
     async def test_command_not_found_audit_entry(self, mock_span: MockSpan) -> None:
         audit = CapturingAuditLog()
-        handler = McpHandler(
-            tool_name="echo", transport="stdio", command=("/no/such/mcp_server",)
-        )
+        handler = McpHandler(tool_name="echo", transport="stdio", command=("/no/such/mcp_server",))
         await McpDispatcher(audit_log=audit).dispatch(_tool(handler), {}, CTX)
         assert len(audit.entries) == 1
         assert audit.entries[0].event == "mcp.stdio.command_not_found"
 
     async def test_command_not_found_span_marked_error(self, mock_span: MockSpan) -> None:
-        handler = McpHandler(
-            tool_name="echo", transport="stdio", command=("/no/such/mcp_server",)
-        )
+        handler = McpHandler(tool_name="echo", transport="stdio", command=("/no/such/mcp_server",))
         await McpDispatcher().dispatch(_tool(handler), {}, CTX)
         assert mock_span.status.status_code == StatusCode.ERROR
 
@@ -396,7 +385,8 @@ class TestMcpHttpDispatch:
 
     async def test_http_success_returns_result(self, mock_span: MockSpan) -> None:
         data = {
-            "jsonrpc": "2.0", "id": "x",
+            "jsonrpc": "2.0",
+            "id": "x",
             "result": {"content": [{"type": "text", "text": "hello"}], "isError": False},
         }
         resp = self._mock_response(data)
@@ -525,7 +515,8 @@ class TestMcpToolDiscoveryHttp:
 
     async def test_rpc_error_raises_value_error(self) -> None:
         error_data = {
-            "jsonrpc": "2.0", "id": "list",
+            "jsonrpc": "2.0",
+            "id": "list",
             "error": {"code": -32601, "message": "Method not found"},
         }
         with patch("sdk_sandbox._mcp_client._httpx") as mock_httpx:

@@ -29,13 +29,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Test doubles
@@ -336,7 +334,9 @@ class TestAcpOutboundAuditDenial:
             "/v1/x/sessions/aud2/acp/outbound",
             json=_make_body(session_capabilities=["exec.shell"]),
         )
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.denied")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.denied"
+        )
         assert record["level"] == "error"
 
     def test_denial_audit_code(self, storage_root: Path) -> None:
@@ -345,7 +345,9 @@ class TestAcpOutboundAuditDenial:
             "/v1/x/sessions/aud3/acp/outbound",
             json=_make_body(session_capabilities=["exec.shell"]),
         )
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.denied")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.denied"
+        )
         assert record["code"] == "acp_outbound_denied"
 
     def test_denial_audit_detail_has_session_id(self, storage_root: Path) -> None:
@@ -354,7 +356,9 @@ class TestAcpOutboundAuditDenial:
             "/v1/x/sessions/aud-session-4/acp/outbound",
             json=_make_body(session_capabilities=["exec.shell"]),
         )
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.denied")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.denied"
+        )
         assert record["detail"]["session_id"] == "aud-session-4"
 
     def test_denial_audit_detail_has_target(self, storage_root: Path) -> None:
@@ -363,7 +367,9 @@ class TestAcpOutboundAuditDenial:
             "/v1/x/sessions/aud5/acp/outbound",
             json=_make_body(target="hermes", session_capabilities=["exec.shell"]),
         )
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.denied")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.denied"
+        )
         assert record["detail"]["target"] == "hermes"
 
     def test_denial_audit_detail_has_call_id(self, storage_root: Path) -> None:
@@ -372,7 +378,9 @@ class TestAcpOutboundAuditDenial:
             "/v1/x/sessions/aud6/acp/outbound",
             json=_make_body(session_capabilities=["exec.shell"]),
         )
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.denied")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.denied"
+        )
         assert "call_id" in record["detail"]
         assert isinstance(record["detail"]["call_id"], str)
 
@@ -403,35 +411,45 @@ class TestAcpOutboundAuditFailure:
         peer = FakeAcpPeerClient(error_urls={_HERMES_URL})
         client = _make_client(storage_root, peer_client=peer)
         client.post("/v1/x/sessions/faud2/acp/outbound", json=_make_body(target="hermes"))
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.failed")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.failed"
+        )
         assert record["level"] == "error"
 
     def test_transport_failure_audit_code(self, storage_root: Path) -> None:
         peer = FakeAcpPeerClient(error_urls={_HERMES_URL})
         client = _make_client(storage_root, peer_client=peer)
         client.post("/v1/x/sessions/faud3/acp/outbound", json=_make_body(target="hermes"))
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.failed")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.failed"
+        )
         assert record["code"] == "acp_outbound_failed"
 
     def test_transport_failure_audit_detail_has_session_id(self, storage_root: Path) -> None:
         peer = FakeAcpPeerClient(error_urls={_HERMES_URL})
         client = _make_client(storage_root, peer_client=peer)
         client.post("/v1/x/sessions/faud-session-4/acp/outbound", json=_make_body(target="hermes"))
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.failed")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.failed"
+        )
         assert record["detail"]["session_id"] == "faud-session-4"
 
     def test_transport_failure_audit_detail_has_target(self, storage_root: Path) -> None:
         peer = FakeAcpPeerClient(error_urls={_HERMES_URL})
         client = _make_client(storage_root, peer_client=peer)
         client.post("/v1/x/sessions/faud5/acp/outbound", json=_make_body(target="hermes"))
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.failed")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.failed"
+        )
         assert record["detail"]["target"] == "hermes"
 
     def test_transport_failure_audit_detail_has_call_id(self, storage_root: Path) -> None:
         peer = FakeAcpPeerClient(error_urls={_HERMES_URL})
         client = _make_client(storage_root, peer_client=peer)
         client.post("/v1/x/sessions/faud6/acp/outbound", json=_make_body(target="hermes"))
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.failed")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.failed"
+        )
         assert "call_id" in record["detail"]
 
 
@@ -491,9 +509,6 @@ class TestAcpOutboundRouteWiring:
         assert resp.status_code != 404
 
 
-from fastapi.testclient import TestClient  # noqa: E402
-
-
 # ---------------------------------------------------------------------------
 # OTel span tests
 # ---------------------------------------------------------------------------
@@ -503,7 +518,9 @@ class TestAcpOutboundOtel:
     def setup_method(self) -> None:
         _otel_exporter.clear()
 
-    def _make_client(self, storage_root: Path, peer_client: FakeAcpPeerClient | None = None) -> TestClient:
+    def _make_client(
+        self, storage_root: Path, peer_client: FakeAcpPeerClient | None = None
+    ) -> TestClient:
         audit = FileAuditLog(storage_root)
         app = create_app(
             audit,
@@ -572,9 +589,7 @@ def _make_toplevel_body(
 ) -> dict[str, Any]:
     return {
         "target": target,
-        "capabilities": (
-            capabilities if capabilities is not None else [f"acp.outbound[{target}]"]
-        ),
+        "capabilities": (capabilities if capabilities is not None else [f"acp.outbound[{target}]"]),
         "message": message if message is not None else {"action": "ping"},
     }
 
@@ -700,7 +715,9 @@ class TestAcpOutboundTopLevelDenial:
             "/v1/x/acp/outbound",
             json=_make_toplevel_body(target="hermes", capabilities=["exec.shell"]),
         )
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.denied")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.denied"
+        )
         assert record["detail"]["target"] == "hermes"
 
     def test_denial_audit_detail_has_call_id(self, storage_root: Path) -> None:
@@ -709,7 +726,9 @@ class TestAcpOutboundTopLevelDenial:
             "/v1/x/acp/outbound",
             json=_make_toplevel_body(capabilities=["exec.shell"]),
         )
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.denied")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.denied"
+        )
         assert "call_id" in record["detail"]
 
     def test_denial_audit_detail_has_no_session_id(self, storage_root: Path) -> None:
@@ -718,7 +737,9 @@ class TestAcpOutboundTopLevelDenial:
             "/v1/x/acp/outbound",
             json=_make_toplevel_body(capabilities=["exec.shell"]),
         )
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.denied")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.denied"
+        )
         assert "session_id" not in record["detail"]
 
 
@@ -746,7 +767,9 @@ class TestAcpOutboundTopLevelTransportFailure:
         peer = FakeAcpPeerClient(error_urls={_HERMES_URL})
         client = _make_client(storage_root, peer_client=peer)
         client.post("/v1/x/acp/outbound", json=_make_toplevel_body(target="hermes"))
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.failed")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "acp.outbound.failed"
+        )
         assert "call_id" in record["detail"]
 
 
@@ -780,7 +803,9 @@ class TestAcpOutboundTopLevelOtel:
     def setup_method(self) -> None:
         _otel_exporter.clear()
 
-    def _make_client(self, storage_root: Path, peer_client: FakeAcpPeerClient | None = None) -> TestClient:
+    def _make_client(
+        self, storage_root: Path, peer_client: FakeAcpPeerClient | None = None
+    ) -> TestClient:
         audit = FileAuditLog(storage_root)
         app = create_app(
             audit,
@@ -861,7 +886,9 @@ def _make_inbound_client(
     app = create_app(
         audit,
         acp_targets=targets if targets is not None else _DEFAULT_TARGETS,
-        acp_inbound_handler=inbound_handler if inbound_handler is not None else FakeAcpInboundHandler(),
+        acp_inbound_handler=inbound_handler
+        if inbound_handler is not None
+        else FakeAcpInboundHandler(),
     )
     return TestClient(app, raise_server_exceptions=False)
 
@@ -875,9 +902,7 @@ def _make_inbound_body(
     return {
         "target": target,
         "session_capabilities": (
-            session_capabilities
-            if session_capabilities is not None
-            else [f"acp.inbound[{target}]"]
+            session_capabilities if session_capabilities is not None else [f"acp.inbound[{target}]"]
         ),
         "message": message if message is not None else {"action": "ping"},
     }
@@ -891,9 +916,7 @@ def _make_inbound_toplevel_body(
 ) -> dict[str, Any]:
     return {
         "target": target,
-        "capabilities": (
-            capabilities if capabilities is not None else [f"acp.inbound[{target}]"]
-        ),
+        "capabilities": (capabilities if capabilities is not None else [f"acp.inbound[{target}]"]),
         "message": message if message is not None else {"action": "ping"},
     }
 
@@ -933,8 +956,12 @@ class TestAcpInboundSuccess:
 
     def test_call_ids_are_unique(self, storage_root: Path) -> None:
         client = _make_inbound_client(storage_root)
-        id1 = client.post("/v1/x/sessions/s6/acp/inbound", json=_make_inbound_body()).json()["call_id"]
-        id2 = client.post("/v1/x/sessions/s7/acp/inbound", json=_make_inbound_body()).json()["call_id"]
+        id1 = client.post("/v1/x/sessions/s6/acp/inbound", json=_make_inbound_body()).json()[
+            "call_id"
+        ]
+        id2 = client.post("/v1/x/sessions/s7/acp/inbound", json=_make_inbound_body()).json()[
+            "call_id"
+        ]
         assert id1 != id2
 
     def test_unrestricted_cap_covers_any_target(self, storage_root: Path) -> None:
@@ -1056,9 +1083,7 @@ class TestAcpInboundProcessingFailure:
     def test_processing_error_code_is_acp_inbound_failed(self, storage_root: Path) -> None:
         handler = FakeAcpInboundHandler(error=RuntimeError("processing failed"))
         client = _make_inbound_client(storage_root, inbound_handler=handler)
-        body = client.post(
-            "/v1/x/sessions/t2/acp/inbound", json=_make_inbound_body()
-        ).json()
+        body = client.post("/v1/x/sessions/t2/acp/inbound", json=_make_inbound_body()).json()
         assert body["error"]["code"] == "acp_inbound_failed"
 
     def test_processing_error_message_in_response(self, storage_root: Path) -> None:
@@ -1161,18 +1186,14 @@ class TestAcpInboundAuditFailure:
     def test_processing_failure_writes_audit_log(self, storage_root: Path) -> None:
         handler = FakeAcpInboundHandler(error=RuntimeError("handler error"))
         client = _make_inbound_client(storage_root, inbound_handler=handler)
-        client.post(
-            "/v1/x/sessions/faud1/acp/inbound", json=_make_inbound_body(target="hermes")
-        )
+        client.post("/v1/x/sessions/faud1/acp/inbound", json=_make_inbound_body(target="hermes"))
         records = _audit_records(storage_root)
         assert any(r.get("event") == "acp.inbound.failed" for r in records)
 
     def test_processing_failure_audit_level_is_error(self, storage_root: Path) -> None:
         handler = FakeAcpInboundHandler(error=RuntimeError("handler error"))
         client = _make_inbound_client(storage_root, inbound_handler=handler)
-        client.post(
-            "/v1/x/sessions/faud2/acp/inbound", json=_make_inbound_body(target="hermes")
-        )
+        client.post("/v1/x/sessions/faud2/acp/inbound", json=_make_inbound_body(target="hermes"))
         record = next(
             r for r in _audit_records(storage_root) if r.get("event") == "acp.inbound.failed"
         )
@@ -1181,9 +1202,7 @@ class TestAcpInboundAuditFailure:
     def test_processing_failure_audit_code(self, storage_root: Path) -> None:
         handler = FakeAcpInboundHandler(error=RuntimeError("handler error"))
         client = _make_inbound_client(storage_root, inbound_handler=handler)
-        client.post(
-            "/v1/x/sessions/faud3/acp/inbound", json=_make_inbound_body(target="hermes")
-        )
+        client.post("/v1/x/sessions/faud3/acp/inbound", json=_make_inbound_body(target="hermes"))
         record = next(
             r for r in _audit_records(storage_root) if r.get("event") == "acp.inbound.failed"
         )
@@ -1204,9 +1223,7 @@ class TestAcpInboundAuditFailure:
     def test_processing_failure_audit_detail_has_target(self, storage_root: Path) -> None:
         handler = FakeAcpInboundHandler(error=RuntimeError("handler error"))
         client = _make_inbound_client(storage_root, inbound_handler=handler)
-        client.post(
-            "/v1/x/sessions/faud5/acp/inbound", json=_make_inbound_body(target="hermes")
-        )
+        client.post("/v1/x/sessions/faud5/acp/inbound", json=_make_inbound_body(target="hermes"))
         record = next(
             r for r in _audit_records(storage_root) if r.get("event") == "acp.inbound.failed"
         )
@@ -1215,9 +1232,7 @@ class TestAcpInboundAuditFailure:
     def test_processing_failure_audit_detail_has_call_id(self, storage_root: Path) -> None:
         handler = FakeAcpInboundHandler(error=RuntimeError("handler error"))
         client = _make_inbound_client(storage_root, inbound_handler=handler)
-        client.post(
-            "/v1/x/sessions/faud6/acp/inbound", json=_make_inbound_body(target="hermes")
-        )
+        client.post("/v1/x/sessions/faud6/acp/inbound", json=_make_inbound_body(target="hermes"))
         record = next(
             r for r in _audit_records(storage_root) if r.get("event") == "acp.inbound.failed"
         )
@@ -1320,9 +1335,7 @@ class TestAcpInboundOtel:
 
         handler = FakeAcpInboundHandler(error=RuntimeError("handler error"))
         client = self._make_client(storage_root, inbound_handler=handler)
-        client.post(
-            "/v1/x/sessions/otel3/acp/inbound", json=_make_inbound_body(target="hermes")
-        )
+        client.post("/v1/x/sessions/otel3/acp/inbound", json=_make_inbound_body(target="hermes"))
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
         span = spans.get("acp.inbound")
         assert span is not None
@@ -1338,9 +1351,7 @@ class TestAcpInboundOtel:
 
     def test_span_has_acp_target_attribute(self, storage_root: Path) -> None:
         client = self._make_client(storage_root)
-        client.post(
-            "/v1/x/sessions/otel5/acp/inbound", json=_make_inbound_body(target="hermes")
-        )
+        client.post("/v1/x/sessions/otel5/acp/inbound", json=_make_inbound_body(target="hermes"))
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
         span = spans.get("acp.inbound")
         assert span is not None
@@ -1505,9 +1516,7 @@ class TestAcpInboundTopLevelProcessingFailure:
     def test_returns_500_on_handler_error(self, storage_root: Path) -> None:
         handler = FakeAcpInboundHandler(error=RuntimeError("processing failed"))
         client = _make_inbound_client(storage_root, inbound_handler=handler)
-        resp = client.post(
-            "/v1/x/acp/inbound", json=_make_inbound_toplevel_body(target="hermes")
-        )
+        resp = client.post("/v1/x/acp/inbound", json=_make_inbound_toplevel_body(target="hermes"))
         assert resp.status_code == 500
 
     def test_processing_error_code_is_acp_inbound_failed(self, storage_root: Path) -> None:

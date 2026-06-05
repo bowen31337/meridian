@@ -39,8 +39,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-import pytest
 from opentelemetry.trace import StatusCode
+import pytest
 from sdk_environment import (
     AuditLogEntry,
     CapabilityEnvelope,
@@ -826,7 +826,7 @@ class TestTimeoutBehavior:
         await rt.execute(req, make_options(audit_log))
         assert driver.executions[0].timeout_seconds is None
 
-    async def test_timeout_error_wraps_as_execute_failed(
+    async def test_timeout_error_wraps_as_execute_timeout(
         self, mock_span: MockSpan, audit_log: CapturingAuditLog
     ) -> None:
         driver = StubDriver(execute_raises=TimeoutError("command timed out"))
@@ -834,7 +834,7 @@ class TestTimeoutBehavior:
         rt.register(driver)
         with pytest.raises(EnvironmentFailure) as exc_info:
             await rt.execute(make_execute(), make_options(audit_log))
-        assert exc_info.value.code == "ENV_EXECUTE_FAILED"
+        assert exc_info.value.code == "ENV_EXECUTE_TIMEOUT"
 
     async def test_timeout_message_surfaces_to_caller(
         self, mock_span: MockSpan, audit_log: CapturingAuditLog
@@ -936,9 +936,7 @@ class TestScratchDirectoryIsolation:
         await rt.provision(
             ProvisionRequest("env-a", "test.scratch", "sess1"), make_options(audit_log)
         )
-        await rt.reclaim(
-            ReclaimRequest("env-a", "test.scratch", "sess1"), make_options(audit_log)
-        )
+        await rt.reclaim(ReclaimRequest("env-a", "test.scratch", "sess1"), make_options(audit_log))
         assert "env-a" in driver.reclaimed
         assert "env-a" not in driver._scratch
 
@@ -1021,9 +1019,7 @@ class TestEnvVarScoping:
         driver = StubDriver()
         rt = EnvironmentRuntime()
         rt.register(driver)
-        req = ExecuteRequest(
-            "env1", "test.stub", "sess1", ("env",), env={"K1": "v1", "K2": "v2"}
-        )
+        req = ExecuteRequest("env1", "test.stub", "sess1", ("env",), env={"K1": "v1", "K2": "v2"})
         await rt.execute(req, make_options(audit_log))
         for k, v in driver.executions[0].env.items():
             assert isinstance(k, str)
@@ -1138,7 +1134,9 @@ def _make_rt(driver: EnvironmentDriver) -> EnvironmentRuntime:
 
 
 def _provision_req(kind: str) -> ProvisionRequest:
-    return ProvisionRequest(environment_id="env-conform", environment_kind=kind, session_id="sess-conform")
+    return ProvisionRequest(
+        environment_id="env-conform", environment_kind=kind, session_id="sess-conform"
+    )
 
 
 def _execute_req(kind: str) -> ExecuteRequest:
@@ -1151,7 +1149,9 @@ def _execute_req(kind: str) -> ExecuteRequest:
 
 
 def _reclaim_req(kind: str) -> ReclaimRequest:
-    return ReclaimRequest(environment_id="env-conform", environment_kind=kind, session_id="sess-conform")
+    return ReclaimRequest(
+        environment_id="env-conform", environment_kind=kind, session_id="sess-conform"
+    )
 
 
 @pytest.mark.parametrize(

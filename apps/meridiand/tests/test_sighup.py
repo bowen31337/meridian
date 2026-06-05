@@ -16,7 +16,8 @@ Tests cover:
   - _do_reload: validate failure detail contains errors list.
   - _do_reload: validate failure sets span status to ERROR.
   - _do_reload: validate failure leaves old config in effect (no swap, no policy update).
-  - _do_reload: provider_build failure writes "system.config.reload.failed" with stage "provider_build".
+  - _do_reload: provider_build failure writes "system.config.reload.failed" with stage
+    "provider_build".
   - _do_reload: provider_build failure sets span status to ERROR.
   - _do_reload: provider_build failure leaves routing policy unchanged.
   - install_sighup_handler: registers a handler on the event loop via add_signal_handler.
@@ -26,20 +27,17 @@ Tests cover:
 from __future__ import annotations
 
 import asyncio
-import signal
-import yaml
 from pathlib import Path
+import signal
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from core_errors import AuditLog, AuditLogEntry, NoopAuditLog
 from meridian_sdk_provider import ModelRouter, ModelRoutingPolicy, ProviderRegistry
-from opentelemetry.trace import StatusCode
-
 from meridiand._sighup import _do_reload, install_sighup_handler, remove_sighup_handler
+from opentelemetry.trace import StatusCode
+import yaml
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -330,6 +328,7 @@ class TestDoReloadProviderBuildFailure:
 
     async def test_provider_build_error_writes_failed_entry(self, tmp_path: Path) -> None:
         from meridiand._provider_factory import ProviderFactoryError
+
         cfg = _write_cfg(
             tmp_path,
             providers=[{"name": "local1", "kind": "ollama"}],
@@ -351,6 +350,7 @@ class TestDoReloadProviderBuildFailure:
 
     async def test_provider_build_error_stage_is_provider_build(self, tmp_path: Path) -> None:
         from meridiand._provider_factory import ProviderFactoryError
+
         cfg = _write_cfg(
             tmp_path,
             providers=[{"name": "local1", "kind": "ollama"}],
@@ -372,6 +372,7 @@ class TestDoReloadProviderBuildFailure:
 
     async def test_provider_build_error_sets_span_error(self, tmp_path: Path) -> None:
         from meridiand._provider_factory import ProviderFactoryError
+
         cfg = _write_cfg(
             tmp_path,
             providers=[{"name": "local1", "kind": "ollama"}],
@@ -394,6 +395,7 @@ class TestDoReloadProviderBuildFailure:
 
     async def test_provider_build_error_no_policy_update(self, tmp_path: Path) -> None:
         from meridiand._provider_factory import ProviderFactoryError
+
         cfg = _write_cfg(
             tmp_path,
             providers=[{"name": "local1", "kind": "ollama"}],
@@ -497,7 +499,7 @@ class TestSignalHandlerRegistration:
             assert len(captured_cb) == 1
             captured_cb[0]()  # invoke the registered callback directly
             # drain: the callback creates a task; yield until it finishes
-            pending = asyncio.all_tasks(loop)
+            pending = asyncio.all_tasks(loop) - {asyncio.current_task()}
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
             ok_entries = [e for e in audit.entries if e.event == "system.config.reload.ok"]

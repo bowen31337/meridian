@@ -144,19 +144,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
 
-import pytest
-from meridiand._audit import FileAuditLog
-from meridiand._replay import (
-    FakeModelAdapter,
-    FakeSandboxAdapter,
-    HarnessLoopError,
-    IterationBudget,
-    MaxTokensPolicy,
-    UsageDelta,
-    run_harness_loop,
-)
 from meridian_sdk_provider import (
     Message,
     MessageDeltaEvent,
@@ -168,9 +156,19 @@ from meridian_sdk_provider import (
     ToolInputDeltaEvent,
     ToolUseStartEvent,
 )
+from meridiand._audit import FileAuditLog
+from meridiand._replay import (
+    FakeModelAdapter,
+    FakeSandboxAdapter,
+    HarnessLoopError,
+    IterationBudget,
+    MaxTokensPolicy,
+    UsageDelta,
+    run_harness_loop,
+)
+import pytest
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Fake phase reader
@@ -256,8 +254,13 @@ class TestHarnessLoopStopPhases:
         reader = _FakePhaseReader(["idle"])
         audit = FileAuditLog(tmp_path)
         model_calls, tool_calls, final_phase = asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         assert model_calls == 0
 
@@ -266,8 +269,13 @@ class TestHarnessLoopStopPhases:
         reader = _FakePhaseReader(["paused"])
         audit = FileAuditLog(tmp_path)
         model_calls, tool_calls, final_phase = asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         assert model_calls == 0
 
@@ -276,8 +284,13 @@ class TestHarnessLoopStopPhases:
         reader = _FakePhaseReader(["terminated"])
         audit = FileAuditLog(tmp_path)
         model_calls, tool_calls, final_phase = asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         assert model_calls == 0
 
@@ -286,8 +299,13 @@ class TestHarnessLoopStopPhases:
         reader = _FakePhaseReader(["idle"])
         audit = FileAuditLog(tmp_path)
         _, tool_calls, _ = asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         assert tool_calls == 0
 
@@ -296,8 +314,13 @@ class TestHarnessLoopStopPhases:
         reader = _FakePhaseReader(["idle"])
         audit = FileAuditLog(tmp_path)
         _, _, final_phase = asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         assert final_phase == "idle"
 
@@ -306,8 +329,13 @@ class TestHarnessLoopStopPhases:
         reader = _FakePhaseReader(["paused"])
         audit = FileAuditLog(tmp_path)
         _, _, final_phase = asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         assert final_phase == "paused"
 
@@ -316,8 +344,13 @@ class TestHarnessLoopStopPhases:
         reader = _FakePhaseReader(["terminated"])
         audit = FileAuditLog(tmp_path)
         _, _, final_phase = asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         assert final_phase == "terminated"
 
@@ -333,8 +366,13 @@ class TestHarnessLoopActivePhases:
         reader = _FakePhaseReader(["created"])
         audit = FileAuditLog(tmp_path)
         model_calls, _, _ = asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         assert model_calls == 1
 
@@ -343,8 +381,13 @@ class TestHarnessLoopActivePhases:
         reader = _FakePhaseReader(["running"])
         audit = FileAuditLog(tmp_path)
         model_calls, _, _ = asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         assert model_calls == 1
 
@@ -353,8 +396,13 @@ class TestHarnessLoopActivePhases:
         reader = _FakePhaseReader(["created"])
         audit = FileAuditLog(tmp_path)
         _, _, final_phase = asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         assert final_phase == "idle"
 
@@ -363,15 +411,18 @@ class TestHarnessLoopActivePhases:
         reader = _FakePhaseReader(["created"])
         audit = FileAuditLog(tmp_path)
         model_calls, tool_calls, _ = asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         assert model_calls == 1
         assert tool_calls == 0
 
-    def test_tool_use_then_end_turn_model_calls_two_tool_calls_one(
-        self, tmp_path: Path
-    ) -> None:
+    def test_tool_use_then_end_turn_model_calls_two_tool_calls_one(self, tmp_path: Path) -> None:
         model, sandbox = _adapters(
             tmp_path / "fix",
             [_tool_use_call(), _end_turn_call()],
@@ -380,8 +431,13 @@ class TestHarnessLoopActivePhases:
         reader = _FakePhaseReader(["created", "waiting_for_tool", "created"])
         audit = FileAuditLog(tmp_path)
         model_calls, tool_calls, _ = asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         assert model_calls == 2
         assert tool_calls == 1
@@ -395,8 +451,13 @@ class TestHarnessLoopActivePhases:
         reader = _FakePhaseReader(["created", "waiting_for_tool", "created"])
         audit = FileAuditLog(tmp_path)
         _, _, final_phase = asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         assert final_phase == "idle"
 
@@ -418,8 +479,13 @@ class TestHarnessLoopMidRunInterruption:
         reader = _FakePhaseReader(["running", "waiting_for_tool", "paused"])
         audit = FileAuditLog(tmp_path)
         model_calls, tool_calls, final_phase = asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         assert model_calls == 1
         assert tool_calls == 1
@@ -434,8 +500,13 @@ class TestHarnessLoopMidRunInterruption:
         reader = _FakePhaseReader(["running", "waiting_for_tool", "terminated"])
         audit = FileAuditLog(tmp_path)
         model_calls, tool_calls, final_phase = asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         assert model_calls == 1
         assert tool_calls == 1
@@ -450,8 +521,13 @@ class TestHarnessLoopMidRunInterruption:
         reader = _FakePhaseReader(["running", "waiting_for_tool", "idle"])
         audit = FileAuditLog(tmp_path)
         model_calls, tool_calls, final_phase = asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         assert model_calls == 1
         assert tool_calls == 1
@@ -502,9 +578,7 @@ class TestHarnessLoopUsageDelta:
         )
         assert len(deltas) == 2
 
-    def test_on_usage_delta_not_called_when_phase_stops_immediately(
-        self, tmp_path: Path
-    ) -> None:
+    def test_on_usage_delta_not_called_when_phase_stops_immediately(self, tmp_path: Path) -> None:
         model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
         reader = _FakePhaseReader(["idle"])
         audit = FileAuditLog(tmp_path)
@@ -536,8 +610,13 @@ class TestHarnessLoopOtel:
         reader = _FakePhaseReader(["created"])
         audit = FileAuditLog(tmp_path)
         asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         span_names = [s.name for s in _otel_exporter.get_finished_spans()]
         assert "harness.run_loop" in span_names
@@ -547,8 +626,13 @@ class TestHarnessLoopOtel:
         reader = _FakePhaseReader(["created"])
         audit = FileAuditLog(tmp_path)
         asyncio.run(
-            run_harness_loop("sess-otel-1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "sess-otel-1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
         span = spans.get("harness.run_loop")
@@ -560,8 +644,13 @@ class TestHarnessLoopOtel:
         reader = _FakePhaseReader(["created"])
         audit = FileAuditLog(tmp_path)
         asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
         span = spans.get("harness.run_loop")
@@ -574,8 +663,13 @@ class TestHarnessLoopOtel:
         reader = _FakePhaseReader(["idle"])
         audit = FileAuditLog(tmp_path)
         asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         span_names = [s.name for s in _otel_exporter.get_finished_spans()]
         assert "harness.run_loop" in span_names
@@ -591,8 +685,13 @@ class TestHarnessLoopOtel:
         audit = FileAuditLog(tmp_path)
         with pytest.raises(HarnessLoopError):
             asyncio.run(
-                run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                                 phase_reader=_ExplodingPhaseReader(), audit_log=audit)
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=_ExplodingPhaseReader(),
+                    audit_log=audit,
+                )
             )
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
         loop_span = spans.get("harness.run_loop")
@@ -615,8 +714,13 @@ class TestHarnessLoopErrorHandling:
         audit = FileAuditLog(tmp_path)
         with pytest.raises(HarnessLoopError):
             asyncio.run(
-                run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                                 phase_reader=_BrokenPhaseReader(), audit_log=audit)
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=_BrokenPhaseReader(),
+                    audit_log=audit,
+                )
             )
 
     def test_error_code_is_harness_loop_failed(self, tmp_path: Path) -> None:
@@ -628,8 +732,13 @@ class TestHarnessLoopErrorHandling:
         audit = FileAuditLog(tmp_path)
         with pytest.raises(HarnessLoopError) as exc_info:
             asyncio.run(
-                run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                                 phase_reader=_BrokenPhaseReader(), audit_log=audit)
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=_BrokenPhaseReader(),
+                    audit_log=audit,
+                )
             )
         assert exc_info.value.code == "harness_loop_failed"
 
@@ -642,8 +751,13 @@ class TestHarnessLoopErrorHandling:
         audit = FileAuditLog(tmp_path)
         with pytest.raises(HarnessLoopError) as exc_info:
             asyncio.run(
-                run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                                 phase_reader=_BrokenPhaseReader(), audit_log=audit)
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=_BrokenPhaseReader(),
+                    audit_log=audit,
+                )
             )
         assert len(exc_info.value.message) > 0
 
@@ -656,8 +770,13 @@ class TestHarnessLoopErrorHandling:
         audit = FileAuditLog(tmp_path)
         with pytest.raises(HarnessLoopError):
             asyncio.run(
-                run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                                 phase_reader=_BrokenPhaseReader(), audit_log=audit)
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=_BrokenPhaseReader(),
+                    audit_log=audit,
+                )
             )
         records = _read_audit(tmp_path)
         assert any(r.get("event") == "harness.run_loop.failed" for r in records)
@@ -671,8 +790,13 @@ class TestHarnessLoopErrorHandling:
         audit = FileAuditLog(tmp_path)
         with pytest.raises(HarnessLoopError):
             asyncio.run(
-                run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                                 phase_reader=_BrokenPhaseReader(), audit_log=audit)
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=_BrokenPhaseReader(),
+                    audit_log=audit,
+                )
             )
         records = _read_audit(tmp_path)
         record = next(r for r in records if r.get("event") == "harness.run_loop.failed")
@@ -687,9 +811,13 @@ class TestHarnessLoopErrorHandling:
         audit = FileAuditLog(tmp_path)
         with pytest.raises(HarnessLoopError):
             asyncio.run(
-                run_harness_loop("sess-audit-1", model_adapter=model,
-                                 sandbox_adapter=sandbox,
-                                 phase_reader=_BrokenPhaseReader(), audit_log=audit)
+                run_harness_loop(
+                    "sess-audit-1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=_BrokenPhaseReader(),
+                    audit_log=audit,
+                )
             )
         records = _read_audit(tmp_path)
         record = next(r for r in records if r.get("event") == "harness.run_loop.failed")
@@ -704,8 +832,13 @@ class TestHarnessLoopErrorHandling:
         audit = FileAuditLog(tmp_path)
         with pytest.raises(HarnessLoopError):
             asyncio.run(
-                run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                                 phase_reader=_BrokenPhaseReader(), audit_log=audit)
+                run_harness_loop(
+                    "s1",
+                    model_adapter=model,
+                    sandbox_adapter=sandbox,
+                    phase_reader=_BrokenPhaseReader(),
+                    audit_log=audit,
+                )
             )
         records = _read_audit(tmp_path)
         record = next(r for r in records if r.get("event") == "harness.run_loop.failed")
@@ -725,8 +858,13 @@ class TestHarnessLoopRelease:
         reader = _FakePhaseReader(["idle"])
         audit = FileAuditLog(tmp_path)
         result = asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         assert result is not None  # no exception raised; session cleanly released
 
@@ -736,8 +874,13 @@ class TestHarnessLoopRelease:
         reader = _FakePhaseReader(["paused"])
         audit = FileAuditLog(tmp_path)
         result = asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         assert result is not None
 
@@ -747,8 +890,13 @@ class TestHarnessLoopRelease:
         reader = _FakePhaseReader(["terminated"])
         audit = FileAuditLog(tmp_path)
         result = asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         assert result is not None
 
@@ -757,8 +905,13 @@ class TestHarnessLoopRelease:
         reader = _FakePhaseReader(["idle"])
         audit = FileAuditLog(tmp_path)
         result = asyncio.run(
-            run_harness_loop("s1", model_adapter=model, sandbox_adapter=sandbox,
-                             phase_reader=reader, audit_log=audit)
+            run_harness_loop(
+                "s1",
+                model_adapter=model,
+                sandbox_adapter=sandbox,
+                phase_reader=reader,
+                audit_log=audit,
+            )
         )
         model_calls, tool_calls, final_phase = result
         assert isinstance(model_calls, int)
@@ -858,9 +1011,7 @@ class TestHarnessLoopIterationBudget:
         )
         assert final_phase == "terminated"
 
-    def test_hard_breach_writes_phase_change_event_to_terminated(
-        self, tmp_path: Path
-    ) -> None:
+    def test_hard_breach_writes_phase_change_event_to_terminated(self, tmp_path: Path) -> None:
         model, sandbox = _adapters(
             tmp_path / "fix",
             [_tool_use_call(), _end_turn_call()],
@@ -1574,9 +1725,7 @@ class TestHarnessLoopWaitingForTool:
         results = [d for _, et, d in event_log.events if et == "tool_call.result"]
         assert results[0]["tool_id"] == "tu_xyz"
 
-    def test_multiple_waiting_for_tool_phases_produce_multiple_events(
-        self, tmp_path: Path
-    ) -> None:
+    def test_multiple_waiting_for_tool_phases_produce_multiple_events(self, tmp_path: Path) -> None:
         model, sandbox = _adapters(
             tmp_path / "fix",
             [_end_turn_call()],
@@ -1655,9 +1804,7 @@ class TestHarnessLoopWaitingForTool:
         )
         assert tool_calls == 2
 
-    def test_final_phase_idle_after_tool_dispatch_and_model_end_turn(
-        self, tmp_path: Path
-    ) -> None:
+    def test_final_phase_idle_after_tool_dispatch_and_model_end_turn(self, tmp_path: Path) -> None:
         model, sandbox = _adapters(
             tmp_path / "fix",
             [_end_turn_call()],
@@ -1802,9 +1949,7 @@ class TestHarnessLoopWaitingForTool:
 
     # --- canvas_op content block: special message kind on the Session ---
 
-    def test_canvas_op_event_emitted_when_content_is_canvas_op_dict(
-        self, tmp_path: Path
-    ) -> None:
+    def test_canvas_op_event_emitted_when_content_is_canvas_op_dict(self, tmp_path: Path) -> None:
         canvas_op_content = {
             "type": "canvas_op",
             "canvas_op": {
@@ -1838,9 +1983,7 @@ class TestHarnessLoopWaitingForTool:
         canvas_events = [d for _, et, d in event_log.events if et == "canvas_op"]
         assert len(canvas_events) == 1
 
-    def test_canvas_op_event_payload_matches_canvas_op_block(
-        self, tmp_path: Path
-    ) -> None:
+    def test_canvas_op_event_payload_matches_canvas_op_block(self, tmp_path: Path) -> None:
         canvas_op_block = {
             "op": "set",
             "widget_id": "w1",
@@ -1907,9 +2050,7 @@ class TestHarnessLoopWaitingForTool:
         assert len(canvas_events) == 1
         assert canvas_events[0] == canvas_op_block
 
-    def test_no_canvas_op_event_for_non_canvas_tool_result(
-        self, tmp_path: Path
-    ) -> None:
+    def test_no_canvas_op_event_for_non_canvas_tool_result(self, tmp_path: Path) -> None:
         model, sandbox = _adapters(
             tmp_path / "fix",
             [_end_turn_call()],
@@ -1931,9 +2072,7 @@ class TestHarnessLoopWaitingForTool:
         canvas_events = [d for _, et, d in event_log.events if et == "canvas_op"]
         assert canvas_events == []
 
-    def test_canvas_op_event_emitted_after_tool_call_result_event(
-        self, tmp_path: Path
-    ) -> None:
+    def test_canvas_op_event_emitted_after_tool_call_result_event(self, tmp_path: Path) -> None:
         canvas_op_content = {
             "type": "canvas_op",
             "canvas_op": {
@@ -2028,9 +2167,7 @@ def _router_end_turn_with_cache(
 
 
 class TestHarnessLoopCacheMetrics:
-    def test_usage_delta_carries_cache_creation_tokens_from_router(
-        self, tmp_path: Path
-    ) -> None:
+    def test_usage_delta_carries_cache_creation_tokens_from_router(self, tmp_path: Path) -> None:
         router = _FakeModelRouter([_router_end_turn_with_cache(cache_creation=150)])
         model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
         reader = _FakePhaseReader(["waiting_for_model"])
@@ -2051,9 +2188,7 @@ class TestHarnessLoopCacheMetrics:
         assert len(deltas) == 1
         assert deltas[0].cache_creation_tokens == 150
 
-    def test_usage_delta_carries_cache_read_tokens_from_router(
-        self, tmp_path: Path
-    ) -> None:
+    def test_usage_delta_carries_cache_read_tokens_from_router(self, tmp_path: Path) -> None:
         router = _FakeModelRouter([_router_end_turn_with_cache(cache_read=200)])
         model, sandbox = _adapters(tmp_path / "fix", [_end_turn_call()])
         reader = _FakePhaseReader(["waiting_for_model"])
@@ -2226,9 +2361,7 @@ class TestHarnessLoopModelCallError:
 
     # --- Fake adapter path: no hooks → terminate ---
 
-    def test_fake_adapter_failure_no_hooks_final_phase_terminated(
-        self, tmp_path: Path
-    ) -> None:
+    def test_fake_adapter_failure_no_hooks_final_phase_terminated(self, tmp_path: Path) -> None:
         model_fixture = tmp_path / "fix" / "model_responses.ndjson"
         model_fixture.parent.mkdir(parents=True, exist_ok=True)
         model_fixture.write_text("")
@@ -2248,9 +2381,7 @@ class TestHarnessLoopModelCallError:
 
     # --- on_error hooks dispatched ---
 
-    def test_on_error_hooks_dispatched_on_router_failure(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
+    def test_on_error_hooks_dispatched_on_router_failure(self, tmp_path: Path, monkeypatch) -> None:
         dispatched: list[str] = []
 
         async def _fake_dispatch(event, data, ctx, *, hooks_dir, audit_log):
@@ -2306,9 +2437,7 @@ class TestHarnessLoopModelCallError:
         )
         assert "on_error" in dispatched
 
-    def test_no_on_error_hooks_without_hooks_dir(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
+    def test_no_on_error_hooks_without_hooks_dir(self, tmp_path: Path, monkeypatch) -> None:
         dispatched: list[str] = []
 
         async def _fake_dispatch(event, data, ctx, *, hooks_dir, audit_log):
@@ -2368,9 +2497,7 @@ class TestHarnessLoopModelCallError:
 
     # --- recoverable verdict: loop continues ---
 
-    def test_recoverable_verdict_allows_loop_to_continue(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
+    def test_recoverable_verdict_allows_loop_to_continue(self, tmp_path: Path, monkeypatch) -> None:
         from meridiand._hook_dispatch import HookDispatchResult
 
         call_count = 0
@@ -2549,9 +2676,7 @@ class TestHarnessLoopModelCallError:
                 )
             )
 
-    def test_on_error_hook_failure_writes_audit_log(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
+    def test_on_error_hook_failure_writes_audit_log(self, tmp_path: Path, monkeypatch) -> None:
         async def _failing_dispatch(event, data, ctx, *, hooks_dir, audit_log):
             if event == "on_error":
                 raise OSError("hook system unavailable")
@@ -2862,9 +2987,7 @@ class TestHarnessLoopEndTurn:
                 )
             )
 
-    def test_post_message_hook_failure_writes_audit_log(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
+    def test_post_message_hook_failure_writes_audit_log(self, tmp_path: Path, monkeypatch) -> None:
         async def _failing_dispatch(event, data, ctx, *, hooks_dir, audit_log):
             if event == "post_message":
                 raise OSError("hook system unavailable")
@@ -3106,9 +3229,7 @@ class TestHarnessLoopMaxTokens:
         phase_changes = [d for _, et, d in event_log.events if et == "session.phase_change"]
         assert not any(d.get("reason") == "max_tokens" for d in phase_changes)
 
-    def test_without_event_log_still_transitions_to_waiting_for_user(
-        self, tmp_path: Path
-    ) -> None:
+    def test_without_event_log_still_transitions_to_waiting_for_user(self, tmp_path: Path) -> None:
         model, sandbox = _adapters(tmp_path / "fix", [_max_tokens_call()])
         reader = _FakePhaseReader(["running"])
         audit = FileAuditLog(tmp_path)
@@ -3360,9 +3481,7 @@ class TestHarnessLoopStopReasonToolUse:
 
     # --- session.phase_change to waiting_for_tool ---
 
-    def test_phase_change_event_written_with_after_waiting_for_tool(
-        self, tmp_path: Path
-    ) -> None:
+    def test_phase_change_event_written_with_after_waiting_for_tool(self, tmp_path: Path) -> None:
         model, sandbox = _adapters(
             tmp_path / "fix",
             [_tool_use_call(), _end_turn_call()],
@@ -3428,13 +3547,12 @@ class TestHarnessLoopStopReasonToolUse:
 
     # --- pre_tool_call hook in tool_use handling ---
 
-    def test_pre_tool_call_hook_dispatched_on_tool_use(
-        self, tmp_path: Path, monkeypatch
-    ) -> None:
+    def test_pre_tool_call_hook_dispatched_on_tool_use(self, tmp_path: Path, monkeypatch) -> None:
         dispatched: list[str] = []
 
         async def _fake_dispatch(event, data, ctx, *, hooks_dir, audit_log):
             dispatched.append(event)
+            return []
 
         monkeypatch.setattr("meridiand._replay.dispatch_hooks", _fake_dispatch)
 
@@ -3465,6 +3583,7 @@ class TestHarnessLoopStopReasonToolUse:
         async def _fake_dispatch(event, data, ctx, *, hooks_dir, audit_log):
             if event == "pre_tool_call":
                 captured.append(data)
+            return []
 
         monkeypatch.setattr("meridiand._replay.dispatch_hooks", _fake_dispatch)
 
@@ -3603,7 +3722,9 @@ class TestHarnessLoopStopReasonToolUse:
         opts = ModelCallOpts(
             model="fake:model",
             messages=[Message(role="user", content="hi")],
-            tools=[ToolDefinition(name="bash", description="run", input_schema=_BASH_SCHEMA_STRICT)],
+            tools=[
+                ToolDefinition(name="bash", description="run", input_schema=_BASH_SCHEMA_STRICT)
+            ],
         )
         model, sandbox = _adapters(tmp_path / "fix", [_tool_use_call("tu_1", "bash")], [])
         reader = _FakePhaseReader(["running"])
@@ -3627,7 +3748,9 @@ class TestHarnessLoopStopReasonToolUse:
         opts = ModelCallOpts(
             model="fake:model",
             messages=[Message(role="user", content="hi")],
-            tools=[ToolDefinition(name="bash", description="run", input_schema=_BASH_SCHEMA_STRICT)],
+            tools=[
+                ToolDefinition(name="bash", description="run", input_schema=_BASH_SCHEMA_STRICT)
+            ],
         )
         model, sandbox = _adapters(
             tmp_path / "fix",
@@ -3770,12 +3893,14 @@ def _router_thinking_then_text(*chunks: str) -> list:
     events.append(ThinkingDeltaEvent(type="thinking_delta", thinking="let me think"))
     for chunk in chunks:
         events.append(TextDeltaEvent(type="text_delta", text=chunk))
-    events.append(MessageStopEvent(
-        type="message_stop",
-        stop_reason="end_turn",
-        input_tokens=12,
-        output_tokens=6,
-    ))
+    events.append(
+        MessageStopEvent(
+            type="message_stop",
+            stop_reason="end_turn",
+            input_tokens=12,
+            output_tokens=6,
+        )
+    )
     return events
 
 
@@ -3823,7 +3948,8 @@ class TestHarnessLoopContract4EventTranslation:
             )
         )
         thinking_deltas = [
-            d for _, et, d in event_log.events
+            d
+            for _, et, d in event_log.events
             if et == "message.delta" and d.get("kind") == "thinking"
         ]
         assert len(thinking_deltas) == 1
@@ -3847,7 +3973,8 @@ class TestHarnessLoopContract4EventTranslation:
             )
         )
         thinking_deltas = [
-            d for _, et, d in event_log.events
+            d
+            for _, et, d in event_log.events
             if et == "message.delta" and d.get("kind") == "thinking"
         ]
         assert thinking_deltas[0]["kind"] == "thinking"
@@ -3871,7 +3998,8 @@ class TestHarnessLoopContract4EventTranslation:
             )
         )
         thinking_deltas = [
-            d for _, et, d in event_log.events
+            d
+            for _, et, d in event_log.events
             if et == "message.delta" and d.get("kind") == "thinking"
         ]
         assert thinking_deltas[0]["thinking"] == "let me think"
@@ -3895,7 +4023,8 @@ class TestHarnessLoopContract4EventTranslation:
             )
         )
         thinking_deltas = [
-            d for _, et, d in event_log.events
+            d
+            for _, et, d in event_log.events
             if et == "message.delta" and d.get("kind") == "thinking"
         ]
         assert thinking_deltas[0]["model_call_number"] == 1
@@ -3940,8 +4069,7 @@ class TestHarnessLoopContract4EventTranslation:
             )
         )
         text_deltas = [
-            d for _, et, d in event_log.events
-            if et == "message.delta" and d.get("kind") == "text"
+            d for _, et, d in event_log.events if et == "message.delta" and d.get("kind") == "text"
         ]
         assert len(text_deltas) == 1
         assert text_deltas[0]["kind"] == "text"

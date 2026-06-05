@@ -3,7 +3,8 @@ Webhook endpoint conformance suite.
 
 Tests cover:
   - POST /v1/webhooks returns 201 on success.
-  - Response fields: id, name, url, secret_ref, event_filter, max_retries, backoff, status, created_at.
+  - Response fields: id, name, url, secret_ref, event_filter, max_retries, backoff,
+    status, created_at.
   - id has "webhook_" prefix.
   - IDs are unique across calls.
   - status is always "active" on creation.
@@ -47,13 +48,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -146,7 +145,9 @@ class TestWebhookCreateResponse:
 
     def test_response_has_url(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.post("/v1/webhooks", json=_body(url="https://hooks.example.com/deploy")).json()
+        body = client.post(
+            "/v1/webhooks", json=_body(url="https://hooks.example.com/deploy")
+        ).json()
         assert body["url"] == "https://hooks.example.com/deploy"
 
     def test_response_status_is_active(self, storage_root: Path) -> None:
@@ -174,9 +175,7 @@ class TestWebhookCreateResponse:
     def test_response_has_event_filter_types(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         types = ["session.completed"]
-        body = client.post(
-            "/v1/webhooks", json=_body(event_filter={"types": types})
-        ).json()
+        body = client.post("/v1/webhooks", json=_body(event_filter={"types": types})).json()
         assert body["event_filter"]["types"] == types
 
     def test_event_filter_session_id_null_when_omitted(self, storage_root: Path) -> None:

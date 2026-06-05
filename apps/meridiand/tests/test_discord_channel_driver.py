@@ -16,21 +16,19 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
 
 import httpx
-import pytest
 from meridiand._discord_channel_driver import (
-    DISCORD_EMBED_CONTENT_TYPE,
     _DEFAULT_INTENTS,
+    DISCORD_EMBED_CONTENT_TYPE,
     DiscordChannelDriver,
-    NoopGatewayClient,
-    NoopSecretResolver,
 )
 from opentelemetry.trace import StatusCode
+import pytest
 from sdk_channel import (
     ChannelCapabilities,
     ChannelFailure,
@@ -40,7 +38,6 @@ from sdk_channel import (
 )
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -222,9 +219,7 @@ class TestDriverSendSuccess:
         transport = httpx.MockTransport(_handler)
         async with httpx.AsyncClient(transport=transport) as client:
             _make_channel_file(storage_root)
-            result = await _make_driver(storage_root, http_client=client).send(
-                _make_send_request()
-            )
+            result = await _make_driver(storage_root, http_client=client).send(_make_send_request())
 
         assert result.delivered is True
 
@@ -235,9 +230,7 @@ class TestDriverSendSuccess:
         transport = httpx.MockTransport(_handler)
         async with httpx.AsyncClient(transport=transport) as client:
             _make_channel_file(storage_root)
-            result = await _make_driver(storage_root, http_client=client).send(
-                _make_send_request()
-            )
+            result = await _make_driver(storage_root, http_client=client).send(_make_send_request())
 
         assert result.message_id == "discord_12345"
 
@@ -248,9 +241,7 @@ class TestDriverSendSuccess:
         transport = httpx.MockTransport(_handler)
         async with httpx.AsyncClient(transport=transport) as client:
             _make_channel_file(storage_root)
-            result = await _make_driver(storage_root, http_client=client).send(
-                _make_send_request()
-            )
+            result = await _make_driver(storage_root, http_client=client).send(_make_send_request())
 
         assert isinstance(result.timestamp, str) and len(result.timestamp) > 0
 
@@ -394,9 +385,7 @@ class TestDriverSendFailures:
     def _otel_clear(self) -> None:
         _otel_exporter.clear()
 
-    async def test_missing_config_raises_chan_config_not_found(
-        self, storage_root: Path
-    ) -> None:
+    async def test_missing_config_raises_chan_config_not_found(self, storage_root: Path) -> None:
         driver = _make_driver(storage_root)
         req = SendRequest(
             channel_id="ch_nonexistent",
@@ -423,9 +412,7 @@ class TestDriverSendFailures:
             await driver.send(_make_send_request())
         assert exc_info.value.code == "CHAN_BOT_TOKEN_UNRESOLVABLE"
 
-    async def test_missing_discord_channel_id_raises_failure(
-        self, storage_root: Path
-    ) -> None:
+    async def test_missing_discord_channel_id_raises_failure(self, storage_root: Path) -> None:
         _make_channel_file(storage_root, discord_channel_id=None)
         driver = _make_driver(storage_root)
         with pytest.raises(ChannelFailure) as exc_info:
@@ -440,9 +427,7 @@ class TestDriverSendFailures:
         async with httpx.AsyncClient(transport=transport) as client:
             _make_channel_file(storage_root)
             with pytest.raises(ChannelFailure) as exc_info:
-                await _make_driver(storage_root, http_client=client).send(
-                    _make_send_request()
-                )
+                await _make_driver(storage_root, http_client=client).send(_make_send_request())
         assert exc_info.value.code == "CHAN_SEND_FAILED"
 
     async def test_network_error_raises_chan_send_failed(self, storage_root: Path) -> None:
@@ -453,9 +438,7 @@ class TestDriverSendFailures:
         async with httpx.AsyncClient(transport=transport) as client:
             _make_channel_file(storage_root)
             with pytest.raises(ChannelFailure) as exc_info:
-                await _make_driver(storage_root, http_client=client).send(
-                    _make_send_request()
-                )
+                await _make_driver(storage_root, http_client=client).send(_make_send_request())
         assert exc_info.value.code == "CHAN_SEND_FAILED"
 
     async def test_invalid_embed_json_raises_chan_embed_parse_failed(
@@ -505,9 +488,7 @@ class TestDriverSendFailures:
         async with httpx.AsyncClient(transport=transport) as client:
             _make_channel_file(storage_root)
             with pytest.raises(ChannelFailure):
-                await _make_driver(storage_root, http_client=client).send(
-                    _make_send_request()
-                )
+                await _make_driver(storage_root, http_client=client).send(_make_send_request())
 
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
         span = spans.get("discord.channel.send")
@@ -613,9 +594,7 @@ class TestDriverStart:
         await driver.start(req)
         await asyncio.sleep(0)
         # Second start with same channel_id should not create another task.
-        req2 = StartRequest(
-            channel_id="ch_disc_1", channel_kind=_DISCORD_KIND, session_id="s2"
-        )
+        req2 = StartRequest(channel_id="ch_disc_1", channel_kind=_DISCORD_KIND, session_id="s2")
         await driver.start(req2)
         await asyncio.sleep(0)
 
@@ -624,10 +603,8 @@ class TestDriverStart:
         # Cleanup.
         for task in driver._gateway_tasks.values():
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
-            except (asyncio.CancelledError, Exception):
-                pass
 
     async def test_start_registers_slash_commands(self, storage_root: Path) -> None:
         captured: list[httpx.Request] = []
@@ -657,9 +634,7 @@ class TestDriverStart:
         body = json.loads(command_posts[0].content)
         assert body["name"] == "ping"
 
-    async def test_start_slash_command_uses_bot_auth_header(
-        self, storage_root: Path
-    ) -> None:
+    async def test_start_slash_command_uses_bot_auth_header(self, storage_root: Path) -> None:
         headers_seen: list[dict] = []
 
         async def _handler(request: httpx.Request) -> httpx.Response:
@@ -698,15 +673,11 @@ class TestDriverStart:
             driver = _make_driver(storage_root, http_client=client)
             with pytest.raises(ChannelFailure) as exc_info:
                 await driver.start(
-                    StartRequest(
-                        channel_id="ch_disc_1", channel_kind=_DISCORD_KIND, session_id="s"
-                    )
+                    StartRequest(channel_id="ch_disc_1", channel_kind=_DISCORD_KIND, session_id="s")
                 )
         assert exc_info.value.code == "CHAN_SLASH_CMD_FAILED"
 
-    async def test_start_missing_bot_token_ref_raises_failure(
-        self, storage_root: Path
-    ) -> None:
+    async def test_start_missing_bot_token_ref_raises_failure(self, storage_root: Path) -> None:
         _make_channel_file(storage_root, bot_token_ref=None)
         driver = _make_driver(storage_root)
         with pytest.raises(ChannelFailure) as exc_info:

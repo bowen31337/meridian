@@ -17,8 +17,8 @@ Every implementation of Sandbox must satisfy these tests. The suite covers:
 
 from __future__ import annotations
 
-import pytest
 from opentelemetry.trace import StatusCode
+import pytest
 from sdk_sandbox import (
     AuditLogEntry,
     ExecutionContext,
@@ -397,12 +397,16 @@ CAPPED_TOOL = ToolDefinition(
     required_capabilities=frozenset({"fs.read", "net.outbound"}),
 )
 
-CTX_NO_CAPS = ExecutionContext(session_id="sess1", workspace="/tmp", granted_capabilities=frozenset())
+CTX_NO_CAPS = ExecutionContext(
+    session_id="sess1", workspace="/tmp", granted_capabilities=frozenset()
+)
 CTX_PARTIAL_CAPS = ExecutionContext(
     session_id="sess1", workspace="/tmp", granted_capabilities=frozenset({"fs.read"})
 )
 CTX_FULL_CAPS = ExecutionContext(
-    session_id="sess1", workspace="/tmp", granted_capabilities=frozenset({"fs.read", "net.outbound"})
+    session_id="sess1",
+    workspace="/tmp",
+    granted_capabilities=frozenset({"fs.read", "net.outbound"}),
 )
 
 
@@ -420,36 +424,26 @@ class TestExecuteCapabilityDenied:
     ) -> None:
         """Denial must return, never raise — no orchestrator crash."""
         sb, _ = registered_sandbox_with_capped_tool()
-        result = await sb.execute(
-            "test.restricted", {}, CTX_NO_CAPS, make_options(audit_log)
-        )
+        result = await sb.execute("test.restricted", {}, CTX_NO_CAPS, make_options(audit_log))
         assert isinstance(result, SandboxResult)
 
-    async def test_is_error_true(
-        self, mock_span: MockSpan, audit_log: CapturingAuditLog
-    ) -> None:
+    async def test_is_error_true(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
         sb, _ = registered_sandbox_with_capped_tool()
-        result = await sb.execute(
-            "test.restricted", {}, CTX_NO_CAPS, make_options(audit_log)
-        )
+        result = await sb.execute("test.restricted", {}, CTX_NO_CAPS, make_options(audit_log))
         assert result.is_error is True
 
     async def test_error_code_capability_denied(
         self, mock_span: MockSpan, audit_log: CapturingAuditLog
     ) -> None:
         sb, _ = registered_sandbox_with_capped_tool()
-        result = await sb.execute(
-            "test.restricted", {}, CTX_NO_CAPS, make_options(audit_log)
-        )
+        result = await sb.execute("test.restricted", {}, CTX_NO_CAPS, make_options(audit_log))
         assert result.error_code == "capability_denied"
 
     async def test_error_message_names_missing_caps(
         self, mock_span: MockSpan, audit_log: CapturingAuditLog
     ) -> None:
         sb, _ = registered_sandbox_with_capped_tool()
-        result = await sb.execute(
-            "test.restricted", {}, CTX_NO_CAPS, make_options(audit_log)
-        )
+        result = await sb.execute("test.restricted", {}, CTX_NO_CAPS, make_options(audit_log))
         assert result.error_message is not None
         assert "fs.read" in result.error_message
         assert "net.outbound" in result.error_message
@@ -458,9 +452,7 @@ class TestExecuteCapabilityDenied:
         self, mock_span: MockSpan, audit_log: CapturingAuditLog
     ) -> None:
         sb, _ = registered_sandbox_with_capped_tool()
-        result = await sb.execute(
-            "test.restricted", {}, CTX_PARTIAL_CAPS, make_options(audit_log)
-        )
+        result = await sb.execute("test.restricted", {}, CTX_PARTIAL_CAPS, make_options(audit_log))
         assert result.is_error is True
         assert result.error_code == "capability_denied"
         assert result.error_message is not None
@@ -471,9 +463,7 @@ class TestExecuteCapabilityDenied:
     ) -> None:
         """All required caps granted → dispatch proceeds, no error."""
         sb, dispatcher = registered_sandbox_with_capped_tool()
-        result = await sb.execute(
-            "test.restricted", {}, CTX_FULL_CAPS, make_options(audit_log)
-        )
+        result = await sb.execute("test.restricted", {}, CTX_FULL_CAPS, make_options(audit_log))
         assert result.is_error is False
         assert result.content == "ok"
         assert len(dispatcher.calls) == 1
@@ -532,9 +522,7 @@ class TestExecuteCapabilityDenied:
     ) -> None:
         errors: list[SandboxFailure] = []
         sb, _ = registered_sandbox_with_capped_tool()
-        await sb.execute(
-            "test.restricted", {}, CTX_NO_CAPS, make_options(audit_log, errors)
-        )
+        await sb.execute("test.restricted", {}, CTX_NO_CAPS, make_options(audit_log, errors))
         assert len(errors) == 1
         assert errors[0].code == "capability_denied"
 
@@ -543,9 +531,7 @@ class TestExecuteCapabilityDenied:
     ) -> None:
         errors: list[SandboxFailure] = []
         sb, _ = registered_sandbox_with_capped_tool()
-        await sb.execute(
-            "test.restricted", {}, CTX_NO_CAPS, make_options(audit_log, errors)
-        )
+        await sb.execute("test.restricted", {}, CTX_NO_CAPS, make_options(audit_log, errors))
         assert "test.restricted" in errors[0].message
 
     async def test_dispatcher_not_called_on_denial(
@@ -566,7 +552,7 @@ class TestExecuteCapabilityDenied:
         self, mock_span: MockSpan, audit_log: CapturingAuditLog
     ) -> None:
         """Tool with no required_capabilities always dispatches regardless of granted."""
-        sb, dispatcher = registered_sandbox(), StubDispatcher()
+        _sb, _dispatcher = registered_sandbox(), StubDispatcher()
         # TOOL_DEF has empty required_capabilities
         result = await registered_sandbox().execute(
             "test.echo", {}, CTX_NO_CAPS, make_options(audit_log)
@@ -610,9 +596,7 @@ class TestExecuteEnvMismatch:
         result = await sb.execute("test.docker_only", {}, CTX_NO_ENV, make_options(audit_log))
         assert isinstance(result, SandboxResult)
 
-    async def test_is_error_true(
-        self, mock_span: MockSpan, audit_log: CapturingAuditLog
-    ) -> None:
+    async def test_is_error_true(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
         sb, _ = registered_sandbox_with_env_tool()
         result = await sb.execute("test.docker_only", {}, CTX_NO_ENV, make_options(audit_log))
         assert result.is_error is True
@@ -636,9 +620,7 @@ class TestExecuteEnvMismatch:
         self, mock_span: MockSpan, audit_log: CapturingAuditLog
     ) -> None:
         sb, _ = registered_sandbox_with_env_tool()
-        result = await sb.execute(
-            "test.docker_only", {}, CTX_WRONG_ENV, make_options(audit_log)
-        )
+        result = await sb.execute("test.docker_only", {}, CTX_WRONG_ENV, make_options(audit_log))
         assert result.is_error is True
         assert result.error_code == "env_mismatch"
         assert result.error_message is not None
@@ -649,9 +631,7 @@ class TestExecuteEnvMismatch:
     ) -> None:
         """Correct environment → dispatch proceeds, no error."""
         sb, dispatcher = registered_sandbox_with_env_tool()
-        result = await sb.execute(
-            "test.docker_only", {}, CTX_RIGHT_ENV, make_options(audit_log)
-        )
+        result = await sb.execute("test.docker_only", {}, CTX_RIGHT_ENV, make_options(audit_log))
         assert result.is_error is False
         assert result.content == "ok"
         assert len(dispatcher.calls) == 1
@@ -718,9 +698,7 @@ class TestExecuteEnvMismatch:
     ) -> None:
         errors: list[SandboxFailure] = []
         sb, _ = registered_sandbox_with_env_tool()
-        await sb.execute(
-            "test.docker_only", {}, CTX_NO_ENV, make_options(audit_log, errors)
-        )
+        await sb.execute("test.docker_only", {}, CTX_NO_ENV, make_options(audit_log, errors))
         assert len(errors) == 1
         assert errors[0].code == "env_mismatch"
 
@@ -967,9 +945,7 @@ class TestExecuteTimeout:
         result = await sb.execute("test.slow", {}, CTX, make_options(audit_log))
         assert isinstance(result, SandboxResult)
 
-    async def test_is_error_true(
-        self, mock_span: MockSpan, audit_log: CapturingAuditLog
-    ) -> None:
+    async def test_is_error_true(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
         sb, _ = registered_sandbox_with_timeout_tool()
         result = await sb.execute("test.slow", {}, CTX, make_options(audit_log))
         assert result.is_error is True
@@ -1250,9 +1226,7 @@ class TestOutputSchemaValidation:
         self, mock_span: MockSpan, audit_log: CapturingAuditLog
     ) -> None:
         """Tool with output_schema=None must pass through any content without error."""
-        result = await registered_sandbox().execute(
-            "test.echo", {}, CTX, make_options(audit_log)
-        )
+        result = await registered_sandbox().execute("test.echo", {}, CTX, make_options(audit_log))
         assert result.is_error is False
 
     async def test_dispatcher_error_skips_output_validation(
@@ -1329,7 +1303,10 @@ class TestInputSchemaValidation:
         """Schema failure must return SandboxResult(is_error=True), never raise."""
         sb, _ = registered_sandbox_with_input_schema_tool()
         result = await sb.execute(
-            "test.input_schema", "not an object", CTX, make_options(audit_log)  # type: ignore[arg-type]
+            "test.input_schema",
+            "not an object",
+            CTX,
+            make_options(audit_log),  # type: ignore[arg-type]
         )
         assert result.is_error is True
 
@@ -1359,7 +1336,10 @@ class TestInputSchemaValidation:
         """Root-level type mismatch should report '$' as the offending path."""
         sb, _ = registered_sandbox_with_input_schema_tool()
         result = await sb.execute(
-            "test.input_schema", "not an object", CTX, make_options(audit_log)  # type: ignore[arg-type]
+            "test.input_schema",
+            "not an object",
+            CTX,
+            make_options(audit_log),  # type: ignore[arg-type]
         )
         assert result.error_message is not None
         assert "$" in result.error_message
@@ -1370,7 +1350,10 @@ class TestInputSchemaValidation:
         """Input schema failure must return SandboxResult, never raise."""
         sb, _ = registered_sandbox_with_input_schema_tool()
         result = await sb.execute(
-            "test.input_schema", "bad", CTX, make_options(audit_log)  # type: ignore[arg-type]
+            "test.input_schema",
+            "bad",
+            CTX,
+            make_options(audit_log),  # type: ignore[arg-type]
         )
         assert isinstance(result, SandboxResult)
 
@@ -1380,7 +1363,10 @@ class TestInputSchemaValidation:
         """Dispatcher must not be invoked when input schema validation fails."""
         sb, dispatcher = registered_sandbox_with_input_schema_tool()
         await sb.execute(
-            "test.input_schema", "bad", CTX, make_options(audit_log)  # type: ignore[arg-type]
+            "test.input_schema",
+            "bad",
+            CTX,
+            make_options(audit_log),  # type: ignore[arg-type]
         )
         assert dispatcher.calls == []
 
@@ -1389,7 +1375,10 @@ class TestInputSchemaValidation:
     ) -> None:
         sb, _ = registered_sandbox_with_input_schema_tool()
         await sb.execute(
-            "test.input_schema", "bad", CTX, make_options(audit_log)  # type: ignore[arg-type]
+            "test.input_schema",
+            "bad",
+            CTX,
+            make_options(audit_log),  # type: ignore[arg-type]
         )
         assert len(audit_log.entries) == 1
         entry = audit_log.entries[0]
@@ -1416,7 +1405,10 @@ class TestInputSchemaValidation:
 
         sb, _ = registered_sandbox_with_input_schema_tool()
         await sb.execute(
-            "test.input_schema", "bad", CTX, make_options(audit_log)  # type: ignore[arg-type]
+            "test.input_schema",
+            "bad",
+            CTX,
+            make_options(audit_log),  # type: ignore[arg-type]
         )
         assert mock_span.status is not None
         assert mock_span.status.status_code == StatusCode.ERROR
@@ -1426,7 +1418,10 @@ class TestInputSchemaValidation:
     ) -> None:
         sb, _ = registered_sandbox_with_input_schema_tool()
         await sb.execute(
-            "test.input_schema", "bad", CTX, make_options(audit_log)  # type: ignore[arg-type]
+            "test.input_schema",
+            "bad",
+            CTX,
+            make_options(audit_log),  # type: ignore[arg-type]
         )
         event_names = [e[0] for e in mock_span.events]
         assert "input.schema.failed" in event_names
@@ -1449,7 +1444,10 @@ class TestInputSchemaValidation:
         errors: list[SandboxFailure] = []
         sb, _ = registered_sandbox_with_input_schema_tool()
         await sb.execute(
-            "test.input_schema", "bad", CTX, make_options(audit_log, errors)  # type: ignore[arg-type]
+            "test.input_schema",
+            "bad",
+            CTX,
+            make_options(audit_log, errors),  # type: ignore[arg-type]
         )
         assert len(errors) == 1
         assert errors[0].code == "input_validation_failed"
@@ -1460,7 +1458,10 @@ class TestInputSchemaValidation:
         errors: list[SandboxFailure] = []
         sb, _ = registered_sandbox_with_input_schema_tool()
         await sb.execute(
-            "test.input_schema", "bad", CTX, make_options(audit_log, errors)  # type: ignore[arg-type]
+            "test.input_schema",
+            "bad",
+            CTX,
+            make_options(audit_log, errors),  # type: ignore[arg-type]
         )
         assert "test.input_schema" in errors[0].message
 
@@ -1469,7 +1470,10 @@ class TestInputSchemaValidation:
     ) -> None:
         sb, _ = registered_sandbox_with_input_schema_tool()
         await sb.execute(
-            "test.input_schema", "bad", CTX, make_options(audit_log)  # type: ignore[arg-type]
+            "test.input_schema",
+            "bad",
+            CTX,
+            make_options(audit_log),  # type: ignore[arg-type]
         )
         assert mock_span.ended
 
@@ -1478,9 +1482,7 @@ class TestInputSchemaValidation:
     ) -> None:
         """Missing required field is caught pre-dispatch."""
         sb, dispatcher = registered_sandbox_with_input_schema_tool()
-        result = await sb.execute(
-            "test.input_schema", {"count": 1}, CTX, make_options(audit_log)
-        )
+        result = await sb.execute("test.input_schema", {"count": 1}, CTX, make_options(audit_log))
         assert result.is_error is True
         assert result.error_code == "input_validation_failed"
         assert dispatcher.calls == []

@@ -46,14 +46,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from meridiand._vault_backend_os_keychain import OsKeychainVaultBackend
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -103,9 +101,7 @@ def _create_vault(client: TestClient, **overrides) -> dict:
 
 
 def _store_secret(client: TestClient, vault_id: str, **overrides) -> dict:
-    return client.post(
-        f"/v1/vaults/{vault_id}/secrets", json=_secret_body(**overrides)
-    ).json()
+    return client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(**overrides)).json()
 
 
 def _audit_records(storage_root: Path) -> list[dict]:
@@ -119,9 +115,7 @@ def _make_backend() -> OsKeychainVaultBackend:
     return OsKeychainVaultBackend(_keyring=_MemoryKeyring())
 
 
-def _make_client_from_backend(
-    storage_root: Path, backend: OsKeychainVaultBackend
-) -> TestClient:
+def _make_client_from_backend(storage_root: Path, backend: OsKeychainVaultBackend) -> TestClient:
     app = create_app(
         FileAuditLog(storage_root),
         storage_root=storage_root,
@@ -171,12 +165,8 @@ class TestVaultSecretStoreSuccess:
     def test_different_keys_each_succeed(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         vault_id = _create_vault(client)["id"]
-        r1 = client.post(
-            f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="key_a")
-        )
-        r2 = client.post(
-            f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="key_b")
-        )
+        r1 = client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="key_a"))
+        r2 = client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="key_b"))
         assert r1.status_code == 201
         assert r2.status_code == 201
 
@@ -262,41 +252,31 @@ class TestVaultSecretStoreValidation:
     def test_empty_key_returns_422(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         vault_id = _create_vault(client)["id"]
-        resp = client.post(
-            f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="   ")
-        )
+        resp = client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="   "))
         assert resp.status_code == 422
 
     def test_empty_key_error_code(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         vault_id = _create_vault(client)["id"]
-        body = client.post(
-            f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="")
-        ).json()
+        body = client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="")).json()
         assert body["error"]["code"] == "vault_secret_invalid_request"
 
     def test_empty_key_error_has_message(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         vault_id = _create_vault(client)["id"]
-        body = client.post(
-            f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="")
-        ).json()
+        body = client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="")).json()
         assert len(body["error"]["message"]) > 0
 
     def test_missing_key_returns_422(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         vault_id = _create_vault(client)["id"]
-        resp = client.post(
-            f"/v1/vaults/{vault_id}/secrets", json={"value": "s3cr3t"}
-        )
+        resp = client.post(f"/v1/vaults/{vault_id}/secrets", json={"value": "s3cr3t"})
         assert resp.status_code == 422
 
     def test_missing_value_returns_422(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         vault_id = _create_vault(client)["id"]
-        resp = client.post(
-            f"/v1/vaults/{vault_id}/secrets", json={"key": "my_key"}
-        )
+        resp = client.post(f"/v1/vaults/{vault_id}/secrets", json={"key": "my_key"})
         assert resp.status_code == 422
 
 
@@ -308,23 +288,17 @@ class TestVaultSecretStoreValidation:
 class TestVaultSecretStoreVaultNotFound:
     def test_unknown_vault_returns_404(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        resp = client.post(
-            "/v1/vaults/vault_nonexistent/secrets", json=_secret_body()
-        )
+        resp = client.post("/v1/vaults/vault_nonexistent/secrets", json=_secret_body())
         assert resp.status_code == 404
 
     def test_not_found_error_code(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.post(
-            "/v1/vaults/vault_nonexistent/secrets", json=_secret_body()
-        ).json()
+        body = client.post("/v1/vaults/vault_nonexistent/secrets", json=_secret_body()).json()
         assert body["error"]["code"] == "vault_not_found"
 
     def test_not_found_error_has_message(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.post(
-            "/v1/vaults/vault_nonexistent/secrets", json=_secret_body()
-        ).json()
+        body = client.post("/v1/vaults/vault_nonexistent/secrets", json=_secret_body()).json()
         assert len(body["error"]["message"]) > 0
 
 
@@ -338,27 +312,21 @@ class TestVaultSecretStoreConflict:
         client = _make_client(storage_root)
         vault_id = _create_vault(client)["id"]
         client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="dupe"))
-        resp = client.post(
-            f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="dupe")
-        )
+        resp = client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="dupe"))
         assert resp.status_code == 409
 
     def test_duplicate_error_code(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         vault_id = _create_vault(client)["id"]
         client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="dupe2"))
-        body = client.post(
-            f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="dupe2")
-        ).json()
+        body = client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="dupe2")).json()
         assert body["error"]["code"] == "vault_secret_conflict"
 
     def test_duplicate_error_has_message(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         vault_id = _create_vault(client)["id"]
         client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="dupe3"))
-        body = client.post(
-            f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="dupe3")
-        ).json()
+        body = client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="dupe3")).json()
         assert len(body["error"]["message"]) > 0
 
     def test_different_vault_same_key_allowed(self, storage_root: Path) -> None:
@@ -366,9 +334,7 @@ class TestVaultSecretStoreConflict:
         v1 = _create_vault(client, name="vault-one")["id"]
         v2 = _create_vault(client, name="vault-two")["id"]
         client.post(f"/v1/vaults/{v1}/secrets", json=_secret_body(key="shared"))
-        resp = client.post(
-            f"/v1/vaults/{v2}/secrets", json=_secret_body(key="shared")
-        )
+        resp = client.post(f"/v1/vaults/{v2}/secrets", json=_secret_body(key="shared"))
         assert resp.status_code == 201
 
 
@@ -403,9 +369,7 @@ class TestVaultSecretStoreAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/vaults/vault_ghost/secrets", json=_secret_body())
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "vault.secret.store.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.secret.store.failed"
         )
         assert record["level"] == "error"
 
@@ -413,9 +377,7 @@ class TestVaultSecretStoreAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/vaults/vault_ghost/secrets", json=_secret_body())
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "vault.secret.store.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.secret.store.failed"
         )
         assert record["code"] == "vault_not_found"
 
@@ -424,9 +386,7 @@ class TestVaultSecretStoreAuditLog:
         vault_id = _create_vault(client)["id"]
         client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key=""))
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "vault.secret.store.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.secret.store.failed"
         )
         assert record["code"] == "vault_secret_invalid_request"
 
@@ -436,9 +396,7 @@ class TestVaultSecretStoreAuditLog:
         client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="dup4"))
         client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="dup4"))
         records = [
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "vault.secret.store.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.secret.store.failed"
         ]
         assert any(r["code"] == "vault_secret_conflict" for r in records)
 
@@ -446,21 +404,15 @@ class TestVaultSecretStoreAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/vaults/vault_ghost/secrets", json=_secret_body())
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "vault.secret.store.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.secret.store.failed"
         )
         assert record["detail"]["vault_id"] == "vault_ghost"
 
     def test_audit_detail_has_key(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        client.post(
-            "/v1/vaults/vault_ghost/secrets", json=_secret_body(key="audit_key")
-        )
+        client.post("/v1/vaults/vault_ghost/secrets", json=_secret_body(key="audit_key"))
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "vault.secret.store.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.secret.store.failed"
         )
         assert record["detail"]["key"] == "audit_key"
 
@@ -468,9 +420,7 @@ class TestVaultSecretStoreAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/vaults/vault_ghost/secrets", json=_secret_body())
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "vault.secret.store.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.secret.store.failed"
         )
         assert len(record["detail"]["message"]) > 0
 
@@ -526,9 +476,7 @@ class TestVaultSecretStoreOtel:
         client = self._client(storage_root)
         vault_id = _create_vault(client)["id"]
         _otel_exporter.clear()
-        client.post(
-            f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="otel_key")
-        )
+        client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="otel_key"))
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
         span = spans.get("vault.secret.store")
         assert span is not None
@@ -720,9 +668,7 @@ class TestVaultSecretMetaAuditLog:
         client = _make_client(storage_root)
         client.get("/v1/vaults/vault_ghost/secrets/k/meta")
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "vault.secret.meta.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.secret.meta.failed"
         )
         assert record["level"] == "error"
 
@@ -730,9 +676,7 @@ class TestVaultSecretMetaAuditLog:
         client = _make_client(storage_root)
         client.get("/v1/vaults/vault_ghost/secrets/k/meta")
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "vault.secret.meta.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.secret.meta.failed"
         )
         assert record["code"] == "vault_not_found"
 
@@ -741,9 +685,7 @@ class TestVaultSecretMetaAuditLog:
         vault_id = _create_vault(client)["id"]
         client.get(f"/v1/vaults/{vault_id}/secrets/missing/meta")
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "vault.secret.meta.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.secret.meta.failed"
         )
         assert record["code"] == "vault_secret_not_found"
 
@@ -751,9 +693,7 @@ class TestVaultSecretMetaAuditLog:
         client = _make_client(storage_root)
         client.get("/v1/vaults/vault_ghost/secrets/k/meta")
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "vault.secret.meta.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.secret.meta.failed"
         )
         assert record["detail"]["vault_id"] == "vault_ghost"
 
@@ -762,9 +702,7 @@ class TestVaultSecretMetaAuditLog:
         vault_id = _create_vault(client)["id"]
         client.get(f"/v1/vaults/{vault_id}/secrets/target_key/meta")
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "vault.secret.meta.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.secret.meta.failed"
         )
         assert record["detail"]["name"] == "target_key"
 
@@ -772,9 +710,7 @@ class TestVaultSecretMetaAuditLog:
         client = _make_client(storage_root)
         client.get("/v1/vaults/vault_ghost/secrets/k/meta")
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "vault.secret.meta.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.secret.meta.failed"
         )
         assert len(record["detail"]["message"]) > 0
 
@@ -979,9 +915,7 @@ class TestVaultSecretListAuditLog:
         client = _make_client(storage_root)
         client.get("/v1/vaults/vault_ghost/secrets")
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "vault.secret.list.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.secret.list.failed"
         )
         assert record["level"] == "error"
 
@@ -989,9 +923,7 @@ class TestVaultSecretListAuditLog:
         client = _make_client(storage_root)
         client.get("/v1/vaults/vault_ghost/secrets")
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "vault.secret.list.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.secret.list.failed"
         )
         assert record["code"] == "vault_not_found"
 
@@ -999,9 +931,7 @@ class TestVaultSecretListAuditLog:
         client = _make_client(storage_root)
         client.get("/v1/vaults/vault_ghost/secrets")
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "vault.secret.list.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.secret.list.failed"
         )
         assert record["detail"]["vault_id"] == "vault_ghost"
 
@@ -1009,9 +939,7 @@ class TestVaultSecretListAuditLog:
         client = _make_client(storage_root)
         client.get("/v1/vaults/vault_ghost/secrets")
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "vault.secret.list.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "vault.secret.list.failed"
         )
         assert len(record["detail"]["message"]) > 0
 
@@ -1098,18 +1026,14 @@ class TestVaultSecretDeleteSuccess:
         client = _make_client(storage_root)
         vault_id = _create_vault(client)["id"]
         _store_secret(client, vault_id, key="del_key")
-        resp = client.delete(
-            f"/v1/vaults/{vault_id}/secrets/del_key?confirm=true"
-        )
+        resp = client.delete(f"/v1/vaults/{vault_id}/secrets/del_key?confirm=true")
         assert resp.status_code == 204
 
     def test_delete_response_has_no_body(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         vault_id = _create_vault(client)["id"]
         _store_secret(client, vault_id, key="nb_key")
-        resp = client.delete(
-            f"/v1/vaults/{vault_id}/secrets/nb_key?confirm=true"
-        )
+        resp = client.delete(f"/v1/vaults/{vault_id}/secrets/nb_key?confirm=true")
         assert resp.content == b""
 
     def test_deleted_secret_absent_from_list(self, storage_root: Path) -> None:
@@ -1135,9 +1059,7 @@ class TestVaultSecretDeleteSuccess:
         vault_id = _create_vault(client)["id"]
         _store_secret(client, vault_id, key="once_key")
         client.delete(f"/v1/vaults/{vault_id}/secrets/once_key?confirm=true")
-        resp = client.delete(
-            f"/v1/vaults/{vault_id}/secrets/once_key?confirm=true"
-        )
+        resp = client.delete(f"/v1/vaults/{vault_id}/secrets/once_key?confirm=true")
         assert resp.status_code == 404
 
 
@@ -1172,9 +1094,7 @@ class TestVaultSecretDeleteConfirmation:
         client = _make_client(storage_root)
         vault_id = _create_vault(client)["id"]
         _store_secret(client, vault_id, key="fc_key")
-        resp = client.delete(
-            f"/v1/vaults/{vault_id}/secrets/fc_key?confirm=false"
-        )
+        resp = client.delete(f"/v1/vaults/{vault_id}/secrets/fc_key?confirm=false")
         assert resp.status_code == 400
 
     def test_secret_not_deleted_without_confirm(self, storage_root: Path) -> None:
@@ -1195,39 +1115,29 @@ class TestVaultSecretDeleteNotFound:
     def test_unknown_key_returns_404(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         vault_id = _create_vault(client)["id"]
-        resp = client.delete(
-            f"/v1/vaults/{vault_id}/secrets/no_such_key?confirm=true"
-        )
+        resp = client.delete(f"/v1/vaults/{vault_id}/secrets/no_such_key?confirm=true")
         assert resp.status_code == 404
 
     def test_unknown_key_error_code(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         vault_id = _create_vault(client)["id"]
-        body = client.delete(
-            f"/v1/vaults/{vault_id}/secrets/no_such_key?confirm=true"
-        ).json()
+        body = client.delete(f"/v1/vaults/{vault_id}/secrets/no_such_key?confirm=true").json()
         assert body["error"]["code"] == "vault_secret_not_found"
 
     def test_unknown_key_has_message(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         vault_id = _create_vault(client)["id"]
-        body = client.delete(
-            f"/v1/vaults/{vault_id}/secrets/no_such_key?confirm=true"
-        ).json()
+        body = client.delete(f"/v1/vaults/{vault_id}/secrets/no_such_key?confirm=true").json()
         assert len(body["error"]["message"]) > 0
 
     def test_unknown_vault_returns_404(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        resp = client.delete(
-            "/v1/vaults/vault_ghost/secrets/any_key?confirm=true"
-        )
+        resp = client.delete("/v1/vaults/vault_ghost/secrets/any_key?confirm=true")
         assert resp.status_code == 404
 
     def test_unknown_vault_error_code(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.delete(
-            "/v1/vaults/vault_ghost/secrets/any_key?confirm=true"
-        ).json()
+        body = client.delete("/v1/vaults/vault_ghost/secrets/any_key?confirm=true").json()
         assert body["error"]["code"] == "vault_not_found"
 
 
@@ -1375,9 +1285,7 @@ class TestVaultSecretDeleteOtel:
         vault_id = _create_vault(client)["id"]
         _store_secret(client, vault_id, key="named_del")
         _otel_exporter.clear()
-        client.delete(
-            f"/v1/vaults/{vault_id}/secrets/named_del?confirm=true"
-        )
+        client.delete(f"/v1/vaults/{vault_id}/secrets/named_del?confirm=true")
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
         span = spans.get("vault.secret.delete")
         assert span is not None
@@ -1394,9 +1302,7 @@ class TestVaultSecretDeleteRouteWiring:
         client = _make_client(storage_root)
         vault_id = _create_vault(client)["id"]
         _store_secret(client, vault_id, key="wiring_del")
-        resp = client.delete(
-            f"/v1/vaults/{vault_id}/secrets/wiring_del?confirm=true"
-        )
+        resp = client.delete(f"/v1/vaults/{vault_id}/secrets/wiring_del?confirm=true")
         assert resp.status_code != 404
 
     def test_route_absent_without_storage_root(self, storage_root: Path) -> None:

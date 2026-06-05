@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import uuid
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -56,9 +56,7 @@ class AcpComplianceError(MeridianError):
 # ---------------------------------------------------------------------------
 
 _COMPLIANCE_TARGET = "hermes"
-_COMPLIANCE_TARGETS: dict[str, str] = {
-    _COMPLIANCE_TARGET: "http://hermes.compliance.internal/acp"
-}
+_COMPLIANCE_TARGETS: dict[str, str] = {_COMPLIANCE_TARGET: "http://hermes.compliance.internal/acp"}
 
 
 class _SuccessPeerClient:
@@ -81,9 +79,7 @@ class _FailingInboundHandler:
 # ---------------------------------------------------------------------------
 
 
-def _result(
-    name: str, description: str, passed: bool, reason: str | None = None
-) -> dict[str, Any]:
+def _result(name: str, description: str, passed: bool, reason: str | None = None) -> dict[str, Any]:
     r: dict[str, Any] = {
         "name": name,
         "description": description,
@@ -261,9 +257,7 @@ async def _run_compliance_suite() -> list[dict[str, Any]]:
                 f"status {r5.status_code}",
             )
         )
-        denied_code = (
-            r5.json().get("error", {}).get("code") if r5.status_code == 403 else None
-        )
+        denied_code = r5.json().get("error", {}).get("code") if r5.status_code == 403 else None
         results.append(
             _result(
                 "denial_error_code",
@@ -404,9 +398,7 @@ async def _run_compliance_suite() -> list[dict[str, Any]]:
                 f"status {r12.status_code}",
             )
         )
-        tf_code = (
-            r12.json().get("error", {}).get("code") if r12.status_code == 502 else None
-        )
+        tf_code = r12.json().get("error", {}).get("code") if r12.status_code == 502 else None
         results.append(
             _result(
                 "transport_failure_error_code",
@@ -507,9 +499,7 @@ async def _run_compliance_suite() -> list[dict[str, Any]]:
                 f"status {r15.status_code}",
             )
         )
-        ib_denied_code = (
-            r15.json().get("error", {}).get("code") if r15.status_code == 403 else None
-        )
+        ib_denied_code = r15.json().get("error", {}).get("code") if r15.status_code == 403 else None
         results.append(
             _result(
                 "inbound_denial_error_code",
@@ -619,9 +609,7 @@ async def _run_compliance_suite() -> list[dict[str, Any]]:
                 f"status {r20.status_code}",
             )
         )
-        ib_fail_code = (
-            r20.json().get("error", {}).get("code") if r20.status_code == 500 else None
-        )
+        ib_fail_code = r20.json().get("error", {}).get("code") if r20.status_code == 500 else None
         results.append(
             _result(
                 "inbound_processing_failure_error_code",

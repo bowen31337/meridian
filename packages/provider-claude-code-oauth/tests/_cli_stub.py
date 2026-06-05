@@ -66,40 +66,50 @@ def main() -> None:
                 continue
 
             if _error:
-                _emit({
-                    "type": "error",
-                    "call_id": call_id,
-                    "code": "cli_test_error",
-                    "message": "stub configured to return error",
-                })
+                _emit(
+                    {
+                        "type": "error",
+                        "call_id": call_id,
+                        "code": "cli_test_error",
+                        "message": "stub configured to return error",
+                    }
+                )
                 continue
 
             if _disallowed_tool:
-                _emit({
-                    "type": "tool_use_start",
-                    "call_id": call_id,
-                    "id": "tool_abc123",
-                    "name": _disallowed_tool,
-                })
+                _emit(
+                    {
+                        "type": "tool_use_start",
+                        "call_id": call_id,
+                        "id": "tool_abc123",
+                        "name": _disallowed_tool,
+                    }
+                )
 
-            _emit({
-                "type": "message_start",
-                "call_id": call_id,
-                "model": model,
-                "input_tokens": 10,
-            })
-            _emit({
-                "type": "text_delta",
-                "call_id": call_id,
-                "text": "Hello from stub!",
-            })
-            _emit({
-                "type": "message_stop",
-                "call_id": call_id,
-                "input_tokens": 10,
-                "output_tokens": 4,
-                "stop_reason": "end_turn",
-            })
+            _emit(
+                {
+                    "type": "message_start",
+                    "call_id": call_id,
+                    "model": model,
+                    "input_tokens": 10,
+                }
+            )
+            _emit(
+                {
+                    "type": "text_delta",
+                    "call_id": call_id,
+                    "text": "Hello from stub!",
+                }
+            )
+            _emit(
+                {
+                    "type": "message_stop",
+                    "call_id": call_id,
+                    "input_tokens": 10,
+                    "output_tokens": 4,
+                    "stop_reason": "end_turn",
+                }
+            )
             _emit({"type": "done", "call_id": call_id})
 
 

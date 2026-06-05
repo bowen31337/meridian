@@ -49,15 +49,14 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from meridiand._audit import FileAuditLog
 from meridiand._skill_forge import (
     SkillForgeProposalError,
     build_skill_version_proposal,
 )
+import pytest
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -82,11 +81,13 @@ def _make_result(
     tools: list[dict[str, Any]] | None = None,
     tests: list[dict[str, Any]] | None = None,
 ) -> str:
-    return json.dumps({
-        "instructions": instructions,
-        "tools": tools if tools is not None else [{"name": "tool1", "description": "A tool"}],
-        "tests": tests if tests is not None else [],
-    })
+    return json.dumps(
+        {
+            "instructions": instructions,
+            "tools": tools if tools is not None else [{"name": "tool1", "description": "A tool"}],
+            "tests": tests if tests is not None else [],
+        }
+    )
 
 
 def _write_primary_user(
@@ -196,9 +197,7 @@ class TestProposalRecordStorage:
         _call(storage_root, job=job)
         assert _proposals(storage_root)[0]["derived_from_session_ids"] == ["sess_a", "sess_b"]
 
-    def test_proposal_derived_from_session_ids_none_when_absent(
-        self, storage_root: Path
-    ) -> None:
+    def test_proposal_derived_from_session_ids_none_when_absent(self, storage_root: Path) -> None:
         _call(storage_root, job=_make_job())
         assert _proposals(storage_root)[0]["derived_from_session_ids"] is None
 
@@ -273,16 +272,12 @@ class TestProposalVersionId:
 
 
 class TestPrimaryUserNotification:
-    def test_writes_notification_when_primary_user_exists(
-        self, storage_root: Path
-    ) -> None:
+    def test_writes_notification_when_primary_user_exists(self, storage_root: Path) -> None:
         _write_primary_user(storage_root / "user_profiles")
         _call(storage_root)
         assert len(_notifications(storage_root)) == 1
 
-    def test_notification_user_id_matches_primary_user(
-        self, storage_root: Path
-    ) -> None:
+    def test_notification_user_id_matches_primary_user(self, storage_root: Path) -> None:
         _write_primary_user(storage_root / "user_profiles", user_id="user_prim_test")
         _call(storage_root)
         notif = _notifications(storage_root)[0]
@@ -294,9 +289,7 @@ class TestPrimaryUserNotification:
         notif = _notifications(storage_root)[0]
         assert notif["proposal_id"] == proposal_id
 
-    def test_notification_type_is_skill_forge_proposal(
-        self, storage_root: Path
-    ) -> None:
+    def test_notification_type_is_skill_forge_proposal(self, storage_root: Path) -> None:
         _write_primary_user(storage_root / "user_profiles")
         _call(storage_root)
         assert _notifications(storage_root)[0]["type"] == "skill_forge.proposal"
@@ -344,7 +337,8 @@ class TestAuditLogSuccess:
     def test_audit_level_is_info(self, storage_root: Path) -> None:
         _call(storage_root)
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.created"
         )
         assert record["level"] == "info"
@@ -352,7 +346,8 @@ class TestAuditLogSuccess:
     def test_audit_detail_has_job_id(self, storage_root: Path) -> None:
         _call(storage_root, job=_make_job(job_id="sfjob_audit"))
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.created"
         )
         assert record["detail"]["job_id"] == "sfjob_audit"
@@ -360,7 +355,8 @@ class TestAuditLogSuccess:
     def test_audit_detail_has_run_id(self, storage_root: Path) -> None:
         _call(storage_root, run_id="sfrun_audit")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.created"
         )
         assert record["detail"]["run_id"] == "sfrun_audit"
@@ -368,7 +364,8 @@ class TestAuditLogSuccess:
     def test_audit_detail_has_skill_id(self, storage_root: Path) -> None:
         _call(storage_root, job=_make_job(skill_id="skill_audit"))
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.created"
         )
         assert record["detail"]["skill_id"] == "skill_audit"
@@ -376,7 +373,8 @@ class TestAuditLogSuccess:
     def test_audit_detail_has_proposal_id(self, storage_root: Path) -> None:
         proposal_id = _call(storage_root)
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.created"
         )
         assert record["detail"]["proposal_id"] == proposal_id
@@ -387,7 +385,8 @@ class TestAuditLogSuccess:
         _write_primary_user(storage_root / "user_profiles", user_id="user_notif_audit")
         _call(storage_root)
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.created"
         )
         assert record["detail"]["notified_user_id"] == "user_notif_audit"
@@ -397,7 +396,8 @@ class TestAuditLogSuccess:
     ) -> None:
         _call(storage_root)
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.created"
         )
         assert record["detail"]["notified_user_id"] is None
@@ -414,20 +414,14 @@ class TestFailureInvalidJson:
             _call(storage_root, result_text="not valid json{{{{")
 
     def test_error_http_status_is_500(self) -> None:
-        err = SkillForgeProposalError(
-            message="boom", timestamp="2024-01-01T00:00:00+00:00"
-        )
+        err = SkillForgeProposalError(message="boom", timestamp="2024-01-01T00:00:00+00:00")
         assert err.http_status() == 500
 
     def test_error_code_is_skill_forge_proposal_failed(self) -> None:
-        err = SkillForgeProposalError(
-            message="boom", timestamp="2024-01-01T00:00:00+00:00"
-        )
+        err = SkillForgeProposalError(message="boom", timestamp="2024-01-01T00:00:00+00:00")
         assert err.code == "skill_forge_proposal_failed"
 
-    def test_failure_writes_proposal_failed_audit_entry(
-        self, storage_root: Path
-    ) -> None:
+    def test_failure_writes_proposal_failed_audit_entry(self, storage_root: Path) -> None:
         with pytest.raises(SkillForgeProposalError):
             _call(storage_root, result_text="not valid json")
         records = _audit_records(storage_root)
@@ -437,7 +431,8 @@ class TestFailureInvalidJson:
         with pytest.raises(SkillForgeProposalError):
             _call(storage_root, result_text="bad")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.failed"
         )
         assert record["level"] == "error"
@@ -446,7 +441,8 @@ class TestFailureInvalidJson:
         with pytest.raises(SkillForgeProposalError):
             _call(storage_root, result_text="bad", job=_make_job(job_id="sfjob_fail"))
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.failed"
         )
         assert record["detail"]["job_id"] == "sfjob_fail"
@@ -455,7 +451,8 @@ class TestFailureInvalidJson:
         with pytest.raises(SkillForgeProposalError):
             _call(storage_root, result_text="bad", run_id="sfrun_fail")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.failed"
         )
         assert record["detail"]["run_id"] == "sfrun_fail"
@@ -468,7 +465,8 @@ class TestFailureInvalidJson:
                 job=_make_job(skill_id="skill_fail"),
             )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.failed"
         )
         assert record["detail"]["skill_id"] == "skill_fail"
@@ -477,7 +475,8 @@ class TestFailureInvalidJson:
         with pytest.raises(SkillForgeProposalError):
             _call(storage_root, result_text="bad")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.proposal.failed"
         )
         assert "message" in record["detail"] and record["detail"]["message"]
@@ -524,17 +523,13 @@ class TestOtelSpans:
         assert span is not None
         assert span.attributes["skill_forge.skill_id"] == "skill_otel"
 
-    def test_span_has_proposal_id_attribute_on_success(
-        self, storage_root: Path
-    ) -> None:
+    def test_span_has_proposal_id_attribute_on_success(self, storage_root: Path) -> None:
         proposal_id = _call(storage_root)
         span = self._get_span()
         assert span is not None
         assert span.attributes["skill_forge.proposal_id"] == proposal_id
 
-    def test_span_success_attribute_true_on_success(
-        self, storage_root: Path
-    ) -> None:
+    def test_span_success_attribute_true_on_success(self, storage_root: Path) -> None:
         _call(storage_root)
         span = self._get_span()
         assert span is not None
@@ -546,9 +541,7 @@ class TestOtelSpans:
         span_names = [s.name for s in _otel_exporter.get_finished_spans()]
         assert "skill_forge.build_proposal" in span_names
 
-    def test_span_success_attribute_false_on_failure(
-        self, storage_root: Path
-    ) -> None:
+    def test_span_success_attribute_false_on_failure(self, storage_root: Path) -> None:
         with pytest.raises(SkillForgeProposalError):
             _call(storage_root, result_text="bad json")
         span = self._get_span()

@@ -26,18 +26,15 @@ Covers:
 from __future__ import annotations
 
 import pytest
-from core_errors import BudgetExceededError
-
 from sdk_budget import (
+    CORRECT_HARD_REASON_CODE,
     BudgetOverrunDiscipline,
     BudgetOverrunDisciplineError,
     BudgetOverrunDisciplineOptions,
-    CORRECT_HARD_REASON_CODE,
     HardBudgetReasonCodeError,
 )
 
 from .conftest import CapturingAuditLog, MockSpan
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -131,7 +128,9 @@ class TestRecordSoftOverrun:
         assert attrs["budget.actual"] == 10.5
         assert "budget.overrun_ratio" in attrs
 
-    def test_no_audit_entry_on_success(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_no_audit_entry_on_success(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         d = make_discipline(audit_log)
         d.record_soft_overrun(
             scope="session",
@@ -163,7 +162,8 @@ class TestRecordSoftOverrunFailure:
     def test_internal_failure_raises_discipline_error(
         self, mock_tracer, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        d = make_discipline()
+        make_discipline()
+
         # Patch get_tracer to return a tracer whose start_as_current_span raises
         class _ExplodingSpan:
             name = "budget.overrun.soft"
@@ -310,7 +310,9 @@ class TestValidateHardTransitionReasonSuccess:
         assert attrs["budget.scope"] == "session"
         assert attrs["budget.scope_id"] == "s3"
 
-    def test_no_audit_entry_on_success(self, mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+    def test_no_audit_entry_on_success(
+        self, mock_span: MockSpan, audit_log: CapturingAuditLog
+    ) -> None:
         d = make_discipline(audit_log)
         d.validate_hard_transition_reason(
             scope="session",
@@ -337,9 +339,7 @@ class TestValidateHardTransitionReasonSuccess:
 
 
 class TestValidateHardTransitionReasonWrongCode:
-    def test_wrong_code_raises_hard_budget_reason_code_error(
-        self, mock_span: MockSpan
-    ) -> None:
+    def test_wrong_code_raises_hard_budget_reason_code_error(self, mock_span: MockSpan) -> None:
         d = make_discipline()
         with pytest.raises(HardBudgetReasonCodeError):
             d.validate_hard_transition_reason(

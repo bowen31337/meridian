@@ -40,9 +40,7 @@ import json
 from pathlib import Path
 
 import pytest
-
 from sdk_budget import ModelPricing, PriceBook
-
 
 # ---------------------------------------------------------------------------
 # Fixtures / helpers

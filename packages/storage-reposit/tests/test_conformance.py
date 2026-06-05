@@ -105,12 +105,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sqlite3
 from pathlib import Path
+import sqlite3
 from typing import Any
 
-import pytest
 from opentelemetry.trace import StatusCode
+import pytest
 from storage_event_log import SessionEvent
 from storage_reposit import (
     AuditLogEntry,
@@ -1007,9 +1007,7 @@ class TestMigrationRuntimeSuccess:
         result = rt.migrate(options=make_migration_options(audit_log))
         assert result == 2
 
-    def test_span_name(
-        self, mock_migration_span: MockSpan, audit_log: CapturingAuditLog
-    ) -> None:
+    def test_span_name(self, mock_migration_span: MockSpan, audit_log: CapturingAuditLog) -> None:
         make_migration_runtime().migrate(options=make_migration_options(audit_log))
         assert mock_migration_span.name == "migration.migrate"
 
@@ -1033,9 +1031,7 @@ class TestMigrationRuntimeSuccess:
         make_migration_runtime().migrate(options=make_migration_options(audit_log))
         assert audit_log.entries == []
 
-    def test_span_ended(
-        self, mock_migration_span: MockSpan, audit_log: CapturingAuditLog
-    ) -> None:
+    def test_span_ended(self, mock_migration_span: MockSpan, audit_log: CapturingAuditLog) -> None:
         make_migration_runtime().migrate(options=make_migration_options(audit_log))
         assert mock_migration_span.ended
 

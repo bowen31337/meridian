@@ -29,14 +29,12 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from storage_event_log import LocalEventLogWriter
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -160,27 +158,21 @@ class TestPhaseTransitionEndpoint:
     def test_event_written_to_log(self, storage_root: Path) -> None:
         audit = FileAuditLog(storage_root)
         client = _make_client(storage_root, audit)
-        client.post(
-            "/v1/x/sessions/log-sess/phase", json={"to_phase": "running", "reason": "go"}
-        )
+        client.post("/v1/x/sessions/log-sess/phase", json={"to_phase": "running", "reason": "go"})
         events = _read_phase_events(storage_root, "log-sess")
         assert len(events) == 1
 
     def test_event_data_has_before_field(self, storage_root: Path) -> None:
         audit = FileAuditLog(storage_root)
         client = _make_client(storage_root, audit)
-        client.post(
-            "/v1/x/sessions/bf-sess/phase", json={"to_phase": "running", "reason": "x"}
-        )
+        client.post("/v1/x/sessions/bf-sess/phase", json={"to_phase": "running", "reason": "x"})
         events = _read_phase_events(storage_root, "bf-sess")
         assert events[0]["before"] == "created"
 
     def test_event_data_has_after_field(self, storage_root: Path) -> None:
         audit = FileAuditLog(storage_root)
         client = _make_client(storage_root, audit)
-        client.post(
-            "/v1/x/sessions/af-sess/phase", json={"to_phase": "done", "reason": "x"}
-        )
+        client.post("/v1/x/sessions/af-sess/phase", json={"to_phase": "done", "reason": "x"})
         events = _read_phase_events(storage_root, "af-sess")
         assert events[0]["after"] == "done"
 
@@ -196,9 +188,7 @@ class TestPhaseTransitionEndpoint:
     def test_event_data_has_timestamp_field(self, storage_root: Path) -> None:
         audit = FileAuditLog(storage_root)
         client = _make_client(storage_root, audit)
-        client.post(
-            "/v1/x/sessions/ts-sess/phase", json={"to_phase": "running", "reason": "x"}
-        )
+        client.post("/v1/x/sessions/ts-sess/phase", json={"to_phase": "running", "reason": "x"})
         events = _read_phase_events(storage_root, "ts-sess")
         assert "timestamp" in events[0]
 
@@ -206,9 +196,7 @@ class TestPhaseTransitionEndpoint:
         audit = FileAuditLog(storage_root)
         writer = _make_writer(storage_root)
         client = _make_client(storage_root, audit, writer)
-        client.post(
-            "/v1/x/sessions/chain-sess/phase", json={"to_phase": "running", "reason": "a"}
-        )
+        client.post("/v1/x/sessions/chain-sess/phase", json={"to_phase": "running", "reason": "a"})
         body = client.post(
             "/v1/x/sessions/chain-sess/phase", json={"to_phase": "done", "reason": "b"}
         ).json()
@@ -245,9 +233,7 @@ class TestPhaseTransitionEndpoint:
         failing_writer.append.side_effect = OSError("disk full")
         app = create_app(audit, storage_root=storage_root, event_log=failing_writer)
         client = TestClient(app, raise_server_exceptions=False)
-        client.post(
-            "/v1/x/sessions/audit-sess/phase", json={"to_phase": "running", "reason": "x"}
-        )
+        client.post("/v1/x/sessions/audit-sess/phase", json={"to_phase": "running", "reason": "x"})
         records = _read_audit(storage_root)
         assert any(r.get("event") == "session.phase_transition.failed" for r in records)
 
@@ -257,9 +243,7 @@ class TestPhaseTransitionEndpoint:
         failing_writer.append.side_effect = OSError("disk full")
         app = create_app(audit, storage_root=storage_root, event_log=failing_writer)
         client = TestClient(app, raise_server_exceptions=False)
-        client.post(
-            "/v1/x/sessions/detail-sess/phase", json={"to_phase": "done", "reason": "x"}
-        )
+        client.post("/v1/x/sessions/detail-sess/phase", json={"to_phase": "done", "reason": "x"})
         records = _read_audit(storage_root)
         rec = next(r for r in records if r.get("event") == "session.phase_transition.failed")
         assert rec["detail"]["session_id"] == "detail-sess"
@@ -270,9 +254,7 @@ class TestPhaseTransitionEndpoint:
         failing_writer.append.side_effect = OSError("disk full")
         app = create_app(audit, storage_root=storage_root, event_log=failing_writer)
         client = TestClient(app, raise_server_exceptions=False)
-        client.post(
-            "/v1/x/sessions/tp-fail-sess/phase", json={"to_phase": "paused", "reason": "x"}
-        )
+        client.post("/v1/x/sessions/tp-fail-sess/phase", json={"to_phase": "paused", "reason": "x"})
         records = _read_audit(storage_root)
         rec = next(r for r in records if r.get("event") == "session.phase_transition.failed")
         assert rec["detail"]["to_phase"] == "paused"
@@ -309,9 +291,7 @@ class TestPhaseTransitionOtel:
 
     def test_success_emits_phase_transition_span(self, storage_root: Path) -> None:
         client = self._make_client(storage_root)
-        client.post(
-            "/v1/x/sessions/otel-sess/phase", json={"to_phase": "running", "reason": "x"}
-        )
+        client.post("/v1/x/sessions/otel-sess/phase", json={"to_phase": "running", "reason": "x"})
         span_names = [s.name for s in _otel_exporter.get_finished_spans()]
         assert "session.phase_transition" in span_names
 
@@ -323,9 +303,7 @@ class TestPhaseTransitionOtel:
         failing_writer.append.side_effect = OSError("disk full")
         app = create_app(audit, storage_root=storage_root, event_log=failing_writer)
         client = TestClient(app, raise_server_exceptions=False)
-        client.post(
-            "/v1/x/sessions/otel-fail/phase", json={"to_phase": "done", "reason": "x"}
-        )
+        client.post("/v1/x/sessions/otel-fail/phase", json={"to_phase": "done", "reason": "x"})
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
         pt_span = spans.get("session.phase_transition")
         assert pt_span is not None

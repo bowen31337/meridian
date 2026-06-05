@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
+import sys
 
 import click
 
@@ -14,10 +14,10 @@ from .files import files
 from .hooks import hooks
 from .imports import imports
 from .memory_stores import memory_stores
-from .sessions import sessions
-from .skills import skills
 from .meridianconfig import meridianconfig
 from .meridianrun import meridianrun
+from .sessions import sessions
+from .skills import skills
 from .tui import meridiantui
 from .user_profiles import user_profiles
 from .vaults import vaults
@@ -75,7 +75,9 @@ cli.add_command(meridiantui)
 
 
 @cli.command()
-@click.option("--root", type=click.Path(path_type=Path), default=None, help="Repo root (default: cwd)")
+@click.option(
+    "--root", type=click.Path(path_type=Path), default=None, help="Repo root (default: cwd)"
+)
 def workspace_init(root: Path | None) -> None:
     """Initialize the uv workspace at repo root."""
     try:

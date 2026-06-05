@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -120,7 +120,8 @@ async def _run_children_parallel(
     budget_model_calls: int | None,
 ) -> tuple[list[dict[str, Any]], str, int, int]:
     """
-    Run all children concurrently. Returns (child_results, status, total_model_calls, total_tool_calls).
+    Run all children concurrently. Returns
+    (child_results, status, total_model_calls, total_tool_calls).
 
     Each child emits usage.delta events via on_usage_delta callbacks that roll up into a
     shared _BudgetAccumulator.  When the accumulated total crosses budget_model_calls the
@@ -184,7 +185,7 @@ async def _run_children_parallel(
                 t.cancel()
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
-                for t, t_idx in task_to_idx.items():
+                for _t, t_idx in task_to_idx.items():
                     if child_results[t_idx] is None:
                         child_results[t_idx] = {
                             "fixture_session_id": children[t_idx].fixture_session_id,
@@ -241,8 +242,13 @@ def make_parallel_runs_router(*, audit_log: AuditLog, storage_root: Path) -> API
             )
 
             try:
-                child_results, status, total_model_calls, total_tool_calls = (
-                    await _run_children_parallel(body.children, storage_root, body.budget_model_calls)
+                (
+                    child_results,
+                    status,
+                    total_model_calls,
+                    total_tool_calls,
+                ) = await _run_children_parallel(
+                    body.children, storage_root, body.budget_model_calls
                 )
 
                 if status == "budget_exceeded":
@@ -293,7 +299,7 @@ def make_parallel_runs_router(*, audit_log: AuditLog, storage_root: Path) -> API
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         succeeded = sum(1 for r in child_results if r["status"] == "completed")
         cancelled = sum(1 for r in child_results if r["status"] == "cancelled")

@@ -1,12 +1,18 @@
-import React, { useEffect, useMemo, useRef } from "react";
-import type { AuditLog as WidgetAuditLog, AuditLogEntry as WidgetAuditLogEntry, CanvasOp } from "@meridian/sdk-widget";
+import type {
+  CanvasOp,
+  AuditLog as WidgetAuditLog,
+  AuditLogEntry as WidgetAuditLogEntry,
+} from "@meridian/sdk-widget";
 import { defaultRegistry } from "@meridian/sdk-widget";
+import type React from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useMeridianApi } from "../api/context.js";
 import { useSubmitCanvasInteraction } from "../api/hooks/useCanvasInteraction.js";
 import { useListSessionEvents } from "../api/hooks/useSessionEvents.js";
 import type { AuditLog } from "../workspace/audit.js";
-import { getTracer, recordInvocationEvent } from "./telemetry.js";
+import type { CanvasWidgetEntry, CanvasWidgetMap } from "./canvas-state.js";
 import { applyCanvasOp, toContentBlock } from "./canvas-state.js";
+import { getTracer, recordInvocationEvent } from "./telemetry.js";
 
 function makeWidgetAuditLog(workspaceLog: AuditLog, fallbackSessionId: string): WidgetAuditLog {
   return {
@@ -31,11 +37,14 @@ export function LiveCanvasPanel({ sessionId }: LiveCanvasPanelProps): React.Reac
   const onInteraction = useSubmitCanvasInteraction(sessionId);
   const { data, isLoading, isError, error } = useListSessionEvents(sessionId);
 
-  const widgetMap = useMemo(() => {
-    if (!data) return new Map();
+  const widgetMap = useMemo<CanvasWidgetMap>(() => {
+    if (!data) return new Map<string, CanvasWidgetEntry>();
     return data.events
       .filter((e) => e.kind === "canvas_op")
-      .reduce((state, event) => applyCanvasOp(state, event.payload as CanvasOp), new Map());
+      .reduce<CanvasWidgetMap>(
+        (state, event) => applyCanvasOp(state, event.payload as unknown as CanvasOp),
+        new Map<string, CanvasWidgetEntry>(),
+      );
   }, [data]);
 
   // Emit OTel span + structured event each time the set of canvas_op events grows.

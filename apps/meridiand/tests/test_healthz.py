@@ -23,7 +23,6 @@ from meridiand._healthz import make_healthz_router
 
 from tests._otel_shared import otel_exporter as _otel_exporter
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

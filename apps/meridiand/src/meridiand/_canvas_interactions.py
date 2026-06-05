@@ -10,13 +10,14 @@ deliver the interaction as a new conversation turn.
 Emits an OpenTelemetry span and logs a structured event on each invocation.
 On failure surfaces an HTTP error response and writes the failure to the audit log.
 """
+
 from __future__ import annotations
 
-import json
-import uuid
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -168,27 +169,31 @@ def make_canvas_interactions_router(
                 # Inject a structured user message so the harness surfaces the
                 # interaction as a new conversation turn (message.added event).
                 message_id = f"msg_{uuid.uuid4().hex}"
-                user_content = json.dumps({
-                    "type": "canvas_interaction",
-                    "interaction_id": interaction_id,
-                    "kind": body.kind,
-                    "widget_id": body.widget_id,
-                    "widget_kind": body.widget_kind,
-                    "payload": body.payload,
-                    "timestamp": now,
-                })
+                user_content = json.dumps(
+                    {
+                        "type": "canvas_interaction",
+                        "interaction_id": interaction_id,
+                        "kind": body.kind,
+                        "widget_id": body.widget_id,
+                        "widget_kind": body.widget_kind,
+                        "payload": body.payload,
+                        "timestamp": now,
+                    }
+                )
 
                 thread_dir = storage_root / "threads" / session_id / thread_id
                 thread_dir.mkdir(parents=True, exist_ok=True)
                 thread_manifest_path = thread_dir / "manifest.json"
                 if not thread_manifest_path.exists():
                     thread_manifest_path.write_text(
-                        json.dumps({
-                            "id": thread_id,
-                            "thread_id": thread_id,
-                            "session_id": session_id,
-                            "created_at": now,
-                        })
+                        json.dumps(
+                            {
+                                "id": thread_id,
+                                "thread_id": thread_id,
+                                "session_id": session_id,
+                                "created_at": now,
+                            }
+                        )
                     )
 
                 messages_path = thread_dir / "messages.ndjson"
@@ -260,7 +265,7 @@ def make_canvas_interactions_router(
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(
             content={

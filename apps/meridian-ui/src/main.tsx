@@ -1,7 +1,7 @@
+import { ALL_WIDGETS, defaultRegistry } from "@meridian/sdk-widget";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { ALL_WIDGETS, defaultRegistry } from "@meridian/sdk-widget";
 import { App } from "./App.js";
 import { MeridianApiProvider } from "./api/index.js";
 

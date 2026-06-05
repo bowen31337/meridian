@@ -38,13 +38,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -234,7 +232,9 @@ class TestChannelPersistence:
 
     def test_persisted_inbound_policy(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        channel_id = client.post("/v1/channels", json=_body(inbound_policy="paired_only")).json()["id"]
+        channel_id = client.post("/v1/channels", json=_body(inbound_policy="paired_only")).json()[
+            "id"
+        ]
         resource = _channel_resource(storage_root, channel_id)
         assert resource["inbound_policy"] == "paired_only"
 
@@ -326,8 +326,7 @@ class TestChannelAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/channels", json=_body(kind=""))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "channel.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "channel.create.failed"
         )
         assert record["level"] == "error"
 
@@ -335,8 +334,7 @@ class TestChannelAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/channels", json=_body(kind=""))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "channel.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "channel.create.failed"
         )
         assert record["code"] == "channel_invalid_request"
 
@@ -344,8 +342,7 @@ class TestChannelAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/channels", json=_body(kind=""))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "channel.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "channel.create.failed"
         )
         assert record["detail"]["channel_id"].startswith("ch_")
 
@@ -353,8 +350,7 @@ class TestChannelAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/channels", json=_body(kind=""))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "channel.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "channel.create.failed"
         )
         assert "kind" in record["detail"]
 
@@ -362,8 +358,7 @@ class TestChannelAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/channels", json=_body(kind=""))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "channel.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "channel.create.failed"
         )
         assert "message" in record["detail"]
         assert len(record["detail"]["message"]) > 0

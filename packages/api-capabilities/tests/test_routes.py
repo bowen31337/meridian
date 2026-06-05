@@ -9,25 +9,27 @@ Tests cover:
   - Audit log: written on validation failure, not written on success.
   - OTel span: correct name, attributes, events, ERROR status on failure.
 """
+
 from __future__ import annotations
 
-import pytest
+from api_capabilities._registry import CapabilityRegistry
 from fastapi.testclient import TestClient
 from opentelemetry.trace import StatusCode
 
-from api_capabilities._registry import CapabilityRegistry
-from tests.conftest import CapturingAuditLog, MockSpan, MockTracer, make_app
-
+from tests.conftest import CapturingAuditLog, MockTracer, make_app
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _client(
     audit_log: CapturingAuditLog | None = None,
     registry: CapabilityRegistry | None = None,
 ) -> TestClient:
-    return TestClient(make_app(audit_log=audit_log, registry=registry), raise_server_exceptions=False)
+    return TestClient(
+        make_app(audit_log=audit_log, registry=registry), raise_server_exceptions=False
+    )
 
 
 _VALID_BODY = {
@@ -39,6 +41,7 @@ _VALID_BODY = {
 # ---------------------------------------------------------------------------
 # GET /v1/x/capabilities — status and schema
 # ---------------------------------------------------------------------------
+
 
 class TestListStatus:
     def test_returns_200(self, mock_tracer: MockTracer) -> None:
@@ -102,6 +105,7 @@ class TestListIncludesPlugins:
 # GET /v1/x/capabilities — OTel
 # ---------------------------------------------------------------------------
 
+
 class TestListTelemetry:
     def test_span_name(self, mock_tracer: MockTracer) -> None:
         _client().get("/v1/x/capabilities")
@@ -130,6 +134,7 @@ class TestListTelemetry:
 # ---------------------------------------------------------------------------
 # POST /v1/x/capabilities — status and schema
 # ---------------------------------------------------------------------------
+
 
 class TestRegisterStatus:
     def test_returns_201(self, mock_tracer: MockTracer) -> None:
@@ -167,6 +172,7 @@ class TestRegisterStatus:
 # POST /v1/x/capabilities — OTel
 # ---------------------------------------------------------------------------
 
+
 class TestRegisterTelemetry:
     def test_span_name(self, mock_tracer: MockTracer) -> None:
         _client().post("/v1/x/capabilities", json=_VALID_BODY)
@@ -183,12 +189,16 @@ class TestRegisterTelemetry:
 
     def test_invocation_event_namespace(self, mock_tracer: MockTracer) -> None:
         _client().post("/v1/x/capabilities", json=_VALID_BODY)
-        ev = next(e for e in mock_tracer.spans[0].events if e[0] == "capabilities.register.invocation")
+        ev = next(
+            e for e in mock_tracer.spans[0].events if e[0] == "capabilities.register.invocation"
+        )
         assert ev[1]["namespace"] == "myplugin"
 
     def test_invocation_event_capability_count(self, mock_tracer: MockTracer) -> None:
         _client().post("/v1/x/capabilities", json=_VALID_BODY)
-        ev = next(e for e in mock_tracer.spans[0].events if e[0] == "capabilities.register.invocation")
+        ev = next(
+            e for e in mock_tracer.spans[0].events if e[0] == "capabilities.register.invocation"
+        )
         assert ev[1]["capability_count"] == 1
 
     def test_span_ended_on_success(self, mock_tracer: MockTracer) -> None:
@@ -200,13 +210,17 @@ class TestRegisterTelemetry:
 # POST /v1/x/capabilities — validation failures
 # ---------------------------------------------------------------------------
 
+
 class TestRegisterValidation:
     def test_invalid_namespace_uppercase_returns_422(self, mock_tracer: MockTracer) -> None:
         body = {"namespace": "MyPlugin", "capabilities": [{"name": "act", "param_expected": False}]}
         assert _client().post("/v1/x/capabilities", json=body).status_code == 422
 
     def test_invalid_namespace_with_spaces_returns_422(self, mock_tracer: MockTracer) -> None:
-        body = {"namespace": "my plugin", "capabilities": [{"name": "act", "param_expected": False}]}
+        body = {
+            "namespace": "my plugin",
+            "capabilities": [{"name": "act", "param_expected": False}],
+        }
         assert _client().post("/v1/x/capabilities", json=body).status_code == 422
 
     def test_invalid_namespace_starts_with_digit_returns_422(self, mock_tracer: MockTracer) -> None:
@@ -233,11 +247,17 @@ class TestRegisterValidation:
         assert _client().post("/v1/x/capabilities", json=body).status_code == 422
 
     def test_invalid_capability_name_uppercase_returns_422(self, mock_tracer: MockTracer) -> None:
-        body = {"namespace": "myplugin", "capabilities": [{"name": "DoThing", "param_expected": False}]}
+        body = {
+            "namespace": "myplugin",
+            "capabilities": [{"name": "DoThing", "param_expected": False}],
+        }
         assert _client().post("/v1/x/capabilities", json=body).status_code == 422
 
     def test_invalid_capability_name_with_hyphen_returns_422(self, mock_tracer: MockTracer) -> None:
-        body = {"namespace": "myplugin", "capabilities": [{"name": "do-thing", "param_expected": False}]}
+        body = {
+            "namespace": "myplugin",
+            "capabilities": [{"name": "do-thing", "param_expected": False}],
+        }
         assert _client().post("/v1/x/capabilities", json=body).status_code == 422
 
     def test_error_envelope_code_is_schema_invalid(self, mock_tracer: MockTracer) -> None:
@@ -260,39 +280,54 @@ class TestRegisterValidation:
 # POST /v1/x/capabilities — audit log on failure
 # ---------------------------------------------------------------------------
 
+
 class TestRegisterAuditLog:
-    def test_audit_written_on_invalid_namespace(self, mock_tracer: MockTracer, audit_log: CapturingAuditLog) -> None:
+    def test_audit_written_on_invalid_namespace(
+        self, mock_tracer: MockTracer, audit_log: CapturingAuditLog
+    ) -> None:
         body = {"namespace": "Bad", "capabilities": [{"name": "act", "param_expected": False}]}
         _client(audit_log=audit_log).post("/v1/x/capabilities", json=body)
         assert len(audit_log.entries) == 1
 
-    def test_audit_entry_level_error(self, mock_tracer: MockTracer, audit_log: CapturingAuditLog) -> None:
+    def test_audit_entry_level_error(
+        self, mock_tracer: MockTracer, audit_log: CapturingAuditLog
+    ) -> None:
         body = {"namespace": "fs", "capabilities": [{"name": "act", "param_expected": False}]}
         _client(audit_log=audit_log).post("/v1/x/capabilities", json=body)
         assert audit_log.entries[0].level == "error"
 
-    def test_audit_entry_event_name(self, mock_tracer: MockTracer, audit_log: CapturingAuditLog) -> None:
+    def test_audit_entry_event_name(
+        self, mock_tracer: MockTracer, audit_log: CapturingAuditLog
+    ) -> None:
         body = {"namespace": "fs", "capabilities": [{"name": "act", "param_expected": False}]}
         _client(audit_log=audit_log).post("/v1/x/capabilities", json=body)
         assert audit_log.entries[0].event == "capabilities.register.failed"
 
-    def test_audit_entry_operation(self, mock_tracer: MockTracer, audit_log: CapturingAuditLog) -> None:
+    def test_audit_entry_operation(
+        self, mock_tracer: MockTracer, audit_log: CapturingAuditLog
+    ) -> None:
         body = {"namespace": "fs", "capabilities": [{"name": "act", "param_expected": False}]}
         _client(audit_log=audit_log).post("/v1/x/capabilities", json=body)
         assert audit_log.entries[0].operation == "register"
 
-    def test_audit_entry_detail_contains_namespace(self, mock_tracer: MockTracer, audit_log: CapturingAuditLog) -> None:
+    def test_audit_entry_detail_contains_namespace(
+        self, mock_tracer: MockTracer, audit_log: CapturingAuditLog
+    ) -> None:
         body = {"namespace": "fs", "capabilities": [{"name": "act", "param_expected": False}]}
         _client(audit_log=audit_log).post("/v1/x/capabilities", json=body)
         assert audit_log.entries[0].detail is not None
         assert audit_log.entries[0].detail["namespace"] == "fs"
 
-    def test_audit_entry_detail_has_reason(self, mock_tracer: MockTracer, audit_log: CapturingAuditLog) -> None:
+    def test_audit_entry_detail_has_reason(
+        self, mock_tracer: MockTracer, audit_log: CapturingAuditLog
+    ) -> None:
         body = {"namespace": "fs", "capabilities": [{"name": "act", "param_expected": False}]}
         _client(audit_log=audit_log).post("/v1/x/capabilities", json=body)
         assert "reason" in (audit_log.entries[0].detail or {})
 
-    def test_no_audit_on_success(self, mock_tracer: MockTracer, audit_log: CapturingAuditLog) -> None:
+    def test_no_audit_on_success(
+        self, mock_tracer: MockTracer, audit_log: CapturingAuditLog
+    ) -> None:
         _client(audit_log=audit_log).post("/v1/x/capabilities", json=_VALID_BODY)
         assert len(audit_log.entries) == 0
 
@@ -300,6 +335,7 @@ class TestRegisterAuditLog:
 # ---------------------------------------------------------------------------
 # POST /v1/x/capabilities — OTel on failure
 # ---------------------------------------------------------------------------
+
 
 class TestRegisterTelemetryOnFailure:
     def test_span_status_error_on_invalid_namespace(self, mock_tracer: MockTracer) -> None:

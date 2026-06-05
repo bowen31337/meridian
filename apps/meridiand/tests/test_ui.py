@@ -18,7 +18,6 @@ Tests cover:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from core_errors import AuditLogEntry, HandlerOptions, NoopAuditLog, install_error_handler
@@ -26,10 +25,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._config import DaemonConfig, parse_config
-from meridiand._ui import UiServeError, make_ui_router
+from meridiand._ui import make_ui_router
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers

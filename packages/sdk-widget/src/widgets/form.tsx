@@ -1,4 +1,5 @@
-import React, { useCallback, useState } from "react";
+import type React from "react";
+import { useCallback, useState } from "react";
 import { useAuditLog } from "../audit.js";
 import { defineWidget } from "../contract.js";
 import type { WidgetProps } from "../contract.js";
@@ -92,12 +93,7 @@ function renderField(field: FormField): React.ReactElement {
           style={{ resize: "vertical", width: "100%", boxSizing: "border-box" }}
         />
       ) : fieldType === "checkbox" ? (
-        <input
-          id={id}
-          type="checkbox"
-          name={field.name}
-          defaultChecked={Boolean(field.value)}
-        />
+        <input id={id} type="checkbox" name={field.name} defaultChecked={Boolean(field.value)} />
       ) : (
         <input
           id={id}
@@ -290,7 +286,11 @@ function FormWidgetImpl({ ctx, props }: WidgetProps<FormProps>): React.ReactElem
       )}
       {fields.map((field) => renderField(field))}
       {errorMessage && (
-        <div role="alert" data-testid="form-widget-error" style={{ color: "red", fontSize: "0.875rem" }}>
+        <div
+          role="alert"
+          data-testid="form-widget-error"
+          style={{ color: "red", fontSize: "0.875rem" }}
+        >
           {errorMessage}
         </div>
       )}

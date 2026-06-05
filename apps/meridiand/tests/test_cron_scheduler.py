@@ -31,17 +31,17 @@ Tests cover:
 from __future__ import annotations
 
 import asyncio
-import json
+import contextlib
 from datetime import UTC, datetime, timedelta
+import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from meridiand._audit import FileAuditLog
 from meridiand._cron_scheduler import CronFireError, fire_cron_trigger, run_cron_scheduler_loop
+import pytest
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -122,10 +122,8 @@ async def _run_one_tick(
     # Give the event loop a turn to execute the loop body.
     await asyncio.sleep(0)
     task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await task
-    except asyncio.CancelledError:
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -149,9 +147,7 @@ class TestFireCronTriggerRecord:
         resource = _make_resource()
         fires_dir = storage_root / "cron" / "fires"
         audit_log = FileAuditLog(storage_root)
-        fire_id = asyncio.run(
-            fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log)
-        )
+        fire_id = asyncio.run(fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log))
         records = _fire_records(storage_root, "cron_test")
         assert records[0]["fire_id"] == fire_id
 
@@ -200,9 +196,7 @@ class TestFireCronTriggerRecord:
         resource = _make_resource()
         fires_dir = storage_root / "cron" / "fires"
         audit_log = FileAuditLog(storage_root)
-        fire_id = asyncio.run(
-            fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log)
-        )
+        fire_id = asyncio.run(fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log))
         assert fire_id.startswith("fire_")
 
     def test_fire_ids_are_unique(self, storage_root: Path) -> None:
@@ -299,9 +293,7 @@ class TestFireCronTriggerOtel:
         resource = _make_resource()
         fires_dir = storage_root / "cron" / "fires"
         audit_log = FileAuditLog(storage_root)
-        fire_id = asyncio.run(
-            fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log)
-        )
+        fire_id = asyncio.run(fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log))
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
         span = spans.get("cron.scheduler.fire")
         assert span is not None
@@ -327,7 +319,9 @@ class TestFireCronTriggerAudit:
         fires_dir = storage_root / "cron" / "fires"
         audit_log = FileAuditLog(storage_root)
         asyncio.run(fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log))
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "cron.scheduler.fired")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "cron.scheduler.fired"
+        )
         assert record["level"] == "info"
 
     def test_fired_audit_detail_has_cron_id(self, storage_root: Path) -> None:
@@ -335,7 +329,9 @@ class TestFireCronTriggerAudit:
         fires_dir = storage_root / "cron" / "fires"
         audit_log = FileAuditLog(storage_root)
         asyncio.run(fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log))
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "cron.scheduler.fired")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "cron.scheduler.fired"
+        )
         assert record["detail"]["cron_id"] == "cron_audit_test"
 
     def test_fired_audit_detail_has_session_id(self, storage_root: Path) -> None:
@@ -343,17 +339,19 @@ class TestFireCronTriggerAudit:
         fires_dir = storage_root / "cron" / "fires"
         audit_log = FileAuditLog(storage_root)
         asyncio.run(fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log))
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "cron.scheduler.fired")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "cron.scheduler.fired"
+        )
         assert record["detail"]["session_id"] == "sess-audit"
 
     def test_fired_audit_detail_has_fire_id(self, storage_root: Path) -> None:
         resource = _make_resource()
         fires_dir = storage_root / "cron" / "fires"
         audit_log = FileAuditLog(storage_root)
-        fire_id = asyncio.run(
-            fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log)
+        fire_id = asyncio.run(fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log))
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "cron.scheduler.fired"
         )
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "cron.scheduler.fired")
         assert record["detail"]["fire_id"] == fire_id
 
     def test_fired_audit_detail_has_capabilities(self, storage_root: Path) -> None:
@@ -362,7 +360,9 @@ class TestFireCronTriggerAudit:
         fires_dir = storage_root / "cron" / "fires"
         audit_log = FileAuditLog(storage_root)
         asyncio.run(fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log))
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "cron.scheduler.fired")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "cron.scheduler.fired"
+        )
         assert record["detail"]["capabilities"] == caps
 
     def test_failure_writes_failed_audit_entry(self, storage_root: Path) -> None:
@@ -371,9 +371,7 @@ class TestFireCronTriggerAudit:
         fires_dir = Path("/nonexistent/path/fires")
         audit_log = FileAuditLog(storage_root)
         with pytest.raises(CronFireError):
-            asyncio.run(
-                fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log)
-            )
+            asyncio.run(fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log))
         records = _audit_records(storage_root)
         assert any(r.get("event") == "cron.scheduler.fire.failed" for r in records)
 
@@ -382,11 +380,10 @@ class TestFireCronTriggerAudit:
         fires_dir = Path("/nonexistent/path/fires")
         audit_log = FileAuditLog(storage_root)
         with pytest.raises(CronFireError):
-            asyncio.run(
-                fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log)
-            )
+            asyncio.run(fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log))
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "cron.scheduler.fire.failed"
         )
         assert record["level"] == "error"
@@ -537,14 +534,10 @@ class TestSchedulerNonFiringCases:
 
 
 class TestSchedulerMissedFiresPolicy:
-    def test_catch_up_fires_multiple_times_for_missed_slots(
-        self, storage_root: Path
-    ) -> None:
+    def test_catch_up_fires_multiple_times_for_missed_slots(self, storage_root: Path) -> None:
         # Missed 3 intervals of 1 second each.
         past = (datetime.now(UTC) - timedelta(seconds=3)).isoformat()
-        resource = _make_resource(
-            interval="1s", next_fire_at=past, missed_fires_policy="catch_up"
-        )
+        resource = _make_resource(interval="1s", next_fire_at=past, missed_fires_policy="catch_up")
         _write_cron(storage_root, resource)
         audit_log = FileAuditLog(storage_root)
         asyncio.run(_run_one_tick(storage_root, audit_log, missed_fires_policy="catch_up"))
@@ -554,22 +547,16 @@ class TestSchedulerMissedFiresPolicy:
     def test_skip_fires_once_for_missed_slots(self, storage_root: Path) -> None:
         # Missed 3 intervals of 1 second each.
         past = (datetime.now(UTC) - timedelta(seconds=3)).isoformat()
-        resource = _make_resource(
-            interval="1s", next_fire_at=past, missed_fires_policy="skip"
-        )
+        resource = _make_resource(interval="1s", next_fire_at=past, missed_fires_policy="skip")
         _write_cron(storage_root, resource)
         audit_log = FileAuditLog(storage_root)
         asyncio.run(_run_one_tick(storage_root, audit_log, missed_fires_policy="skip"))
         fires = _fire_records(storage_root, "cron_test")
         assert len(fires) == 1
 
-    def test_skip_advances_next_fire_at_past_missed_slots(
-        self, storage_root: Path
-    ) -> None:
+    def test_skip_advances_next_fire_at_past_missed_slots(self, storage_root: Path) -> None:
         past = (datetime.now(UTC) - timedelta(seconds=3)).isoformat()
-        resource = _make_resource(
-            interval="1s", next_fire_at=past, missed_fires_policy="skip"
-        )
+        resource = _make_resource(interval="1s", next_fire_at=past, missed_fires_policy="skip")
         cron_file = _write_cron(storage_root, resource)
         audit_log = FileAuditLog(storage_root)
         asyncio.run(_run_one_tick(storage_root, audit_log, missed_fires_policy="skip"))
@@ -581,9 +568,7 @@ class TestSchedulerMissedFiresPolicy:
     def test_resource_policy_overrides_loop_default(self, storage_root: Path) -> None:
         # Resource says "catch_up" but loop default is "skip".
         past = (datetime.now(UTC) - timedelta(seconds=3)).isoformat()
-        resource = _make_resource(
-            interval="1s", next_fire_at=past, missed_fires_policy="catch_up"
-        )
+        resource = _make_resource(interval="1s", next_fire_at=past, missed_fires_policy="catch_up")
         _write_cron(storage_root, resource)
         audit_log = FileAuditLog(storage_root)
         # Loop default is "skip" — resource's "catch_up" should win.

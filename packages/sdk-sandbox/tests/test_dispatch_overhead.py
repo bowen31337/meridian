@@ -11,17 +11,17 @@ Verifies that InProcessDispatcher, SubprocessDispatcher, and ContainerDispatcher
 from __future__ import annotations
 
 import asyncio
-import sys
 from pathlib import Path
+import sys
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from sdk_sandbox import (
     ContainerHandler,
     ExecutionContext,
     InProcessHandler,
+    SandboxFailure,
     SubprocessHandler,
     ToolDefinition,
 )
@@ -134,7 +134,9 @@ class TestInProcessOverhead:
         d = InProcessDispatcher(audit_log=audit)
         d.register("test.tool", AsyncMock(return_value="ok"))
         await d.dispatch(_tool(InProcessHandler()), {}, CTX)
-        breach_entries = [e for e in audit.entries if e.event == "dispatch.overhead.target_breached"]
+        breach_entries = [
+            e for e in audit.entries if e.event == "dispatch.overhead.target_breached"
+        ]
         assert breach_entries == []
 
     async def test_overhead_breach_writes_warn_audit(self, mock_span: MockSpan) -> None:
@@ -147,7 +149,9 @@ class TestInProcessOverhead:
         d.register("test.tool", slow_fn)
         await d.dispatch(_tool(InProcessHandler()), {}, CTX)
 
-        breach_entries = [e for e in audit.entries if e.event == "dispatch.overhead.target_breached"]
+        breach_entries = [
+            e for e in audit.entries if e.event == "dispatch.overhead.target_breached"
+        ]
         assert len(breach_entries) == 1
         assert breach_entries[0].level == "warn"
 
@@ -181,7 +185,7 @@ class TestInProcessOverhead:
 
     async def test_no_overhead_event_on_handler_not_found(self, mock_span: MockSpan) -> None:
         d = InProcessDispatcher()
-        with pytest.raises(Exception):
+        with pytest.raises(SandboxFailure):
             await d.dispatch(_tool(InProcessHandler()), {}, CTX)
         assert _overhead_event(mock_span) is None
 
@@ -207,9 +211,7 @@ class TestSubprocessOverhead:
         await d.dispatch(_tool(SubprocessHandler(path=exe)), {}, CTX)
         assert _overhead_event(mock_span) is not None
 
-    async def test_overhead_event_kind_attribute(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_overhead_event_kind_attribute(self, tmp_path: Path, mock_span: MockSpan) -> None:
         exe = _write_exe(tmp_path, "echo_tool", _ECHO_SCRIPT)
         d = SubprocessDispatcher()
         await d.dispatch(_tool(SubprocessHandler(path=exe)), {}, CTX)
@@ -230,7 +232,9 @@ class TestSubprocessOverhead:
         audit = CapturingAuditLog()
         d = SubprocessDispatcher(audit_log=audit)
         await d.dispatch(_tool(SubprocessHandler(path=exe)), {}, CTX)
-        breach_entries = [e for e in audit.entries if e.event == "dispatch.overhead.target_breached"]
+        breach_entries = [
+            e for e in audit.entries if e.event == "dispatch.overhead.target_breached"
+        ]
         assert breach_entries == []
 
     async def test_overhead_breach_writes_warn_audit(
@@ -241,13 +245,13 @@ class TestSubprocessOverhead:
         d = SubprocessDispatcher(audit_log=audit)
         await d.dispatch(_tool(SubprocessHandler(path=exe)), {}, CTX)
 
-        breach_entries = [e for e in audit.entries if e.event == "dispatch.overhead.target_breached"]
+        breach_entries = [
+            e for e in audit.entries if e.event == "dispatch.overhead.target_breached"
+        ]
         assert len(breach_entries) == 1
         assert breach_entries[0].level == "warn"
 
-    async def test_overhead_breach_audit_detail(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_overhead_breach_audit_detail(self, tmp_path: Path, mock_span: MockSpan) -> None:
         exe = _write_exe(tmp_path, "slow_tool", _SLOW_SCRIPT)
         audit = CapturingAuditLog()
         d = SubprocessDispatcher(audit_log=audit)
@@ -282,15 +286,11 @@ class TestContainerOverhead:
 
         with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
             d = ContainerDispatcher()
-            await d.dispatch(
-                _tool(ContainerHandler(environment_id="c1", entrypoint=exe)), {}, CTX
-            )
+            await d.dispatch(_tool(ContainerHandler(environment_id="c1", entrypoint=exe)), {}, CTX)
 
         assert _overhead_event(mock_span) is not None
 
-    async def test_overhead_event_kind_attribute(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_overhead_event_kind_attribute(self, tmp_path: Path, mock_span: MockSpan) -> None:
         exe = _write_exe(tmp_path, "echo_tool", _ECHO_SCRIPT)
         orig = asyncio.create_subprocess_exec
 
@@ -335,7 +335,9 @@ class TestContainerOverhead:
                 _tool(ContainerHandler(environment_id="c1", entrypoint=exe)), {}, CTX
             )
 
-        breach_entries = [e for e in audit.entries if e.event == "dispatch.overhead.target_breached"]
+        breach_entries = [
+            e for e in audit.entries if e.event == "dispatch.overhead.target_breached"
+        ]
         assert breach_entries == []
 
     async def test_no_overhead_event_on_docker_not_found(self, mock_span: MockSpan) -> None:

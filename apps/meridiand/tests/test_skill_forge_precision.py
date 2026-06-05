@@ -38,19 +38,18 @@ Tests cover:
 from __future__ import annotations
 
 import json
-import uuid
 from pathlib import Path
 from typing import Any
+import uuid
 
-import pytest
 from meridiand._audit import FileAuditLog
 from meridiand._skill_forge_precision import (
     SkillForgePrecisionError,
     compute_precision_metric,
 )
+import pytest
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -135,9 +134,7 @@ class TestPrecisionRecordStorage:
         _call(storage_root, precision_dir=prec_dir)
         assert len(_precision_records(prec_dir)) == 1
 
-    def test_metric_record_id_has_skprecision_prefix(
-        self, storage_root: Path
-    ) -> None:
+    def test_metric_record_id_has_skprecision_prefix(self, storage_root: Path) -> None:
         result = _call(storage_root)
         assert result["id"].startswith("skprecision_")
 
@@ -185,9 +182,7 @@ class TestMetricComputation:
         result = _call(storage_root)
         assert result["approved_count"] == 0
 
-    def test_all_proposals_approved_gives_precision_one(
-        self, storage_root: Path
-    ) -> None:
+    def test_all_proposals_approved_gives_precision_one(self, storage_root: Path) -> None:
         props_dir = storage_root / "skill_forge" / "proposals"
         acts_dir = storage_root / "skill_activations"
         _write_proposal(props_dir, "skillver_p1")
@@ -197,9 +192,7 @@ class TestMetricComputation:
         result = _call(storage_root)
         assert result["precision"] == pytest.approx(1.0)
 
-    def test_half_proposals_approved_gives_precision_half(
-        self, storage_root: Path
-    ) -> None:
+    def test_half_proposals_approved_gives_precision_half(self, storage_root: Path) -> None:
         props_dir = storage_root / "skill_forge" / "proposals"
         acts_dir = storage_root / "skill_activations"
         _write_proposal(props_dir, "skillver_p1")
@@ -226,27 +219,19 @@ class TestMetricComputation:
         result = _call(storage_root)
         assert result["approved_count"] == 1
 
-    def test_pending_activation_does_not_count_as_approved(
-        self, storage_root: Path
-    ) -> None:
+    def test_pending_activation_does_not_count_as_approved(self, storage_root: Path) -> None:
         props_dir = storage_root / "skill_forge" / "proposals"
         acts_dir = storage_root / "skill_activations"
         _write_proposal(props_dir, "skillver_pending")
-        _write_activation(
-            acts_dir, skill_version_id="skillver_pending", status="pending"
-        )
+        _write_activation(acts_dir, skill_version_id="skillver_pending", status="pending")
         result = _call(storage_root)
         assert result["approved_count"] == 0
 
-    def test_revoked_activation_does_not_count_as_approved(
-        self, storage_root: Path
-    ) -> None:
+    def test_revoked_activation_does_not_count_as_approved(self, storage_root: Path) -> None:
         props_dir = storage_root / "skill_forge" / "proposals"
         acts_dir = storage_root / "skill_activations"
         _write_proposal(props_dir, "skillver_revoked")
-        _write_activation(
-            acts_dir, skill_version_id="skillver_revoked", status="revoked"
-        )
+        _write_activation(acts_dir, skill_version_id="skillver_revoked", status="revoked")
         result = _call(storage_root)
         assert result["approved_count"] == 0
 
@@ -261,9 +246,7 @@ class TestMetricComputation:
         result = _call(storage_root)
         assert result["approved_count"] == 1
 
-    def test_precision_equals_approved_count_over_total(
-        self, storage_root: Path
-    ) -> None:
+    def test_precision_equals_approved_count_over_total(self, storage_root: Path) -> None:
         props_dir = storage_root / "skill_forge" / "proposals"
         acts_dir = storage_root / "skill_activations"
         _write_proposal(props_dir, "skillver_x1")
@@ -274,9 +257,7 @@ class TestMetricComputation:
         expected = result["approved_count"] / result["total_proposals"]
         assert result["precision"] == pytest.approx(expected)
 
-    def test_missing_proposals_dir_gives_zero_total(
-        self, storage_root: Path
-    ) -> None:
+    def test_missing_proposals_dir_gives_zero_total(self, storage_root: Path) -> None:
         result = _call(
             storage_root,
             proposals_dir=storage_root / "nonexistent_proposals",
@@ -286,9 +267,7 @@ class TestMetricComputation:
         assert result["approved_count"] == 0
         assert result["precision"] == 0.0
 
-    def test_missing_activations_dir_still_computes_total(
-        self, storage_root: Path
-    ) -> None:
+    def test_missing_activations_dir_still_computes_total(self, storage_root: Path) -> None:
         props_dir = storage_root / "skill_forge" / "proposals"
         _write_proposal(props_dir, "skillver_noa")
         result = _call(
@@ -364,9 +343,7 @@ class TestAuditLogSuccess:
 
 
 class TestFailureUnwritable:
-    def test_raises_precision_error_on_write_failure(
-        self, storage_root: Path
-    ) -> None:
+    def test_raises_precision_error_on_write_failure(self, storage_root: Path) -> None:
         # Place a regular file at the precision_dir path so mkdir raises.
         prec_dir = storage_root / "precision"
         prec_dir.write_text("not_a_directory")
@@ -374,28 +351,20 @@ class TestFailureUnwritable:
             _call(storage_root, precision_dir=prec_dir)
 
     def test_error_http_status_is_500(self) -> None:
-        err = SkillForgePrecisionError(
-            message="boom", timestamp="2026-01-01T00:00:00+00:00"
-        )
+        err = SkillForgePrecisionError(message="boom", timestamp="2026-01-01T00:00:00+00:00")
         assert err.http_status() == 500
 
     def test_error_code_is_skill_forge_precision_failed(self) -> None:
-        err = SkillForgePrecisionError(
-            message="boom", timestamp="2026-01-01T00:00:00+00:00"
-        )
+        err = SkillForgePrecisionError(message="boom", timestamp="2026-01-01T00:00:00+00:00")
         assert err.code == "skill_forge_precision_failed"
 
-    def test_failure_writes_compute_failed_audit_entry(
-        self, storage_root: Path
-    ) -> None:
+    def test_failure_writes_compute_failed_audit_entry(self, storage_root: Path) -> None:
         prec_dir = storage_root / "precision"
         prec_dir.write_text("not_a_directory")
         with pytest.raises(SkillForgePrecisionError):
             _call(storage_root, precision_dir=prec_dir)
         records = _audit_records(storage_root)
-        assert any(
-            r.get("event") == "skill_forge.precision.compute.failed" for r in records
-        )
+        assert any(r.get("event") == "skill_forge.precision.compute.failed" for r in records)
 
     def test_failure_audit_level_is_error(self, storage_root: Path) -> None:
         prec_dir = storage_root / "precision"
@@ -455,9 +424,7 @@ class TestOtelSpans:
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
         return spans.get("skill_forge.precision_metric")
 
-    def test_emits_precision_metric_span_on_success(
-        self, storage_root: Path
-    ) -> None:
+    def test_emits_precision_metric_span_on_success(self, storage_root: Path) -> None:
         _call(storage_root)
         span_names = [s.name for s in _otel_exporter.get_finished_spans()]
         assert "skill_forge.precision_metric" in span_names
@@ -488,17 +455,13 @@ class TestOtelSpans:
         assert span is not None
         assert span.attributes["skill_forge.precision.precision"] == pytest.approx(0.0)
 
-    def test_span_success_attribute_true_on_success(
-        self, storage_root: Path
-    ) -> None:
+    def test_span_success_attribute_true_on_success(self, storage_root: Path) -> None:
         _call(storage_root)
         span = self._get_span()
         assert span is not None
         assert span.attributes["skill_forge.precision_metric.success"] is True
 
-    def test_emits_precision_metric_span_on_failure(
-        self, storage_root: Path
-    ) -> None:
+    def test_emits_precision_metric_span_on_failure(self, storage_root: Path) -> None:
         prec_dir = storage_root / "precision"
         prec_dir.write_text("not_a_directory")
         with pytest.raises(SkillForgePrecisionError):
@@ -506,9 +469,7 @@ class TestOtelSpans:
         span_names = [s.name for s in _otel_exporter.get_finished_spans()]
         assert "skill_forge.precision_metric" in span_names
 
-    def test_span_success_attribute_false_on_failure(
-        self, storage_root: Path
-    ) -> None:
+    def test_span_success_attribute_false_on_failure(self, storage_root: Path) -> None:
         prec_dir = storage_root / "precision"
         prec_dir.write_text("not_a_directory")
         with pytest.raises(SkillForgePrecisionError):

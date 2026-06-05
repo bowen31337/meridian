@@ -16,10 +16,10 @@ from ._types import (
 
 try:
     import httpx as _httpx
-
-    _HTTPX_AVAILABLE = True
 except ImportError:
-    _HTTPX_AVAILABLE = False
+    _httpx = None
+
+_HTTPX_AVAILABLE = _httpx is not None
 
 
 def _ms_since(start: float) -> float:
@@ -126,6 +126,7 @@ class HttpBackendDriver(EnvironmentDriver):
                 "httpx is required for HttpBackendDriver. "
                 "Install with: pip install 'meridian-sdk-environment[http]'"
             )
+        assert _httpx is not None
         async with _httpx.AsyncClient(timeout=self._timeout_s) as client:
             response = await client.post(
                 f"{self._url}/{operation}",

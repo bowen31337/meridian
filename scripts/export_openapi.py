@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import datetime
 import json
+from pathlib import Path
 import sys
 import tempfile
-from pathlib import Path
 
-import yaml
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
+import yaml
 
 _REPO_ROOT = Path(__file__).parent.parent
 _DEST = _REPO_ROOT / "packages" / "schemas" / "openapi.yaml"

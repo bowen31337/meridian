@@ -17,19 +17,18 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from pathlib import Path
 from typing import Any
 
 import httpx
-import pytest
 from meridiand._slack_channel_driver import (
     SLACK_BLOCKS_CONTENT_TYPE,
-    NoopSocketModeClient,
-    NoopSecretResolver,
     SlackChannelDriver,
 )
 from opentelemetry.trace import StatusCode
+import pytest
 from sdk_channel import (
     ChannelCapabilities,
     ChannelFailure,
@@ -39,7 +38,6 @@ from sdk_channel import (
 )
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -242,9 +240,7 @@ class TestDriverSendSuccess:
         transport = httpx.MockTransport(_handler)
         async with httpx.AsyncClient(transport=transport) as client:
             _make_channel_file(storage_root)
-            result = await _make_driver(storage_root, http_client=client).send(
-                _make_send_request()
-            )
+            result = await _make_driver(storage_root, http_client=client).send(_make_send_request())
 
         assert result.delivered is True
 
@@ -255,9 +251,7 @@ class TestDriverSendSuccess:
         transport = httpx.MockTransport(_handler)
         async with httpx.AsyncClient(transport=transport) as client:
             _make_channel_file(storage_root)
-            result = await _make_driver(storage_root, http_client=client).send(
-                _make_send_request()
-            )
+            result = await _make_driver(storage_root, http_client=client).send(_make_send_request())
 
         assert "9999999999.000001" in result.message_id
 
@@ -268,9 +262,7 @@ class TestDriverSendSuccess:
         transport = httpx.MockTransport(_handler)
         async with httpx.AsyncClient(transport=transport) as client:
             _make_channel_file(storage_root)
-            result = await _make_driver(storage_root, http_client=client).send(
-                _make_send_request()
-            )
+            result = await _make_driver(storage_root, http_client=client).send(_make_send_request())
 
         assert isinstance(result.timestamp, str) and len(result.timestamp) > 0
 
@@ -469,9 +461,7 @@ class TestDriverSendFailures:
     def _otel_clear(self) -> None:
         _otel_exporter.clear()
 
-    async def test_missing_config_raises_chan_config_not_found(
-        self, storage_root: Path
-    ) -> None:
+    async def test_missing_config_raises_chan_config_not_found(self, storage_root: Path) -> None:
         driver = _make_driver(storage_root)
         req = SendRequest(
             channel_id="ch_nonexistent",
@@ -498,9 +488,7 @@ class TestDriverSendFailures:
             await driver.send(_make_send_request())
         assert exc_info.value.code == "CHAN_BOT_TOKEN_UNRESOLVABLE"
 
-    async def test_missing_slack_channel_id_raises_failure(
-        self, storage_root: Path
-    ) -> None:
+    async def test_missing_slack_channel_id_raises_failure(self, storage_root: Path) -> None:
         _make_channel_file(storage_root, slack_channel_id=None)
         driver = _make_driver(storage_root)
         with pytest.raises(ChannelFailure) as exc_info:
@@ -515,14 +503,10 @@ class TestDriverSendFailures:
         async with httpx.AsyncClient(transport=transport) as client:
             _make_channel_file(storage_root)
             with pytest.raises(ChannelFailure) as exc_info:
-                await _make_driver(storage_root, http_client=client).send(
-                    _make_send_request()
-                )
+                await _make_driver(storage_root, http_client=client).send(_make_send_request())
         assert exc_info.value.code == "CHAN_SEND_FAILED"
 
-    async def test_slack_api_ok_false_raises_chan_send_failed(
-        self, storage_root: Path
-    ) -> None:
+    async def test_slack_api_ok_false_raises_chan_send_failed(self, storage_root: Path) -> None:
         async def _handler(request: httpx.Request) -> httpx.Response:
             return _slack_response(ok=False, error="channel_not_found")
 
@@ -530,9 +514,7 @@ class TestDriverSendFailures:
         async with httpx.AsyncClient(transport=transport) as client:
             _make_channel_file(storage_root)
             with pytest.raises(ChannelFailure) as exc_info:
-                await _make_driver(storage_root, http_client=client).send(
-                    _make_send_request()
-                )
+                await _make_driver(storage_root, http_client=client).send(_make_send_request())
         assert exc_info.value.code == "CHAN_SEND_FAILED"
 
     async def test_network_error_raises_chan_send_failed(self, storage_root: Path) -> None:
@@ -543,9 +525,7 @@ class TestDriverSendFailures:
         async with httpx.AsyncClient(transport=transport) as client:
             _make_channel_file(storage_root)
             with pytest.raises(ChannelFailure) as exc_info:
-                await _make_driver(storage_root, http_client=client).send(
-                    _make_send_request()
-                )
+                await _make_driver(storage_root, http_client=client).send(_make_send_request())
         assert exc_info.value.code == "CHAN_SEND_FAILED"
 
     async def test_invalid_blocks_json_raises_chan_blocks_parse_failed(
@@ -595,9 +575,7 @@ class TestDriverSendFailures:
         async with httpx.AsyncClient(transport=transport) as client:
             _make_channel_file(storage_root)
             with pytest.raises(ChannelFailure):
-                await _make_driver(storage_root, http_client=client).send(
-                    _make_send_request()
-                )
+                await _make_driver(storage_root, http_client=client).send(_make_send_request())
 
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
         span = spans.get("slack.channel.send")
@@ -700,14 +678,10 @@ class TestDriverStart:
 
         for task in driver._socket_tasks.values():
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
-            except (asyncio.CancelledError, Exception):
-                pass
 
-    async def test_start_missing_bot_token_ref_raises_failure(
-        self, storage_root: Path
-    ) -> None:
+    async def test_start_missing_bot_token_ref_raises_failure(self, storage_root: Path) -> None:
         _make_channel_file(storage_root, bot_token_ref=None)
         driver = _make_driver(storage_root)
         with pytest.raises(ChannelFailure) as exc_info:
@@ -720,15 +694,11 @@ class TestDriverStart:
         driver = _make_driver(storage_root)
         with pytest.raises(ChannelFailure) as exc_info:
             await driver.start(
-                StartRequest(
-                    channel_id="ch_nonexistent", channel_kind=_SLACK_KIND, session_id="s"
-                )
+                StartRequest(channel_id="ch_nonexistent", channel_kind=_SLACK_KIND, session_id="s")
             )
         assert exc_info.value.code == "CHAN_CONFIG_NOT_FOUND"
 
-    async def test_start_unresolvable_app_token_raises_failure(
-        self, storage_root: Path
-    ) -> None:
+    async def test_start_unresolvable_app_token_raises_failure(self, storage_root: Path) -> None:
         _make_channel_file(storage_root, slack_app_token_ref=_APP_TOKEN_REF)
         # bot token resolves, app token does not
         driver = _make_driver(

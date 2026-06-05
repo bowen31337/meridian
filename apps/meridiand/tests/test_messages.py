@@ -25,10 +25,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
-from meridiand._app import create_app
-from meridiand._audit import FileAuditLog
 from meridian_sdk_provider import (
     FakeModelAdapter,
     ModelCallOpts,
@@ -40,6 +37,8 @@ from meridian_sdk_provider import (
 )
 from meridian_sdk_provider.errors import ProviderCallError
 from meridian_sdk_provider.types import ModelCountReq, TokenCount
+from meridiand._app import create_app
+from meridiand._audit import FileAuditLog
 
 from tests._otel_shared import otel_exporter as _otel_exporter
 

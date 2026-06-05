@@ -21,12 +21,8 @@ def _now() -> str:
 
 
 class MetricsError(MeridianError):
-    def __init__(
-        self, *, message: str, timestamp: str, cause: BaseException | None = None
-    ) -> None:
-        super().__init__(
-            code="metrics_failed", message=message, timestamp=timestamp, cause=cause
-        )
+    def __init__(self, *, message: str, timestamp: str, cause: BaseException | None = None) -> None:
+        super().__init__(code="metrics_failed", message=message, timestamp=timestamp, cause=cause)
 
     def http_status(self) -> int:
         return 500
@@ -67,6 +63,6 @@ def make_metrics_router(*, audit_log: AuditLog) -> APIRouter:
                         detail={"message": err.message},
                     )
                 )
-                raise err
+                raise err from exc
 
     return router

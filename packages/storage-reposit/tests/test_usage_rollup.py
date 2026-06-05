@@ -27,15 +27,14 @@ Covers:
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
+import sqlite3
 from typing import Any
 
 import pytest
 from storage_event_log import SessionEvent
 from storage_reposit import SQLiteProjectionStore, UsageRollupProjector
-from storage_reposit import _migrations as _mig
-
+from storage_reposit._usage_rollup import _hour
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -89,8 +88,14 @@ def row(conn: sqlite3.Connection, session_id: str, hour: str) -> dict[str, Any] 
     r = cur.fetchone()
     if r is None:
         return None
-    keys = ("input_tokens", "output_tokens", "cache_tokens", "cache_creation_tokens", "cache_read_tokens")
-    return dict(zip(keys, r))
+    keys = (
+        "input_tokens",
+        "output_tokens",
+        "cache_tokens",
+        "cache_creation_tokens",
+        "cache_read_tokens",
+    )
+    return dict(zip(keys, r, strict=False))
 
 
 def all_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -98,17 +103,21 @@ def all_rows(conn: sqlite3.Connection) -> list[dict[str, Any]]:
         "SELECT session_id, hour, input_tokens, output_tokens, cache_tokens, "
         "cache_creation_tokens, cache_read_tokens FROM usage_rollups ORDER BY session_id, hour"
     )
-    keys = ("session_id", "hour", "input_tokens", "output_tokens", "cache_tokens",
-            "cache_creation_tokens", "cache_read_tokens")
-    return [dict(zip(keys, r)) for r in cur.fetchall()]
+    keys = (
+        "session_id",
+        "hour",
+        "input_tokens",
+        "output_tokens",
+        "cache_tokens",
+        "cache_creation_tokens",
+        "cache_read_tokens",
+    )
+    return [dict(zip(keys, r, strict=False)) for r in cur.fetchall()]
 
 
 # ---------------------------------------------------------------------------
 # _hour() helper
 # ---------------------------------------------------------------------------
-
-
-from storage_reposit._usage_rollup import _hour
 
 
 class TestHourHelper:

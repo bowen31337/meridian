@@ -1,15 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import UTC, datetime
 import json
 import threading
 import time
-from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any
 
 from core_errors import AuditLog, AuditLogEntry
 from starlette.types import ASGIApp, Receive, Scope, Send
-
 
 _TTL_SECONDS = 86400  # 24 hours
 _MAX_KEY_LENGTH = 255

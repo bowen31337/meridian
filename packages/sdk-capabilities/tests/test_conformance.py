@@ -37,8 +37,8 @@ of the capability system must satisfy:
 
 from __future__ import annotations
 
-import pytest
 from opentelemetry.trace import StatusCode
+import pytest
 from sdk_capabilities import (
     Capability,
     CapabilityDenied,
@@ -51,7 +51,6 @@ from sdk_capabilities import (
 )
 
 from .conftest import CapturingAuditLog, MockSpan
-
 
 # ---------------------------------------------------------------------------
 # Helpers

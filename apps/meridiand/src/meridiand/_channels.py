@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
-import uuid
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any, Literal
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -50,9 +50,7 @@ class ChannelCreateError(MeridianError):
 
 class ChannelInvalidRequestError(MeridianError):
     def __init__(self, *, message: str, timestamp: str) -> None:
-        super().__init__(
-            code="channel_invalid_request", message=message, timestamp=timestamp
-        )
+        super().__init__(code="channel_invalid_request", message=message, timestamp=timestamp)
 
     def http_status(self) -> int:
         return 422
@@ -215,7 +213,7 @@ def make_channels_router(*, audit_log: AuditLog, storage_root: Path) -> APIRoute
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=channel_record, status_code=201)
 
@@ -290,7 +288,7 @@ def make_channels_router(*, audit_log: AuditLog, storage_root: Path) -> APIRoute
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         response_body: dict[str, Any] = {
             "token": token_record["token"],

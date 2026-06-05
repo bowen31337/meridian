@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
+import json
 from typing import Any
 
 
@@ -41,9 +41,7 @@ class OsKeychainVaultBackend:
     def secret_exists(self, vault_id: str, key: str) -> bool:
         return self._kr.get_password(_SERVICE, self._account(vault_id, key)) is not None
 
-    def store_secret(
-        self, vault_id: str, key: str, value: str, now: str
-    ) -> dict[str, Any]:
+    def store_secret(self, vault_id: str, key: str, value: str, now: str) -> dict[str, Any]:
         record: dict[str, Any] = {
             "vault_id": vault_id,
             "key": key,
@@ -52,9 +50,7 @@ class OsKeychainVaultBackend:
             "last_accessed_at": None,
             "requester_counts": {},
         }
-        self._kr.set_password(
-            _SERVICE, self._account(vault_id, key), json.dumps(record)
-        )
+        self._kr.set_password(_SERVICE, self._account(vault_id, key), json.dumps(record))
         return record
 
     def get_secret(self, vault_id: str, name: str) -> dict[str, Any] | None:
@@ -64,9 +60,7 @@ class OsKeychainVaultBackend:
         return json.loads(raw)
 
     def update_secret(self, vault_id: str, name: str, record: dict[str, Any]) -> None:
-        self._kr.set_password(
-            _SERVICE, self._account(vault_id, name), json.dumps(record)
-        )
+        self._kr.set_password(_SERVICE, self._account(vault_id, name), json.dumps(record))
 
     def list_secrets(self, vault_id: str, keys: list[str]) -> list[dict[str, Any]]:
         items = []

@@ -13,10 +13,10 @@ the error message in the JSON error body, and writes the failure to the audit lo
 
 from __future__ import annotations
 
-import json
-import uuid
 from datetime import UTC, datetime
+import json
 from pathlib import Path
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -157,9 +157,7 @@ def make_crash_recovery_soak_router(
             )
 
             crash_count = (
-                _crash_count_override
-                if _crash_count_override is not None
-                else CRASH_COUNT
+                _crash_count_override if _crash_count_override is not None else CRASH_COUNT
             )
 
             resume_count = 0
@@ -173,9 +171,7 @@ def make_crash_recovery_soak_router(
                     recovered = _attempt_recovery(storage_root, session_id)
                 except Exception as exc:
                     recovered = False
-                    sample_failures.append(
-                        {"session_id": session_id, "error": str(exc)}
-                    )
+                    sample_failures.append({"session_id": session_id, "error": str(exc)})
 
                 if recovered:
                     resume_count += 1

@@ -36,17 +36,14 @@ Coverage:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from click.testing import CliRunner
+from meridian_cli.__main__ import cli
+from meridian_cli.meridianconfig import _CONFIG_VERSION, DEFAULT_CONFIG_PATH
 import pytest
 import yaml
-from click.testing import CliRunner
-
-from meridian_cli.__main__ import cli
-from meridian_cli.meridianconfig import DEFAULT_CONFIG_PATH, _CONFIG_VERSION
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -128,7 +125,7 @@ class TestValidateDefaultPath:
         assert "OK" in result.output
 
     def test_default_path_constant_points_to_home_meridian(self) -> None:
-        assert DEFAULT_CONFIG_PATH == Path.home() / ".meridian" / "config.yml"
+        assert Path.home() / ".meridian" / "config.yml" == DEFAULT_CONFIG_PATH
 
 
 # ---------------------------------------------------------------------------

@@ -35,15 +35,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
+from meridian_kb_indexer import Chunk
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from meridiand._kb import KbStore
-from meridian_kb_indexer import Chunk
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -121,9 +119,7 @@ class TestMemoryStoreQueryRunsEmptyStore:
 class TestMemoryStoreQueryRunsNotFound:
     def test_unknown_store_returns_404(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        resp = client.post(
-            "/v1/memory_stores/memstore_doesnotexist/query_runs", json=_query_body()
-        )
+        resp = client.post("/v1/memory_stores/memstore_doesnotexist/query_runs", json=_query_body())
         assert resp.status_code == 404
 
     def test_not_found_error_code(self, storage_root: Path) -> None:
@@ -367,8 +363,7 @@ class TestMemoryStoreQueryRunsAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/memory_stores/memstore_missing/query_runs", json=_query_body())
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "memory_store.query.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "memory_store.query.failed"
         )
         assert record["level"] == "error"
 
@@ -376,8 +371,7 @@ class TestMemoryStoreQueryRunsAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/memory_stores/memstore_missing/query_runs", json=_query_body())
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "memory_store.query.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "memory_store.query.failed"
         )
         assert record["code"] == "memory_store_not_found"
 
@@ -385,8 +379,7 @@ class TestMemoryStoreQueryRunsAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/memory_stores/memstore_missing/query_runs", json=_query_body())
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "memory_store.query.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "memory_store.query.failed"
         )
         assert record["detail"]["memory_store_id"] == "memstore_missing"
 
@@ -397,8 +390,7 @@ class TestMemoryStoreQueryRunsAuditLog:
             json=_query_body(query="my search"),
         )
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "memory_store.query.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "memory_store.query.failed"
         )
         assert record["detail"]["query"] == "my search"
 
@@ -406,8 +398,7 @@ class TestMemoryStoreQueryRunsAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/memory_stores/memstore_missing/query_runs", json=_query_body())
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "memory_store.query.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "memory_store.query.failed"
         )
         assert len(record["detail"]["message"]) > 0
 

@@ -11,15 +11,13 @@ Invariants verified:
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 from click.testing import CliRunner
-
 from meridian_cli.__main__ import cli
 from meridian_cli._client import DaemonClient, DaemonError
 from meridian_cli.meridianrun import _Renderer
-
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -165,9 +163,7 @@ def test_follow_stops_on_done_phase(mock_client: MagicMock) -> None:
 
 
 def test_follow_stops_on_cancelled_phase(mock_client: MagicMock) -> None:
-    cancelled = _make_event(
-        "session.phase_change", {"prev_phase": "running", "phase": "cancelled"}
-    )
+    cancelled = _make_event("session.phase_change", {"prev_phase": "running", "phase": "cancelled"})
     mock_client.request.side_effect = [[cancelled], []]
 
     with patch("meridian_cli.meridianrun.write_audit"):
@@ -178,9 +174,7 @@ def test_follow_stops_on_cancelled_phase(mock_client: MagicMock) -> None:
 
 
 def test_follow_stops_on_error_phase(mock_client: MagicMock) -> None:
-    err_phase = _make_event(
-        "session.phase_change", {"prev_phase": "running", "phase": "error"}
-    )
+    err_phase = _make_event("session.phase_change", {"prev_phase": "running", "phase": "error"})
     mock_client.request.side_effect = [[err_phase], []]
 
     with patch("meridian_cli.meridianrun.write_audit"):
@@ -191,12 +185,8 @@ def test_follow_stops_on_error_phase(mock_client: MagicMock) -> None:
 
 
 def test_follow_continues_on_non_terminal_phase(mock_client: MagicMock) -> None:
-    running = _make_event(
-        "session.phase_change", {"prev_phase": "idle", "phase": "running"}
-    )
-    done = _make_event(
-        "session.phase_change", {"prev_phase": "running", "phase": "done"}, seq=1
-    )
+    running = _make_event("session.phase_change", {"prev_phase": "idle", "phase": "running"})
+    done = _make_event("session.phase_change", {"prev_phase": "running", "phase": "done"}, seq=1)
     mock_client.request.side_effect = [[running], [done]]
 
     with patch("meridian_cli.meridianrun.write_audit"):
@@ -305,9 +295,7 @@ def renderer(fake_console: _FakeConsole) -> _Renderer:
 
 
 def test_renderer_phase_change(renderer: _Renderer, fake_console: _FakeConsole) -> None:
-    renderer.render(
-        _make_event("session.phase_change", {"prev_phase": "idle", "phase": "running"})
-    )
+    renderer.render(_make_event("session.phase_change", {"prev_phase": "idle", "phase": "running"}))
     assert any("running" in line for line in fake_console.lines)
     assert any("idle" in line for line in fake_console.lines)
 
@@ -386,7 +374,7 @@ def test_renderer_flush_ends_streaming_line(
         _make_event("message.delta", {"delta": {"type": "text_delta", "text": "partial"}})
     )
     # Before flush, no newline yet
-    assert fake_console._pending != "" or any("partial" in l for l in fake_console.lines)
+    assert fake_console._pending != "" or any("partial" in line for line in fake_console.lines)
     renderer.close()
     # After close, pending is flushed
     combined = " ".join(fake_console.lines)
@@ -396,9 +384,7 @@ def test_renderer_flush_ends_streaming_line(
 def test_renderer_seq_tracking_via_events_endpoint(mock_client: MagicMock) -> None:
     """The since= query param advances as events are consumed."""
     evt0 = _make_event("session.created", {}, seq=0)
-    evt1 = _make_event(
-        "session.phase_change", {"prev_phase": "idle", "phase": "done"}, seq=1
-    )
+    evt1 = _make_event("session.phase_change", {"prev_phase": "idle", "phase": "done"}, seq=1)
     mock_client.request.return_value = [evt0, evt1]
 
     with patch("meridian_cli.meridianrun.write_audit"):

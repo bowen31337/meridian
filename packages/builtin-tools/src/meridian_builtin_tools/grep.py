@@ -212,7 +212,7 @@ def _parse_rg_json(
 
         file_path = _text_or_bytes(msg.get("data", {}).get("path", {}))
         if workspace and file_path.startswith(workspace):
-            file_path = file_path[len(workspace):].lstrip("/\\")
+            file_path = file_path[len(workspace) :].lstrip("/\\")
 
         # Collect (type, line_number, text) items until the paired "end".
         file_items: list[tuple[str, int, str]] = []
@@ -310,15 +310,11 @@ async def _run_rg(
         stderr=asyncio.subprocess.PIPE,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=_TIMEOUT_SECONDS
-        )
-    except asyncio.TimeoutError as exc:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_TIMEOUT_SECONDS)
+    except TimeoutError as exc:
         proc.kill()
         await proc.wait()
-        raise RuntimeError(
-            f"ripgrep timed out after {_TIMEOUT_SECONDS}s"
-        ) from exc
+        raise RuntimeError(f"ripgrep timed out after {_TIMEOUT_SECONDS}s") from exc
 
     # Exit code 0 = matches found, 1 = no matches (not an error), 2 = error.
     if proc.returncode not in (0, 1):
@@ -372,9 +368,7 @@ async def grep_tool(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     pattern: str = args["pattern"]
     glob: str | None = args.get("glob")
     context_lines: int = int(args.get("context_lines", _DEFAULT_CONTEXT_LINES))
-    max_results: int = min(
-        int(args.get("max_results", _DEFAULT_MAX_RESULTS)), _MAX_RESULTS_LIMIT
-    )
+    max_results: int = min(int(args.get("max_results", _DEFAULT_MAX_RESULTS)), _MAX_RESULTS_LIMIT)
     fixed_strings: bool = bool(args.get("fixed_strings", False))
     case_insensitive: bool = bool(args.get("case_insensitive", False))
 

@@ -13,12 +13,12 @@ import time
 from typing import Any
 
 import click
+from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import DataTable, Footer, Header, Label, RichLog, Static
-from textual import work
 
 from ._audit import write_audit
 from ._client import DaemonClient, DaemonError
@@ -249,10 +249,7 @@ class MeridianTuiApp(App[None]):
         etype = evt.get("type", "?")
         data = evt.get("data") or {}
         log = self.query_one("#events-pane", RichLog)
-        log.write(
-            f"[dim]{ts}[/dim] [bold]{etype}[/bold] "
-            f"{json.dumps(data, separators=(',', ':'))}"
-        )
+        log.write(f"[dim]{ts}[/dim] [bold]{etype}[/bold] {json.dumps(data, separators=(',', ':'))}")
 
         if etype in _BUDGET_EVENT_TYPES:
             self._enqueue_approval(
@@ -334,9 +331,7 @@ def meridiantui(ctx: click.Context) -> None:
 
     span_name = "tui.launch"
     tracer = get_tracer()
-    with tracer.start_as_current_span(
-        span_name, attributes={"operation": "tui.launch"}
-    ) as span:
+    with tracer.start_as_current_span(span_name, attributes={"operation": "tui.launch"}) as span:
         record_invocation_event(
             span,
             {

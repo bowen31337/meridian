@@ -41,6 +41,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from meridian_sdk_provider.audit import AuditLogEntry
+from meridian_sdk_provider.errors import ProviderCallError
+from meridian_sdk_provider.types import Message, ModelCallOpts
 from opentelemetry.trace import StatusCode
 
 from meridian_provider_claude_code_oauth._disallowed_tools import ALL_CLAUDE_CODE_BUILTIN_TOOLS
@@ -51,9 +54,6 @@ from meridian_provider_claude_code_oauth._subprocess import (
     _opts_to_dict,
 )
 from meridian_provider_claude_code_oauth.provider import SystemOAuthProvider
-from meridian_sdk_provider.audit import AuditLogEntry
-from meridian_sdk_provider.errors import ProviderCallError
-from meridian_sdk_provider.types import Message, ModelCallOpts
 
 _STUB = str(Path(__file__).parent / "_cli_stub.py")
 
@@ -306,6 +306,7 @@ class TestSystemOAuthProviderDisallowedTool:
         provider = SystemOAuthProvider(_manager=mgr, audit_log=audit)
         if tracer is not None:
             import meridian_provider_claude_code_oauth.provider as _mod
+
             _mod.get_tracer = lambda: tracer  # type: ignore[assignment]
         return provider, mgr
 
@@ -378,6 +379,7 @@ class TestSystemOAuthProviderDisallowedTool:
     async def test_span_marked_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         tracer = _MockTracer()
         import meridian_provider_claude_code_oauth.provider as _mod
+
         monkeypatch.setattr(_mod, "get_tracer", lambda: tracer)
 
         mgr = _FakeManager()
@@ -419,10 +421,12 @@ class TestSystemOAuthProviderDisallowedTool:
 class TestPackageExports:
     def test_all_claude_code_builtin_tools_exported(self) -> None:
         import meridian_provider_claude_code_oauth as pkg
+
         assert hasattr(pkg, "ALL_CLAUDE_CODE_BUILTIN_TOOLS")
         assert pkg.ALL_CLAUDE_CODE_BUILTIN_TOOLS is ALL_CLAUDE_CODE_BUILTIN_TOOLS
 
     def test_disallowed_tool_error_exported(self) -> None:
         import meridian_provider_claude_code_oauth as pkg
+
         assert hasattr(pkg, "DisallowedToolError")
         assert pkg.DisallowedToolError is DisallowedToolError

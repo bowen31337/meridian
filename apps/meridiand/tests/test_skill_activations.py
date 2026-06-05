@@ -60,13 +60,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -160,17 +158,13 @@ class TestRequestActivationSuccess:
     def test_returns_201(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         skill = _create_skill(client)
-        resp = client.post(
-            f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}
-        )
+        resp = client.post(f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]})
         assert resp.status_code == 201
 
     def test_response_id_has_skillact_prefix(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         skill = _create_skill(client)
-        body = client.post(
-            f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}
-        ).json()
+        body = client.post(f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}).json()
         assert body["id"].startswith("skillact_")
 
     def test_ids_are_unique(self, storage_root: Path) -> None:
@@ -188,58 +182,44 @@ class TestRequestActivationSuccess:
     def test_response_has_agent_id(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         skill = _create_skill(client)
-        body = client.post(
-            f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}
-        ).json()
+        body = client.post(f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}).json()
         assert body["agent_id"] == _AGENT_ID
 
     def test_response_has_skill_id(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         skill = _create_skill(client)
-        body = client.post(
-            f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}
-        ).json()
+        body = client.post(f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}).json()
         assert body["skill_id"] == skill["id"]
 
     def test_status_is_pending(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         skill = _create_skill(client)
-        body = client.post(
-            f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}
-        ).json()
+        body = client.post(f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}).json()
         assert body["status"] == "pending"
 
     def test_approved_at_is_null(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         skill = _create_skill(client)
-        body = client.post(
-            f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}
-        ).json()
+        body = client.post(f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}).json()
         assert body["approved_at"] is None
 
     def test_revoked_at_is_null(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         skill = _create_skill(client)
-        body = client.post(
-            f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}
-        ).json()
+        body = client.post(f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}).json()
         assert body["revoked_at"] is None
 
     def test_requested_at_is_set(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         skill = _create_skill(client)
-        body = client.post(
-            f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}
-        ).json()
+        body = client.post(f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}).json()
         assert isinstance(body["requested_at"], str)
         assert len(body["requested_at"]) > 0
 
     def test_skill_version_id_defaults_to_latest(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         skill = _create_skill(client)
-        body = client.post(
-            f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}
-        ).json()
+        body = client.post(f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}).json()
         assert body["skill_version_id"] == skill["version"]["id"]
 
     def test_explicit_skill_version_id_stored(self, storage_root: Path) -> None:
@@ -274,9 +254,7 @@ class TestRequestActivationSuccess:
         skill = _create_skill(client)
         _request_activation(client, _AGENT_ID, skill["id"])
         client.delete(f"/v1/agents/{_AGENT_ID}/skills/{skill['id']}")
-        resp = client.post(
-            f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}
-        )
+        resp = client.post(f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]})
         assert resp.status_code == 201
         assert resp.json()["status"] == "pending"
 
@@ -308,27 +286,21 @@ class TestRequestActivationErrors:
 
     def test_empty_skill_id_error_code(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.post(
-            f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": ""}
-        ).json()
+        body = client.post(f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": ""}).json()
         assert body["error"]["code"] == "skill_activation_invalid_request"
 
     def test_conflict_when_pending_activation_exists(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         skill = _create_skill(client)
         _request_activation(client, _AGENT_ID, skill["id"])
-        resp = client.post(
-            f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}
-        )
+        resp = client.post(f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]})
         assert resp.status_code == 409
 
     def test_conflict_error_code_when_pending(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         skill = _create_skill(client)
         _request_activation(client, _AGENT_ID, skill["id"])
-        body = client.post(
-            f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}
-        ).json()
+        body = client.post(f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}).json()
         assert body["error"]["code"] == "skill_activation_conflict"
 
     def test_conflict_when_active_activation_exists(self, storage_root: Path) -> None:
@@ -336,9 +308,7 @@ class TestRequestActivationErrors:
         skill = _create_skill(client)
         _request_activation(client, _AGENT_ID, skill["id"])
         _approve_activation(client, _AGENT_ID, skill["id"])
-        resp = client.post(
-            f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}
-        )
+        resp = client.post(f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]})
         assert resp.status_code == 409
 
     def test_conflict_error_code_when_active(self, storage_root: Path) -> None:
@@ -346,9 +316,7 @@ class TestRequestActivationErrors:
         skill = _create_skill(client)
         _request_activation(client, _AGENT_ID, skill["id"])
         _approve_activation(client, _AGENT_ID, skill["id"])
-        body = client.post(
-            f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}
-        ).json()
+        body = client.post(f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": skill["id"]}).json()
         assert body["error"]["code"] == "skill_activation_conflict"
 
     def test_error_response_has_message(self, storage_root: Path) -> None:
@@ -378,7 +346,8 @@ class TestRequestActivationAudit:
         skill = _create_skill(client)
         _request_activation(client, _AGENT_ID, skill["id"])
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill.activation.requested"
         )
         assert record["level"] == "info"
@@ -388,7 +357,8 @@ class TestRequestActivationAudit:
         skill = _create_skill(client)
         activation = _request_activation(client, _AGENT_ID, skill["id"])
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill.activation.requested"
         )
         assert record["detail"]["activation_id"] == activation["id"]
@@ -398,7 +368,8 @@ class TestRequestActivationAudit:
         skill = _create_skill(client)
         _request_activation(client, _AGENT_ID, skill["id"])
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill.activation.requested"
         )
         assert record["detail"]["agent_id"] == _AGENT_ID
@@ -408,7 +379,8 @@ class TestRequestActivationAudit:
         skill = _create_skill(client)
         _request_activation(client, _AGENT_ID, skill["id"])
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill.activation.requested"
         )
         assert record["detail"]["skill_id"] == skill["id"]
@@ -423,7 +395,8 @@ class TestRequestActivationAudit:
         client = _make_client(storage_root)
         client.post(f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": "skill_missing"})
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill.activation.request.failed"
         )
         assert record["level"] == "error"
@@ -432,7 +405,8 @@ class TestRequestActivationAudit:
         client = _make_client(storage_root)
         client.post(f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": "skill_missing"})
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill.activation.request.failed"
         )
         assert record["detail"]["agent_id"] == _AGENT_ID
@@ -441,7 +415,8 @@ class TestRequestActivationAudit:
         client = _make_client(storage_root)
         client.post(f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": "skill_missing"})
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill.activation.request.failed"
         )
         assert record["detail"]["skill_id"] == "skill_missing"
@@ -450,7 +425,8 @@ class TestRequestActivationAudit:
         client = _make_client(storage_root)
         client.post(f"/v1/agents/{_AGENT_ID}/skills", json={"skill_id": "skill_missing"})
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill.activation.request.failed"
         )
         assert "message" in record["detail"]
@@ -545,18 +521,14 @@ class TestApproveActivationSuccess:
         client = _make_client(storage_root)
         skill = _create_skill(client)
         _request_activation(client, _AGENT_ID, skill["id"])
-        body = client.post(
-            f"/v1/agents/{_AGENT_ID}/skills/{skill['id']}/approve"
-        ).json()
+        body = client.post(f"/v1/agents/{_AGENT_ID}/skills/{skill['id']}/approve").json()
         assert body["status"] == "active"
 
     def test_approved_at_is_set(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         skill = _create_skill(client)
         _request_activation(client, _AGENT_ID, skill["id"])
-        body = client.post(
-            f"/v1/agents/{_AGENT_ID}/skills/{skill['id']}/approve"
-        ).json()
+        body = client.post(f"/v1/agents/{_AGENT_ID}/skills/{skill['id']}/approve").json()
         assert isinstance(body["approved_at"], str)
         assert len(body["approved_at"]) > 0
 
@@ -564,9 +536,7 @@ class TestApproveActivationSuccess:
         client = _make_client(storage_root)
         skill = _create_skill(client)
         _request_activation(client, _AGENT_ID, skill["id"])
-        body = client.post(
-            f"/v1/agents/{_AGENT_ID}/skills/{skill['id']}/approve"
-        ).json()
+        body = client.post(f"/v1/agents/{_AGENT_ID}/skills/{skill['id']}/approve").json()
         assert body["revoked_at"] is None
 
     def test_persisted_record_is_active(self, storage_root: Path) -> None:
@@ -588,9 +558,7 @@ class TestApproveActivationErrors:
 
     def test_no_activation_error_code(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.post(
-            f"/v1/agents/{_AGENT_ID}/skills/skill_missing/approve"
-        ).json()
+        body = client.post(f"/v1/agents/{_AGENT_ID}/skills/skill_missing/approve").json()
         assert body["error"]["code"] == "skill_activation_not_found"
 
     def test_already_active_returns_409(self, storage_root: Path) -> None:
@@ -606,9 +574,7 @@ class TestApproveActivationErrors:
         skill = _create_skill(client)
         _request_activation(client, _AGENT_ID, skill["id"])
         _approve_activation(client, _AGENT_ID, skill["id"])
-        body = client.post(
-            f"/v1/agents/{_AGENT_ID}/skills/{skill['id']}/approve"
-        ).json()
+        body = client.post(f"/v1/agents/{_AGENT_ID}/skills/{skill['id']}/approve").json()
         assert body["error"]["code"] == "skill_activation_conflict"
 
     def test_revoked_activation_returns_409(self, storage_root: Path) -> None:
@@ -635,8 +601,7 @@ class TestApproveActivationAudit:
         _request_activation(client, _AGENT_ID, skill["id"])
         client.post(f"/v1/agents/{_AGENT_ID}/skills/{skill['id']}/approve")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill.activation.approved"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.activation.approved"
         )
         assert record["level"] == "info"
 
@@ -646,8 +611,7 @@ class TestApproveActivationAudit:
         _request_activation(client, _AGENT_ID, skill["id"])
         client.post(f"/v1/agents/{_AGENT_ID}/skills/{skill['id']}/approve")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill.activation.approved"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.activation.approved"
         )
         assert record["detail"]["agent_id"] == _AGENT_ID
 
@@ -657,8 +621,7 @@ class TestApproveActivationAudit:
         _request_activation(client, _AGENT_ID, skill["id"])
         client.post(f"/v1/agents/{_AGENT_ID}/skills/{skill['id']}/approve")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill.activation.approved"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.activation.approved"
         )
         assert record["detail"]["skill_id"] == skill["id"]
 
@@ -672,7 +635,8 @@ class TestApproveActivationAudit:
         client = _make_client(storage_root)
         client.post(f"/v1/agents/{_AGENT_ID}/skills/skill_missing/approve")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill.activation.approve.failed"
         )
         assert record["level"] == "error"
@@ -812,8 +776,7 @@ class TestRevokeActivationAudit:
         _request_activation(client, _AGENT_ID, skill["id"])
         client.delete(f"/v1/agents/{_AGENT_ID}/skills/{skill['id']}")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill.activation.revoked"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.activation.revoked"
         )
         assert record["level"] == "info"
 
@@ -823,8 +786,7 @@ class TestRevokeActivationAudit:
         _request_activation(client, _AGENT_ID, skill["id"])
         client.delete(f"/v1/agents/{_AGENT_ID}/skills/{skill['id']}")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill.activation.revoked"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.activation.revoked"
         )
         assert record["detail"]["agent_id"] == _AGENT_ID
 
@@ -834,8 +796,7 @@ class TestRevokeActivationAudit:
         _request_activation(client, _AGENT_ID, skill["id"])
         client.delete(f"/v1/agents/{_AGENT_ID}/skills/{skill['id']}")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill.activation.revoked"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill.activation.revoked"
         )
         assert record["detail"]["skill_id"] == skill["id"]
 
@@ -849,7 +810,8 @@ class TestRevokeActivationAudit:
         client = _make_client(storage_root)
         client.delete(f"/v1/agents/{_AGENT_ID}/skills/skill_missing")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill.activation.revoke.failed"
         )
         assert record["level"] == "error"
@@ -1030,23 +992,17 @@ class TestListActivationsPagination:
         skill_b = _create_skill(client, name="skill-b")
         _request_activation(client, _AGENT_ID, skill_a["id"])
         _request_activation(client, _AGENT_ID, skill_b["id"])
-        body = client.get(
-            f"/v1/agents/{_AGENT_ID}/skills", params={"limit": 1}
-        ).json()
+        body = client.get(f"/v1/agents/{_AGENT_ID}/skills", params={"limit": 1}).json()
         assert len(body["items"]) == 1
 
     def test_limit_reflected_in_response(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.get(
-            f"/v1/agents/{_AGENT_ID}/skills", params={"limit": 5}
-        ).json()
+        body = client.get(f"/v1/agents/{_AGENT_ID}/skills", params={"limit": 5}).json()
         assert body["limit"] == 5
 
     def test_offset_reflected_in_response(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.get(
-            f"/v1/agents/{_AGENT_ID}/skills", params={"offset": 3}
-        ).json()
+        body = client.get(f"/v1/agents/{_AGENT_ID}/skills", params={"offset": 3}).json()
         assert body["offset"] == 3
 
     def test_total_reflects_full_count_not_page(self, storage_root: Path) -> None:
@@ -1057,9 +1013,7 @@ class TestListActivationsPagination:
         _request_activation(client, _AGENT_ID, skill_a["id"])
         _request_activation(client, _AGENT_ID, skill_b["id"])
         _request_activation(client, _AGENT_ID, skill_c["id"])
-        body = client.get(
-            f"/v1/agents/{_AGENT_ID}/skills", params={"limit": 2}
-        ).json()
+        body = client.get(f"/v1/agents/{_AGENT_ID}/skills", params={"limit": 2}).json()
         assert body["total"] == 3
         assert len(body["items"]) == 2
 
@@ -1067,9 +1021,7 @@ class TestListActivationsPagination:
         client = _make_client(storage_root)
         skill = _create_skill(client)
         _request_activation(client, _AGENT_ID, skill["id"])
-        body = client.get(
-            f"/v1/agents/{_AGENT_ID}/skills", params={"offset": 100}
-        ).json()
+        body = client.get(f"/v1/agents/{_AGENT_ID}/skills", params={"offset": 100}).json()
         assert body["items"] == []
         assert body["total"] == 1
 

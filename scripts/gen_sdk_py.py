@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import datetime
 import json
+from pathlib import Path
 import subprocess
 import sys
-from pathlib import Path
 
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
@@ -43,13 +43,17 @@ def main() -> int:
     with _tracer.start_as_current_span("sdk_py.gen") as span:
         try:
             if not _SPEC.exists():
-                msg = f"openapi spec not found: {_SPEC} — run 'make codegen' step by step or export_openapi.py first"
+                msg = (
+                    f"openapi spec not found: {_SPEC} — run 'make codegen'"
+                    " step by step or export_openapi.py first"
+                )
                 print(f"error: {msg}", file=sys.stderr)
                 span.set_status(Status(StatusCode.ERROR, msg))
                 _audit("error", "sdk_py.gen.failed", {"error": msg})
                 return 1
 
             _OUT.mkdir(parents=True, exist_ok=True)
+            out_file = _OUT / "__init__.py"
             cmd = [
                 "uv",
                 "run",
@@ -59,11 +63,12 @@ def main() -> int:
                 "--input-file-type",
                 "openapi",
                 "--output",
-                str(_OUT),
+                str(out_file),
                 "--output-model-type",
                 "pydantic_v2.BaseModel",
                 "--target-python-version",
                 "3.11",
+                "--disable-timestamp",
             ]
             result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(_REPO_ROOT))
 
@@ -82,7 +87,22 @@ def main() -> int:
                 )
                 return 1
 
-            gen_files = list(_OUT.glob("**/*.py"))
+            # Format the generated module with the repo's formatter so the
+            # codegen output is lint-clean (lint:ruff-format runs over it in CI).
+            fmt = subprocess.run(
+                ["uv", "run", "ruff", "format", str(out_file)],
+                capture_output=True,
+                text=True,
+                cwd=str(_REPO_ROOT),
+            )
+            if fmt.returncode != 0:
+                msg = fmt.stderr or fmt.stdout
+                print(f"error: ruff format of generated sdk-py failed:\n{msg}", file=sys.stderr)
+                span.set_status(Status(StatusCode.ERROR, "ruff format failed"))
+                _audit("error", "sdk_py.gen.failed", {"error": msg})
+                return 1
+
+            gen_files = [out_file]
             bytes_written = sum(f.stat().st_size for f in gen_files)
             span.add_event(
                 "sdk_py.gen.done",

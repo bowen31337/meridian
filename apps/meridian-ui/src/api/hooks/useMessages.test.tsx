@@ -91,9 +91,9 @@ describe("useSendMessage", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     expect(result.current.data).toEqual(MESSAGE);
-    const url = vi.mocked(fetch).mock.calls[0]![0] as string;
+    const url = vi.mocked(fetch).mock.calls[0]?.[0] as string;
     expect(url).toContain("/v1/sessions/s1/messages");
-    const init = vi.mocked(fetch).mock.calls[0]![1] as RequestInit;
+    const init = vi.mocked(fetch).mock.calls[0]?.[1] as RequestInit;
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body as string)).toEqual({ content: "Hello" });
   });
@@ -105,7 +105,7 @@ describe("useSendMessage", () => {
     result.current.mutate({ sessionId: "s1", body: { content: "Hi", channel_id: "ch1" } });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
-    const init = vi.mocked(fetch).mock.calls[0]![1] as RequestInit;
+    const init = vi.mocked(fetch).mock.calls[0]?.[1] as RequestInit;
     expect(JSON.parse(init.body as string)).toEqual({ content: "Hi", channel_id: "ch1" });
   });
 
@@ -127,7 +127,9 @@ describe("useSendMessage", () => {
   });
 
   it("writes to audit log and sets isError on failure", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ code: "SERVER_ERROR", message: "boom" }, 500));
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse({ code: "SERVER_ERROR", message: "boom" }, 500),
+    );
     const auditLog = makeAuditLog();
     const { result } = renderHook(() => useSendMessage(), { wrapper: createWrapper({ auditLog }) });
 

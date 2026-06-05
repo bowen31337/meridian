@@ -2,9 +2,6 @@
 # Audit log
 from ._audit import AuditLog, NoopAuditLog
 
-# Usage rollup
-from ._usage_rollup import UsageRollupProjector
-
 # Contract
 from ._contract import EventHandler
 from ._indexer import BackgroundIndexer
@@ -16,6 +13,13 @@ from ._migrations import SCHEMA_VERSION
 # Phase projection
 from ._phase import PhaseProjection, PhaseProjectionOptions, PhaseProjectionRuntime
 
+# Core components
+from ._reader import LocalEventLogReader
+from ._reader_runtime import ReaderOptions, ReaderRuntime
+
+# Runtime
+from ._runtime import IndexerOptions, IndexerRuntime
+
 # Phase state machine
 from ._state_machine import (
     EVENTS,
@@ -24,13 +28,6 @@ from ._state_machine import (
     PhaseStateMachineOptions,
     PhaseStateMachineRuntime,
 )
-
-# Core components
-from ._reader import LocalEventLogReader
-from ._reader_runtime import ReaderOptions, ReaderRuntime
-
-# Runtime
-from ._runtime import IndexerOptions, IndexerRuntime
 from ._store import SQLiteProjectionStore
 
 # Telemetry
@@ -44,6 +41,9 @@ from ._telemetry import (
     record_state_machine_failure,
 )
 from ._types import AuditLogEntry, EventSeq, IndexerFailure, StructuredEvent
+
+# Usage rollup
+from ._usage_rollup import UsageRollupProjector
 
 # Version
 from ._version import INDEXER_SDK_VERSION

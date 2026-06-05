@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import time
-import uuid
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import json
 from pathlib import Path
+import time
 from typing import Any, Protocol, runtime_checkable
-
-import jsonschema
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -24,6 +22,7 @@ from core_errors import (
 )
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
+import jsonschema
 from meridian_sdk_provider import (
     MessageStartEvent,
     MessageStopEvent,
@@ -105,10 +104,7 @@ def _validate_tool_args(schema: dict[str, Any], data: Any) -> list[str]:
     validator = jsonschema.Draft7Validator(schema)
     errors = []
     for err in validator.iter_errors(data):
-        path = "".join(
-            f"[{p!r}]" if isinstance(p, str) else f"[{p}]"
-            for p in err.absolute_path
-        )
+        path = "".join(f"[{p!r}]" if isinstance(p, str) else f"[{p}]" for p in err.absolute_path)
         errors.append(f"${path}: {err.message}" if path else err.message)
     return errors
 
@@ -673,7 +669,10 @@ async def run_harness_loop(
                                 )
                             except Exception as _hook_exc:
                                 _err = HarnessLoopError(
-                                    message=f"on_error hook dispatch failed for session {session_id!r}: {_hook_exc}",
+                                    message=(
+                                        f"on_error hook dispatch failed for session "
+                                        f"{session_id!r}: {_hook_exc}"
+                                    ),
                                     timestamp=_err_now,
                                     cause=_hook_exc,
                                 )
@@ -690,7 +689,7 @@ async def run_harness_loop(
                                         },
                                     )
                                 )
-                                raise _err
+                                raise _err from _hook_exc
                     if not _recoverable:
                         final_phase = "terminated"
                         break
@@ -698,12 +697,14 @@ async def run_harness_loop(
 
                 if on_usage_delta is not None:
                     if _stop_event is not None:
-                        on_usage_delta(UsageDelta(
-                            input_tokens=_stop_event.input_tokens or 0,
-                            output_tokens=_stop_event.output_tokens or 0,
-                            cache_creation_tokens=_stop_event.cache_creation_input_tokens,
-                            cache_read_tokens=_stop_event.cache_read_input_tokens,
-                        ))
+                        on_usage_delta(
+                            UsageDelta(
+                                input_tokens=_stop_event.input_tokens or 0,
+                                output_tokens=_stop_event.output_tokens or 0,
+                                cache_creation_tokens=_stop_event.cache_creation_input_tokens,
+                                cache_read_tokens=_stop_event.cache_read_input_tokens,
+                            )
+                        )
                     else:
                         on_usage_delta(UsageDelta(input_tokens=100, output_tokens=50))
 
@@ -816,10 +817,7 @@ async def run_harness_loop(
                 # Per-iteration budget check: only reached when tool_use would continue.
                 if iteration_budget is not None:
                     before_phase = final_phase
-                    if (
-                        iteration_budget.hard is not None
-                        and model_calls >= iteration_budget.hard
-                    ):
+                    if iteration_budget.hard is not None and model_calls >= iteration_budget.hard:
                         if event_log is not None:
                             await event_log.append(
                                 session_id,
@@ -833,10 +831,7 @@ async def run_harness_loop(
                             )
                         final_phase = "terminated"
                         break
-                    elif (
-                        iteration_budget.soft is not None
-                        and model_calls >= iteration_budget.soft
-                    ):
+                    elif iteration_budget.soft is not None and model_calls >= iteration_budget.soft:
                         if event_log is not None:
                             await event_log.append(
                                 session_id,
@@ -915,9 +910,7 @@ async def run_harness_loop(
                                 audit_log=audit_log,
                             )
                             for _phr in _pre_hook_results:
-                                if _phr.mutations and isinstance(
-                                    _phr.mutations.get("args"), dict
-                                ):
+                                if _phr.mutations and isinstance(_phr.mutations.get("args"), dict):
                                     _args = _phr.mutations["args"]
                                     break
                         except HookVetoError as _veto:
@@ -951,7 +944,7 @@ async def run_harness_loop(
                                 f" {_veto.hook_name!r}: {_veto.message}",
                                 timestamp=_veto_now,
                                 cause=_veto,
-                            )
+                            ) from _veto
 
                     # 4. Write tool_call.requested event.
                     if event_log is not None:
@@ -1002,7 +995,7 @@ async def run_harness_loop(
                     },
                 )
             )
-            raise err
+            raise err from exc
 
     return model_calls, tool_calls, final_phase
 
@@ -1126,7 +1119,7 @@ def make_replay_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(
             content={

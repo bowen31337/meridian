@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import hashlib
 import io
 import json
+from pathlib import Path
 import subprocess
 import tarfile
 import tempfile
+from typing import Any, Protocol
 import urllib.request
 import uuid
-from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any, Protocol
 
 from core_errors import (
     AuditLog,
@@ -125,9 +125,7 @@ class SkillInstallError(MeridianError):
 
 class SkillInstallInvalidSourceError(MeridianError):
     def __init__(self, *, message: str, timestamp: str) -> None:
-        super().__init__(
-            code="skill_install_invalid_source", message=message, timestamp=timestamp
-        )
+        super().__init__(code="skill_install_invalid_source", message=message, timestamp=timestamp)
 
     def http_status(self) -> int:
         return 422
@@ -298,7 +296,7 @@ class NpmSkillLoader:
         if spec.startswith("@") and spec.count("@") > 1:
             at_idx = spec.index("@", 1)
             name = spec[:at_idx]
-            version = spec[at_idx + 1:]
+            version = spec[at_idx + 1 :]
         elif not spec.startswith("@") and "@" in spec:
             name, version = spec.rsplit("@", 1)
         else:
@@ -550,7 +548,7 @@ def make_skills_router(
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=skill_record, status_code=201)
 
@@ -692,7 +690,7 @@ def make_skills_router(
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=skill_record, status_code=201)
 
@@ -770,7 +768,7 @@ def make_skills_router(
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=version_record, status_code=200)
 
@@ -838,7 +836,7 @@ def make_skills_router(
                         detail={"message": err2.message},
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         response_headers: dict[str, str] = {}
         if next_cursor is not None:
@@ -920,7 +918,7 @@ def make_skills_router(
                         detail={"skill_id": skill_id, "message": err2.message},
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         response_headers: dict[str, str] = {}
         if next_cursor is not None:

@@ -1,12 +1,14 @@
 """Shared fixtures: MockTracer/MockSpan for OTel, CapturingAuditLog, and app factory."""
+
 from __future__ import annotations
 
 from typing import Any
 
-import pytest
-from fastapi import FastAPI
-
+from api_models._audit import AuditLog
+from api_models._routes import make_router
+from api_models._types import AuditLogEntry
 from core_errors import install_error_handler
+from fastapi import FastAPI
 from meridian_sdk_provider import (
     FakeModelAdapter,
     ModelRouter,
@@ -14,15 +16,12 @@ from meridian_sdk_provider import (
     ModelRoutingRule,
 )
 from meridian_sdk_provider.protocol import ModelCapabilities, ModelEntry
-
-from api_models._audit import AuditLog
-from api_models._routes import make_router
-from api_models._types import AuditLogEntry
-
+import pytest
 
 # ---------------------------------------------------------------------------
 # OTel mock
 # ---------------------------------------------------------------------------
+
 
 class MockSpan:
     def __init__(self, name: str = "", attributes: dict[str, Any] | None = None) -> None:
@@ -42,7 +41,7 @@ class MockSpan:
     def record_exception(self, exc: BaseException, **_: Any) -> None:
         self.recorded_exceptions.append(exc)
 
-    def __enter__(self) -> "MockSpan":
+    def __enter__(self) -> MockSpan:
         return self
 
     def __exit__(self, *_: Any) -> bool:
@@ -81,6 +80,7 @@ def mock_span(mock_tracer: MockTracer) -> MockSpan:
 # ---------------------------------------------------------------------------
 # Audit log capture
 # ---------------------------------------------------------------------------
+
 
 class CapturingAuditLog(AuditLog):
     def __init__(self) -> None:

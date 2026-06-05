@@ -20,7 +20,8 @@ Tests cover:
   - resolve: audit code matches the raised error's code.
   - resolve: NoopAuditLog used when audit_log is None (no crash).
   - resolve: emits audit.secret_access entry with level "info" on success.
-  - resolve: audit.secret_access detail contains vault_id, name, requester_agent_id, requester_tool_call_id.
+  - resolve: audit.secret_access detail contains vault_id, name, requester_agent_id,
+    requester_tool_call_id.
   - resolve: audit.secret_access requester fields are None when not provided.
   - resolve: audit.secret_access requester fields carry provided agent_id and tool_call_id.
   - resolve: failure audit detail contains requester_agent_id and requester_tool_call_id.
@@ -31,10 +32,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from core_errors import AuditLog, AuditLogEntry, NoopAuditLog
-from opentelemetry.trace import StatusCode
-
 from meridiand._secret_ref import (
     SecretRefNotFoundError,
     SecretRefParseError,
@@ -42,9 +40,10 @@ from meridiand._secret_ref import (
     SecretRefResolver,
 )
 from meridiand._vault_backend_os_keychain import OsKeychainVaultBackend
+from opentelemetry.trace import StatusCode
+import pytest
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -93,9 +92,7 @@ def _write_vault(storage_root: Path, vault_id: str, backend: str = "os_keychain"
     vaults_dir = storage_root / "vaults"
     vaults_dir.mkdir(parents=True, exist_ok=True)
     vault_file = vaults_dir / f"{vault_id}.json"
-    vault_file.write_text(
-        json.dumps({"id": vault_id, "name": "test-vault", "backend": backend})
-    )
+    vault_file.write_text(json.dumps({"id": vault_id, "name": "test-vault", "backend": backend}))
     return vault_file
 
 
@@ -342,7 +339,9 @@ class TestSecretRefOtel:
         resolver = _make_resolver(storage_root, backend)
         ref = "secret_ref://vault/vault_attr/k"
         resolver.resolve(ref)
-        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "vault.secret.resolve")
+        span = next(
+            s for s in _otel_exporter.get_finished_spans() if s.name == "vault.secret.resolve"
+        )
         assert span.attributes["secret.ref"] == ref
 
     def test_span_has_vault_id_attribute_on_success(self, storage_root: Path) -> None:
@@ -351,7 +350,9 @@ class TestSecretRefOtel:
         _store_secret(backend, "vault_vid", "k", "v")
         resolver = _make_resolver(storage_root, backend)
         resolver.resolve("secret_ref://vault/vault_vid/k")
-        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "vault.secret.resolve")
+        span = next(
+            s for s in _otel_exporter.get_finished_spans() if s.name == "vault.secret.resolve"
+        )
         assert span.attributes["vault.id"] == "vault_vid"
 
     def test_span_has_secret_key_attribute_on_success(self, storage_root: Path) -> None:
@@ -360,7 +361,9 @@ class TestSecretRefOtel:
         _store_secret(backend, "vault_sk", "my_key", "v")
         resolver = _make_resolver(storage_root, backend)
         resolver.resolve("secret_ref://vault/vault_sk/my_key")
-        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "vault.secret.resolve")
+        span = next(
+            s for s in _otel_exporter.get_finished_spans() if s.name == "vault.secret.resolve"
+        )
         assert span.attributes["secret.key"] == "my_key"
 
     def test_span_has_invocation_event(self, storage_root: Path) -> None:
@@ -369,7 +372,9 @@ class TestSecretRefOtel:
         _store_secret(backend, "vault_evt", "k", "v")
         resolver = _make_resolver(storage_root, backend)
         resolver.resolve("secret_ref://vault/vault_evt/k")
-        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "vault.secret.resolve")
+        span = next(
+            s for s in _otel_exporter.get_finished_spans() if s.name == "vault.secret.resolve"
+        )
         event_names = [e.name for e in span.events]
         assert "meridian.error.invocation" in event_names
 
@@ -379,7 +384,9 @@ class TestSecretRefOtel:
         _store_secret(backend, "vault_ec", "k", "v")
         resolver = _make_resolver(storage_root, backend)
         resolver.resolve("secret_ref://vault/vault_ec/k")
-        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "vault.secret.resolve")
+        span = next(
+            s for s in _otel_exporter.get_finished_spans() if s.name == "vault.secret.resolve"
+        )
         evt = next(e for e in span.events if e.name == "meridian.error.invocation")
         assert evt.attributes["code"] == "vault_secret_resolve"
 
@@ -387,7 +394,9 @@ class TestSecretRefOtel:
         resolver = _make_resolver(storage_root)
         with pytest.raises(SecretRefParseError):
             resolver.resolve("bad_ref")
-        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "vault.secret.resolve")
+        span = next(
+            s for s in _otel_exporter.get_finished_spans() if s.name == "vault.secret.resolve"
+        )
         assert span.status.status_code == StatusCode.ERROR
 
     def test_vault_not_found_span_status_is_error(self, storage_root: Path) -> None:
@@ -395,7 +404,9 @@ class TestSecretRefOtel:
         resolver = _make_resolver(storage_root, backend)
         with pytest.raises(SecretRefResolveError):
             resolver.resolve("secret_ref://vault/vault_ghost/k")
-        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "vault.secret.resolve")
+        span = next(
+            s for s in _otel_exporter.get_finished_spans() if s.name == "vault.secret.resolve"
+        )
         assert span.status.status_code == StatusCode.ERROR
 
     def test_secret_not_found_span_status_is_error(self, storage_root: Path) -> None:
@@ -404,7 +415,9 @@ class TestSecretRefOtel:
         resolver = _make_resolver(storage_root, backend)
         with pytest.raises(SecretRefNotFoundError):
             resolver.resolve("secret_ref://vault/vault_snf/missing")
-        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "vault.secret.resolve")
+        span = next(
+            s for s in _otel_exporter.get_finished_spans() if s.name == "vault.secret.resolve"
+        )
         assert span.status.status_code == StatusCode.ERROR
 
 
@@ -563,7 +576,9 @@ class TestSecretAccessAuditEvent:
         assert entry.detail is not None
         assert entry.detail["name"] == "my_secret_key"
 
-    def test_secret_access_requester_fields_none_when_not_provided(self, storage_root: Path) -> None:
+    def test_secret_access_requester_fields_none_when_not_provided(
+        self, storage_root: Path
+    ) -> None:
         audit = _CapturingAuditLog()
         backend = _make_backend()
         _write_vault(storage_root, "vault_rn")

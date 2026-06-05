@@ -7,10 +7,6 @@ from ._contract import EnvironmentDriver
 
 # Built-in drivers
 from ._docker_driver import DockerBackendDriver
-from ._http_driver import HttpBackendDriver, VaultCredentialResolver
-from ._local_driver import LocalBackendDriver
-from ._mcp_driver import McpBackendDriver
-from ._ssh_driver import SshBackendDriver
 
 # Network policy enforcement
 from ._enforcer import NetworkEnforcer
@@ -18,6 +14,9 @@ from ._enforcer import NetworkEnforcer
 # Filesystem policy enforcement
 from ._fs_enforcer import FilesystemEnforcer
 from ._fs_gate import FilesystemGate
+from ._http_driver import HttpBackendDriver, VaultCredentialResolver
+from ._local_driver import LocalBackendDriver
+from ._mcp_driver import McpBackendDriver
 
 # Worker pool (lifecycle: provision-on-first-use, warm pool, TTL reaper, on-demand)
 from ._pool import WorkerPool
@@ -25,6 +24,7 @@ from ._proxy import OutboundProxyTransport
 
 # Runtime
 from ._runtime import EnvironmentRuntime, RuntimeOptions, default_runtime
+from ._ssh_driver import SshBackendDriver
 
 # Telemetry
 from ._telemetry import (

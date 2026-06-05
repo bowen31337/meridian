@@ -16,8 +16,8 @@ import ast
 import datetime
 import json
 import os
-import sys
 from pathlib import Path
+import sys
 
 # Imports that may only appear inside the approved storage directories.
 _BANNED_IMPORTS: frozenset[str] = frozenset(
@@ -35,9 +35,7 @@ _ALLOWED_DIRS: tuple[Path, ...] = (
 )
 
 # Directory names that are always skipped during traversal.
-_SKIP_DIRS: frozenset[str] = frozenset(
-    {".git", "__pycache__", ".venv", ".eggs", "node_modules"}
-)
+_SKIP_DIRS: frozenset[str] = frozenset({".git", "__pycache__", ".venv", ".eggs", "node_modules"})
 
 
 def _is_test_file(path: Path) -> bool:
@@ -68,11 +66,10 @@ def _extract_db_imports(path: Path) -> list[str]:
                 top = alias.name.split(".")[0]
                 if top in _BANNED_IMPORTS:
                     seen[top] = None
-        elif isinstance(node, ast.ImportFrom):
-            if node.module:
-                top = node.module.split(".")[0]
-                if top in _BANNED_IMPORTS:
-                    seen[top] = None
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            top = node.module.split(".")[0]
+            if top in _BANNED_IMPORTS:
+                seen[top] = None
     return list(seen)
 
 

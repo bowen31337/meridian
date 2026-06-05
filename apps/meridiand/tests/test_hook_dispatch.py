@@ -61,25 +61,22 @@ from __future__ import annotations
 
 import asyncio
 import json
-import uuid
 from pathlib import Path
 from typing import Any
+import uuid
 
-import pytest
-from core_errors import AuditLog, AuditLogEntry, NoopAuditLog
-from opentelemetry.trace import StatusCode
-from sdk_sandbox import ExecutionContext
-
+from core_errors import AuditLog, AuditLogEntry
 from meridiand._hook_dispatch import (
     HookDispatchBlockedError,
-    HookDispatchResult,
     HookVetoError,
     _SandboxAuditBridge,
     dispatch_hooks,
 )
+from opentelemetry.trace import StatusCode
+import pytest
+from sdk_sandbox import ExecutionContext
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers

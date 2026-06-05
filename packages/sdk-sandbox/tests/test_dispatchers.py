@@ -13,15 +13,13 @@ Covers per-dispatcher:
 from __future__ import annotations
 
 import asyncio
-import json
-import sys
 from pathlib import Path
+import sys
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from opentelemetry.trace import StatusCode
-
+import pytest
 from sdk_sandbox import (
     ContainerHandler,
     ExecutionContext,
@@ -263,9 +261,9 @@ class TestSubprocessDispatcher:
     async def test_success_returns_result(self, tmp_path: Path, mock_span: MockSpan) -> None:
         script = _write_script(tmp_path, "echo.py", _ECHO_SCRIPT)
         d = SubprocessDispatcher()
-        tool = _tool(SubprocessHandler(path=f"{sys.executable} {script}".split()[0]))
+        _tool(SubprocessHandler(path=f"{sys.executable} {script}".split()[0]))
         # run via python interpreter directly
-        tool2 = _tool(SubprocessHandler(path=sys.executable))
+        _tool(SubprocessHandler(path=sys.executable))
         # easier: write a proper executable
         exe = tmp_path / "echo_tool"
         exe.write_text(f"#!{sys.executable}\n{_ECHO_SCRIPT}")
@@ -387,7 +385,6 @@ class TestSubprocessDispatcher:
         assert mock_span.status.status_code == StatusCode.ERROR
 
     async def test_payload_includes_thread_id(self, tmp_path: Path, mock_span: MockSpan) -> None:
-        received: list[dict] = []
         script_text = (
             "import sys, json\n"
             "req = json.load(sys.stdin)\n"
@@ -398,8 +395,10 @@ class TestSubprocessDispatcher:
         exe.write_text(f"#!{sys.executable}\n{script_text}")
         exe.chmod(0o755)
         ctx_with_thread = ExecutionContext(
-            session_id="sess-disp", workspace="/workspace",
-            thread_id="thread-123", scratch_dir="/tmp/scratch"
+            session_id="sess-disp",
+            workspace="/workspace",
+            thread_id="thread-123",
+            scratch_dir="/tmp/scratch",
         )
         d = SubprocessDispatcher()
         result = await d.dispatch(_tool(SubprocessHandler(path=str(exe))), {}, ctx_with_thread)
@@ -702,6 +701,7 @@ class TestHttpDispatcher:
         captured_payload: list[dict] = []
 
         with patch("sdk_sandbox._dispatchers._httpx") as mock_httpx:
+
             async def fake_post(url: str, *, json: dict, headers: dict) -> Any:
                 captured_payload.append(json)
                 return resp
@@ -809,9 +809,7 @@ class TestContainerDispatcher:
 
     async def test_docker_not_found_returns_is_error(self, mock_span: MockSpan) -> None:
         d = ContainerDispatcher(docker_executable="/no/such/docker")
-        result = await d.dispatch(
-            self._tool_with_handler("c1", "/entrypoint"), {}, CTX
-        )
+        result = await d.dispatch(self._tool_with_handler("c1", "/entrypoint"), {}, CTX)
         assert result.is_error is True
         assert result.error_code == "container_docker_not_found"
 
@@ -878,8 +876,10 @@ class TestContainerDispatcher:
             return await orig(str(exe), **kwargs)
 
         ctx_with_thread = ExecutionContext(
-            session_id="sess-disp", workspace="/workspace",
-            thread_id="thread-456", scratch_dir="/tmp/scratch"
+            session_id="sess-disp",
+            workspace="/workspace",
+            thread_id="thread-456",
+            scratch_dir="/tmp/scratch",
         )
         with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
             result = await ContainerDispatcher().dispatch(

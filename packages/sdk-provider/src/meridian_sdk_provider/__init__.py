@@ -18,12 +18,6 @@ Public surface for provider authors and router consumers::
 
 from ._version import SDK_PROVIDER_VERSION
 from .audit import AuditLog, AuditLogEntry, NoopAuditLog
-from .event_log import ModelCallEventLog, NoopModelCallEventLog
-from .fake import FakeModelAdapter, write_model_fixture
-from .ollama import OllamaProvider
-from .openai import OpenAIProvider
-from .openrouter import OpenRouterProvider
-from .registry import ProviderRegistry
 from .errors import (
     NoProviderFoundError,
     ProviderCallError,
@@ -33,7 +27,13 @@ from .errors import (
     ProviderTimeoutError,
     RoutingError,
 )
+from .event_log import ModelCallEventLog, NoopModelCallEventLog
+from .fake import FakeModelAdapter, write_model_fixture
+from .ollama import OllamaProvider
+from .openai import OpenAIProvider
+from .openrouter import OpenRouterProvider
 from .protocol import ModelCapabilities, ModelEntry, ModelProvider, ProviderCapabilities
+from .registry import ProviderRegistry
 from .router import (
     FallbackRule,
     ModelRouter,
@@ -42,7 +42,12 @@ from .router import (
     RoutingCondition,
     TokenRange,
 )
-from .telemetry import get_tracer, record_cache_metrics, record_invocation_event, record_provider_failure
+from .telemetry import (
+    get_tracer,
+    record_cache_metrics,
+    record_invocation_event,
+    record_provider_failure,
+)
 from .types import (
     CacheControl,
     ContentBlock,

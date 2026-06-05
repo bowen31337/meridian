@@ -41,8 +41,6 @@ import tempfile
 import time
 
 from ._contract import EnvironmentDriver
-
-_SIGKILL_GRACE_S: float = 2.0
 from ._types import (
     CapabilityEnvelope,
     ExecuteRequest,
@@ -52,6 +50,8 @@ from ._types import (
     ProvisionRequest,
     ReclaimRequest,
 )
+
+_SIGKILL_GRACE_S: float = 2.0
 
 
 def _ms_since(start: float) -> float:
@@ -141,9 +141,7 @@ class LocalBackendDriver(EnvironmentDriver):
         try:
             os.makedirs(scratch, exist_ok=True)
         except OSError as exc:
-            raise RuntimeError(
-                f"Failed to create scratch directory {scratch!r}: {exc}"
-            ) from exc
+            raise RuntimeError(f"Failed to create scratch directory {scratch!r}: {exc}") from exc
         self._scratch_dirs[request.environment_id] = scratch
 
     async def execute(self, request: ExecuteRequest) -> ExecuteResult:
@@ -178,16 +176,14 @@ class LocalBackendDriver(EnvironmentDriver):
                     proc.communicate(stdin_data),
                     timeout=timeout_s,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 proc.terminate()
                 try:
                     await asyncio.wait_for(proc.wait(), timeout=_SIGKILL_GRACE_S)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     proc.kill()
                     await proc.wait()
-                raise TimeoutError(
-                    f"Subprocess timed out after {timeout_s:.1f}s"
-                )
+                raise TimeoutError(f"Subprocess timed out after {timeout_s:.1f}s") from None
             duration_ms = _ms_since(start)
             return ExecuteResult(
                 stdout=stdout_b.decode(errors="replace"),

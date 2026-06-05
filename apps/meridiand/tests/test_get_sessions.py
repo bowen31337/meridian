@@ -36,14 +36,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from storage_event_log import EventLogWriter, LocalEventLogWriter
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -355,9 +353,7 @@ class TestListSessionsPagination:
     def test_cursor_advances_to_next_page(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         for i in range(5):
-            _seed_session(
-                storage_root, f"sess_adv_{i}", f"2026-08-{i + 1:02d}T00:00:00+00:00"
-            )
+            _seed_session(storage_root, f"sess_adv_{i}", f"2026-08-{i + 1:02d}T00:00:00+00:00")
         page1, _ = _get_sessions(client, limit=2)
         cursor = page1["next_cursor"]
         assert cursor is not None

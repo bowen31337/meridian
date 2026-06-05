@@ -12,11 +12,11 @@ the error message in the JSON error body, and writes the failure to the audit lo
 
 from __future__ import annotations
 
-import json
-import uuid
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any
+import uuid
 
 from core_errors import (
     AuditLog,

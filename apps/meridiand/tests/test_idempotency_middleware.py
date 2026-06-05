@@ -26,14 +26,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
-from fastapi.testclient import TestClient
-
 from core_errors import NoopAuditLog
+from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from meridiand._idempotency_middleware import IdempotencyKeyMiddleware
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -149,7 +146,12 @@ class TestCacheHitAndMiss:
         # POST /v1/skills with key "k"
         resp1 = client.post(
             "/v1/skills",
-            json={"name": "skill-a", "description": "d", "instructions": "i", "tools": [{"name": "bash", "description": "run"}]},
+            json={
+                "name": "skill-a",
+                "description": "d",
+                "instructions": "i",
+                "tools": [{"name": "bash", "description": "run"}],
+            },
             headers={"Idempotency-Key": "shared-key"},
         )
         # POST to a different path with the same key — must not be replayed from /v1/skills cache.
@@ -231,7 +233,12 @@ class TestKeyValidation:
         client = _make_client(storage_root)
         resp = client.post(
             "/v1/skills",
-            json={"name": "s", "description": "d", "instructions": "i", "tools": [{"name": "bash", "description": "run"}]},
+            json={
+                "name": "s",
+                "description": "d",
+                "instructions": "i",
+                "tools": [{"name": "bash", "description": "run"}],
+            },
             headers={"Idempotency-Key": "x" * 255},
         )
         assert resp.status_code == 201
@@ -306,12 +313,22 @@ class TestSkillsEndpointIdempotency:
         client = _make_client(storage_root)
         resp1 = client.post(
             "/v1/skills",
-            json={"name": "skill-r", "description": "d", "instructions": "i", "tools": [{"name": "bash", "description": "run"}]},
+            json={
+                "name": "skill-r",
+                "description": "d",
+                "instructions": "i",
+                "tools": [{"name": "bash", "description": "run"}],
+            },
             headers={"Idempotency-Key": "replay-key"},
         )
         resp2 = client.post(
             "/v1/skills",
-            json={"name": "skill-r", "description": "d", "instructions": "i", "tools": [{"name": "bash", "description": "run"}]},
+            json={
+                "name": "skill-r",
+                "description": "d",
+                "instructions": "i",
+                "tools": [{"name": "bash", "description": "run"}],
+            },
             headers={"Idempotency-Key": "replay-key"},
         )
         assert resp1.status_code == 201

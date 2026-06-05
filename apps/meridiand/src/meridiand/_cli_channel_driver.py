@@ -37,12 +37,13 @@ the exception is recorded on failure.
 from __future__ import annotations
 
 import asyncio
-import json
-import sys
-import uuid
+import contextlib
 from datetime import UTC, datetime
+import json
 from pathlib import Path
+import sys
 from typing import Any, Protocol, runtime_checkable
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -240,9 +241,7 @@ class CliChannelDriver(ChannelDriver):
         The task is idempotent: a second start() for the same channel_id
         while the task is still running is a no-op.
         """
-        self._load_driver_config(
-            request.channel_id, request.channel_kind, request.session_id
-        )
+        self._load_driver_config(request.channel_id, request.channel_kind, request.session_id)
 
         existing = self._read_tasks.get(request.channel_id)
         if existing is not None and not existing.done():
@@ -340,10 +339,8 @@ class CliChannelDriver(ChannelDriver):
         task = self._read_tasks.pop(request.channel_id, None)
         if task is not None and not task.done():
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
-            except (asyncio.CancelledError, Exception):
-                pass
         await self._stdin_reader_client.stop()
 
     def capabilities(self) -> ChannelCapabilities:

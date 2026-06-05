@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import os
 import re
-from datetime import UTC, datetime
 
 from ._types import AgentFilesystemPolicy, FilesystemPolicy, FilesystemViolation
 

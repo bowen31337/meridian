@@ -54,14 +54,11 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 from opentelemetry.trace import StatusCode
-
-from meridian_provider_claude_code_oauth import SdkMcpServer, create_sdk_mcp_server
-from meridian_provider_claude_code_oauth._mcp_server import PROXY_TOOL_NAME
 from sdk_sandbox._audit import AuditLog
+from sdk_sandbox._dispatchers import InProcessDispatcher
 from sdk_sandbox._runtime import Sandbox
 from sdk_sandbox._types import (
     AuditLogEntry,
@@ -71,7 +68,9 @@ from sdk_sandbox._types import (
     SandboxResult,
     ToolDefinition,
 )
-from sdk_sandbox._dispatchers import InProcessDispatcher
+
+from meridian_provider_claude_code_oauth import SdkMcpServer, create_sdk_mcp_server
+from meridian_provider_claude_code_oauth._mcp_server import PROXY_TOOL_NAME
 
 # ---------------------------------------------------------------------------
 # Shared context
@@ -149,11 +148,7 @@ class _FakeWriter:
         pass
 
     def responses(self) -> list[dict[str, Any]]:
-        return [
-            json.loads(line)
-            for line in self._buf.split(b"\n")
-            if line.strip()
-        ]
+        return [json.loads(line) for line in self._buf.split(b"\n") if line.strip()]
 
 
 # ---------------------------------------------------------------------------
@@ -275,18 +270,14 @@ class TestMcpProtocol:
 
     async def test_tools_list_returns_proxy_tool(self) -> None:
         server = _make_server()
-        responses = await _exchange(
-            server, {"jsonrpc": "2.0", "id": "lst", "method": "tools/list"}
-        )
+        responses = await _exchange(server, {"jsonrpc": "2.0", "id": "lst", "method": "tools/list"})
         tools = responses[0]["result"]["tools"]
         assert len(tools) == 1
         assert tools[0]["name"] == PROXY_TOOL_NAME
 
     async def test_tools_list_input_schema_has_required_fields(self) -> None:
         server = _make_server()
-        responses = await _exchange(
-            server, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
-        )
+        responses = await _exchange(server, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
         schema = responses[0]["result"]["tools"][0]["inputSchema"]
         assert "tool_name" in schema["properties"]
         assert "tool_input" in schema["properties"]
@@ -309,16 +300,15 @@ class TestMcpProtocol:
 
     async def test_unknown_method_returns_rpc_error(self) -> None:
         server = _make_server()
-        responses = await _exchange(
-            server, {"jsonrpc": "2.0", "id": "y", "method": "nonexistent"}
-        )
+        responses = await _exchange(server, {"jsonrpc": "2.0", "id": "y", "method": "nonexistent"})
         assert "error" in responses[0]
         assert responses[0]["error"]["code"] == -32601
 
     async def test_notification_unknown_method_no_response(self) -> None:
         server = _make_server()
         responses = await _exchange(
-            server, {"jsonrpc": "2.0", "method": "nonexistent"}  # no id → notification
+            server,
+            {"jsonrpc": "2.0", "method": "nonexistent"},  # no id → notification
         )
         assert responses == []
 
@@ -530,9 +520,7 @@ class TestProxySuccess:
         event_names = [e[0] for e in tracer.span.events]
         assert "mcp_server.invocation" in event_names
 
-    async def test_invocation_event_has_tool_name(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_invocation_event_has_tool_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
         tracer = MockTracer()
         server = _make_server(tracer=tracer, monkeypatch=monkeypatch)
         await _exchange(
@@ -550,9 +538,7 @@ class TestProxySuccess:
         event = next(e for e in tracer.span.events if e[0] == "mcp_server.invocation")
         assert event[1]["tool.name"] == "my_tool"
 
-    async def test_invocation_event_has_session_id(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_invocation_event_has_session_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
         tracer = MockTracer()
         server = _make_server(tracer=tracer, monkeypatch=monkeypatch)
         await _exchange(
@@ -678,9 +664,7 @@ class TestProxySandboxIsError:
 
     async def test_span_marked_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         tracer = MockTracer()
-        server = _make_server(
-            sandbox=self._error_sandbox(), tracer=tracer, monkeypatch=monkeypatch
-        )
+        server = _make_server(sandbox=self._error_sandbox(), tracer=tracer, monkeypatch=monkeypatch)
         await _exchange(
             server,
             {
@@ -698,9 +682,7 @@ class TestProxySandboxIsError:
 
     async def test_span_has_proxy_error_event(self, monkeypatch: pytest.MonkeyPatch) -> None:
         tracer = MockTracer()
-        server = _make_server(
-            sandbox=self._error_sandbox(), tracer=tracer, monkeypatch=monkeypatch
-        )
+        server = _make_server(sandbox=self._error_sandbox(), tracer=tracer, monkeypatch=monkeypatch)
         await _exchange(
             server,
             {
@@ -829,9 +811,7 @@ class TestProxySandboxFailure:
 
 class TestProxyUnexpectedException:
     async def test_returns_mcp_is_error_true(self) -> None:
-        server = _make_server(
-            sandbox=_FakeSandbox(raises=RuntimeError("internal meltdown"))
-        )
+        server = _make_server(sandbox=_FakeSandbox(raises=RuntimeError("internal meltdown")))
         responses = await _exchange(
             server,
             {
@@ -847,9 +827,7 @@ class TestProxyUnexpectedException:
         assert responses[0]["result"]["isError"] is True
 
     async def test_exception_message_in_content(self) -> None:
-        server = _make_server(
-            sandbox=_FakeSandbox(raises=RuntimeError("internal meltdown"))
-        )
+        server = _make_server(sandbox=_FakeSandbox(raises=RuntimeError("internal meltdown")))
         responses = await _exchange(
             server,
             {
@@ -866,9 +844,7 @@ class TestProxyUnexpectedException:
 
     async def test_writes_audit_entry(self) -> None:
         audit = CapturingAuditLog()
-        server = _make_server(
-            sandbox=_FakeSandbox(raises=RuntimeError("boom")), audit_log=audit
-        )
+        server = _make_server(sandbox=_FakeSandbox(raises=RuntimeError("boom")), audit_log=audit)
         await _exchange(
             server,
             {
@@ -998,8 +974,7 @@ class TestCreateSdkMcpServer:
                 {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
             )
 
-        import asyncio
-        responses = asyncio.get_event_loop().run_until_complete(_run())
+        responses = asyncio.run(_run())
         assert responses[0]["result"]["serverInfo"]["name"] == "meridian-sdk-mcp-server"
 
     def test_custom_server_name_injected(self) -> None:
@@ -1015,6 +990,7 @@ class TestCreateSdkMcpServer:
 
     def test_noop_audit_log_when_none(self) -> None:
         from sdk_sandbox._audit import NoopAuditLog
+
         server = create_sdk_mcp_server(_FakeSandbox(), CTX)  # type: ignore[arg-type]
         assert isinstance(server._audit_log, NoopAuditLog)
 
@@ -1113,10 +1089,12 @@ class TestRealSandboxIntegration:
 class TestPublicAPI:
     def test_sdk_mcp_server_exported(self) -> None:
         import meridian_provider_claude_code_oauth as pkg
+
         assert hasattr(pkg, "SdkMcpServer")
         assert pkg.SdkMcpServer is SdkMcpServer
 
     def test_create_sdk_mcp_server_exported(self) -> None:
         import meridian_provider_claude_code_oauth as pkg
+
         assert hasattr(pkg, "create_sdk_mcp_server")
         assert pkg.create_sdk_mcp_server is create_sdk_mcp_server

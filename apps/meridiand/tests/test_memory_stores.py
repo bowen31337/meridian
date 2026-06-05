@@ -27,7 +27,8 @@ Tests cover:
   - OTel span "memory_store.create" emitted on success.
   - OTel span "memory_store.create" emitted on failure.
   - OTel span set to ERROR status on failure.
-  - Span carries memory_store.id, memory_store.name, memory_store.backend, memory_store.scope attributes.
+  - Span carries memory_store.id, memory_store.name, memory_store.backend,
+    memory_store.scope attributes.
   - create_app wires memory_stores router when storage_root is supplied.
   - create_app omits memory_stores route when storage_root is None.
 """
@@ -37,13 +38,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -282,7 +281,8 @@ class TestMemoryStoreAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/memory_stores", json=_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "memory_store.create.failed"
         )
         assert record["level"] == "error"
@@ -291,7 +291,8 @@ class TestMemoryStoreAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/memory_stores", json=_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "memory_store.create.failed"
         )
         assert record["code"] == "memory_store_invalid_request"
@@ -300,7 +301,8 @@ class TestMemoryStoreAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/memory_stores", json=_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "memory_store.create.failed"
         )
         assert record["detail"]["memory_store_id"].startswith("memstore_")
@@ -309,7 +311,8 @@ class TestMemoryStoreAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/memory_stores", json=_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "memory_store.create.failed"
         )
         assert "name" in record["detail"]
@@ -318,7 +321,8 @@ class TestMemoryStoreAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/memory_stores", json=_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "memory_store.create.failed"
         )
         assert "message" in record["detail"]

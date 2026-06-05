@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from datetime import UTC, datetime, timedelta
 import gzip
 import json
-import uuid
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -54,9 +54,7 @@ class CompactionError(MeridianError):
 
 class CompactionSessionNotFoundError(MeridianError):
     def __init__(self, *, message: str, timestamp: str) -> None:
-        super().__init__(
-            code="compaction_session_not_found", message=message, timestamp=timestamp
-        )
+        super().__init__(code="compaction_session_not_found", message=message, timestamp=timestamp)
 
     def http_status(self) -> int:
         return 404
@@ -70,9 +68,7 @@ class RestoreError(MeridianError):
         timestamp: str,
         cause: BaseException | None = None,
     ) -> None:
-        super().__init__(
-            code="restore_failed", message=message, timestamp=timestamp, cause=cause
-        )
+        super().__init__(code="restore_failed", message=message, timestamp=timestamp, cause=cause)
 
     def http_status(self) -> int:
         return 500
@@ -80,9 +76,7 @@ class RestoreError(MeridianError):
 
 class RestoreSessionNotArchivedError(MeridianError):
     def __init__(self, *, message: str, timestamp: str) -> None:
-        super().__init__(
-            code="restore_session_not_archived", message=message, timestamp=timestamp
-        )
+        super().__init__(code="restore_session_not_archived", message=message, timestamp=timestamp)
 
     def http_status(self) -> int:
         return 404
@@ -215,14 +209,14 @@ class AutoCompactor:
 
         compressed = await self._blob.get(archive_key)
         archive_text = gzip.decompress(compressed).decode()
-        archive_lines = [l for l in archive_text.splitlines() if l.strip()]
+        archive_lines = [line for line in archive_text.splitlines() if line.strip()]
 
         live_files = self.find_event_files(session_id)
         new_events: list[str] = []
         if live_files:
             live_lines: list[str] = []
             for f in live_files:
-                live_lines.extend(l for l in f.read_text().splitlines() if l.strip())
+                live_lines.extend(line for line in f.read_text().splitlines() if line.strip())
             new_events = live_lines[summary_event_count:]
 
         restored_lines = archive_lines + new_events
@@ -420,7 +414,7 @@ def make_compaction_router(
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
             await dispatch_hooks(
                 "on_compact",
@@ -496,7 +490,7 @@ def make_compaction_router(
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=manifest, status_code=200)
 
@@ -560,7 +554,7 @@ def make_compaction_router(
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=result, status_code=200)
 
@@ -630,7 +624,7 @@ def make_compaction_router(
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(
             content={

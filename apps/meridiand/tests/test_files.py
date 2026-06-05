@@ -45,14 +45,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
-from meridiand._files import make_files_router
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -146,9 +143,7 @@ class TestFilesUploadMultipart:
         assert body["content_type"] == "text/plain"
 
     def test_name_defaults_to_filename(self, storage_root: Path) -> None:
-        body = _upload_multipart(
-            _make_client(storage_root), b"x", filename="myfile.csv"
-        ).json()
+        body = _upload_multipart(_make_client(storage_root), b"x", filename="myfile.csv").json()
         assert body["name"] == "myfile.csv"
 
     def test_name_override_from_form_field(self, storage_root: Path) -> None:
@@ -188,9 +183,7 @@ class TestFilesUploadJson:
         assert body["name"] == "report.pdf"
 
     def test_content_type_from_body(self, storage_root: Path) -> None:
-        body = _upload_json(
-            _make_client(storage_root), b"x", content_type="image/png"
-        ).json()
+        body = _upload_json(_make_client(storage_root), b"x", content_type="image/png").json()
         assert body["content_type"] == "image/png"
 
     def test_each_call_returns_unique_id(self, storage_root: Path) -> None:
@@ -323,18 +316,14 @@ class TestFilesGetMetadata:
     def test_not_found_audit_level_is_error(self, storage_root: Path) -> None:
         _make_client(storage_root).get("/v1/files/file_missing")
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "files.get_metadata.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "files.get_metadata.failed"
         )
         assert record["level"] == "error"
 
     def test_not_found_audit_code(self, storage_root: Path) -> None:
         _make_client(storage_root).get("/v1/files/file_missing")
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "files.get_metadata.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "files.get_metadata.failed"
         )
         assert record["code"] == "files_not_found"
 
@@ -367,9 +356,7 @@ class TestFilesGetContent:
 
     def test_content_type_header_matches_stored(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        file_id = _upload_multipart(
-            client, b"img", content_type="image/jpeg"
-        ).json()["id"]
+        file_id = _upload_multipart(client, b"img", content_type="image/jpeg").json()["id"]
         resp = client.get(f"/v1/files/{file_id}/content")
         assert "image/jpeg" in resp.headers.get("content-type", "")
 
@@ -398,18 +385,14 @@ class TestFilesGetContent:
     def test_not_found_audit_level_is_error(self, storage_root: Path) -> None:
         _make_client(storage_root).get("/v1/files/file_ghost/content")
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "files.get_content.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "files.get_content.failed"
         )
         assert record["level"] == "error"
 
     def test_not_found_audit_code(self, storage_root: Path) -> None:
         _make_client(storage_root).get("/v1/files/file_ghost/content")
         record = next(
-            r
-            for r in _audit_records(storage_root)
-            if r.get("event") == "files.get_content.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "files.get_content.failed"
         )
         assert record["code"] == "files_not_found"
 

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
-import uuid
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -233,7 +233,7 @@ def make_sessions_router(
         with tracer.start_as_current_span(
             "session",
             attributes={"session.id": session_id},
-        ) as root_span:
+        ):
             _carrier: dict[str, str] = {}
             TraceContextTextMapPropagator().inject(_carrier)
             _traceparent = _carrier.get("traceparent", "")
@@ -320,7 +320,7 @@ def make_sessions_router(
                             },
                         )
                     )
-                    raise err
+                    raise err from exc
 
         return JSONResponse(
             content={
@@ -371,15 +371,27 @@ def make_sessions_router(
                             continue
                         if agent_id is not None and record.get("agent_id") != agent_id:
                             continue
-                        if user_profile_id is not None and record.get("user_profile_id") != user_profile_id:
+                        if (
+                            user_profile_id is not None
+                            and record.get("user_profile_id") != user_profile_id
+                        ):
                             continue
                         if channel_id is not None and record.get("channel_id") != channel_id:
                             continue
-                        if parent_session_id is not None and record.get("parent_session_id") != parent_session_id:
+                        if (
+                            parent_session_id is not None
+                            and record.get("parent_session_id") != parent_session_id
+                        ):
                             continue
-                        if created_after is not None and record.get("created_at", "") <= created_after:
+                        if (
+                            created_after is not None
+                            and record.get("created_at", "") <= created_after
+                        ):
                             continue
-                        if created_before is not None and record.get("created_at", "") >= created_before:
+                        if (
+                            created_before is not None
+                            and record.get("created_at", "") >= created_before
+                        ):
                             continue
                         all_sessions.append(record)
 
@@ -438,7 +450,7 @@ def make_sessions_router(
                         detail={"message": err2.message},
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         response_headers: dict[str, str] = {}
         if next_cursor is not None:
@@ -533,7 +545,7 @@ def make_sessions_router(
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=record, status_code=200)
 
@@ -629,7 +641,7 @@ def make_sessions_router(
                         detail={"session_id": session_id, "message": err2.message},
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         response_headers: dict[str, str] = {}
         if next_cursor is not None:
@@ -748,7 +760,7 @@ def make_sessions_router(
                         detail={"session_id": session_id, "message": err2.message},
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         response_headers: dict[str, str] = {}
         if next_cursor is not None:
@@ -867,7 +879,7 @@ def make_sessions_router(
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(
             content={
@@ -904,7 +916,10 @@ def make_sessions_router(
             try:
                 if body.role in ("assistant", "tool"):
                     rejected = MessageAppendRejectedError(
-                        message=f"Role {body.role!r} is reserved for the harness; only 'user' and 'system' are accepted",
+                        message=(
+                            f"Role {body.role!r} is reserved for the harness; "
+                            f"only 'user' and 'system' are accepted"
+                        ),
                         timestamp=now,
                     )
                     span.set_attribute("session.message.append.success", False)
@@ -1033,7 +1048,7 @@ def make_sessions_router(
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(
             content={

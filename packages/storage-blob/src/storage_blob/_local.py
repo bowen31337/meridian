@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import contextlib
-import posixpath
 from datetime import UTC, datetime
 from pathlib import Path
+import posixpath
 
 from ._contract import BlobStore
 from ._types import BlobFailure

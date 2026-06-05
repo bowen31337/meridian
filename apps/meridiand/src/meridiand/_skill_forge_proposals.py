@@ -22,9 +22,9 @@ caller, and writes the failure to the audit log before re-raising.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import hashlib
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -184,9 +184,7 @@ class RejectProposalRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def make_skill_forge_proposals_router(
-    *, audit_log: AuditLog, storage_root: Path
-) -> APIRouter:
+def make_skill_forge_proposals_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
     router = APIRouter()
     proposals_dir = storage_root / "skill_forge" / "proposals"
     efficacy_dir = storage_root / "skill_forge" / "efficacy"
@@ -292,7 +290,7 @@ def make_skill_forge_proposals_router(
                         detail={"message": err2.message},
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         response_headers: dict[str, str] = {}
         if next_cursor is not None:
@@ -304,9 +302,7 @@ def make_skill_forge_proposals_router(
             headers=response_headers,
         )
 
-    @router.post(
-        "/v1/x/skill_forge/proposals/{proposal_id}/approve", status_code=200
-    )
+    @router.post("/v1/x/skill_forge/proposals/{proposal_id}/approve", status_code=200)
     async def approve_proposal(proposal_id: str) -> JSONResponse:
         now = _now()
         tracer = get_tracer()
@@ -327,9 +323,7 @@ def make_skill_forge_proposals_router(
             try:
                 proposal_file = proposals_dir / f"{proposal_id}.json"
                 if not proposal_file.exists():
-                    raise SkillForgeProposalNotFoundError(
-                        proposal_id=proposal_id, timestamp=now
-                    )
+                    raise SkillForgeProposalNotFoundError(proposal_id=proposal_id, timestamp=now)
 
                 proposal: dict[str, Any] = json.loads(proposal_file.read_text())
 
@@ -376,9 +370,7 @@ def make_skill_forge_proposals_router(
                     "source": "forge",
                     "derived_from_session_ids": derived_from_session_ids,
                 }
-                (versions_dir / f"{version_id}.json").write_text(
-                    json.dumps(version_record)
-                )
+                (versions_dir / f"{version_id}.json").write_text(json.dumps(version_record))
 
                 skill_file = skills_dir / f"{skill_id}.json"
                 if skill_file.exists():
@@ -447,16 +439,12 @@ def make_skill_forge_proposals_router(
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=version_record, status_code=200)
 
-    @router.post(
-        "/v1/x/skill_forge/proposals/{proposal_id}/reject", status_code=200
-    )
-    async def reject_proposal(
-        proposal_id: str, body: RejectProposalRequest
-    ) -> JSONResponse:
+    @router.post("/v1/x/skill_forge/proposals/{proposal_id}/reject", status_code=200)
+    async def reject_proposal(proposal_id: str, body: RejectProposalRequest) -> JSONResponse:
         now = _now()
         tracer = get_tracer()
 
@@ -476,9 +464,7 @@ def make_skill_forge_proposals_router(
             try:
                 proposal_file = proposals_dir / f"{proposal_id}.json"
                 if not proposal_file.exists():
-                    raise SkillForgeProposalNotFoundError(
-                        proposal_id=proposal_id, timestamp=now
-                    )
+                    raise SkillForgeProposalNotFoundError(proposal_id=proposal_id, timestamp=now)
 
                 proposal: dict[str, Any] = json.loads(proposal_file.read_text())
 
@@ -548,7 +534,7 @@ def make_skill_forge_proposals_router(
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=proposal, status_code=200)
 

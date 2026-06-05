@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import json
-import re
-import uuid
 from datetime import UTC, datetime, timedelta
-from enum import Enum
+from enum import StrEnum
+import json
 from pathlib import Path
+import re
 from typing import Any, Literal
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -18,8 +18,7 @@ from core_errors import (
     record_invocation_event,
 )
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 
@@ -40,7 +39,7 @@ def _parse_duration(s: str) -> timedelta:
     """Parse a duration string like '5m', '1h', '2d', '1h30m' to timedelta."""
     stripped = s.strip()
     if not stripped:
-        raise ValueError(f"Duration string is empty")
+        raise ValueError("Duration string is empty")
     m = _DURATION_RE.match(stripped)
     if not m or not any(m.group(k) for k in ("days", "hours", "minutes", "seconds")):
         raise ValueError(f"Invalid duration: {s!r} (expected e.g. '5m', '1h', '2d')")
@@ -56,7 +55,7 @@ def _parse_duration(s: str) -> timedelta:
 # ---------------------------------------------------------------------------
 
 
-class TriggerType(str, Enum):
+class TriggerType(StrEnum):
     timestamp = "timestamp"
     interval = "interval"
     channel_event = "channel_event"
@@ -169,8 +168,7 @@ def _validate_trigger(body: CronCreateRequest) -> CronInvalidRequestError | None
     if getattr(body, field) is None:
         return CronInvalidRequestError(
             message=(
-                f"trigger_type '{body.trigger_type.value}' requires '{field}' "
-                f"({description})"
+                f"trigger_type '{body.trigger_type.value}' requires '{field}' ({description})"
             ),
             timestamp=_now(),
         )
@@ -234,7 +232,7 @@ def make_cron_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         raise CronInvalidRequestError(
                             message=f"Invalid interval duration {body.interval!r}: {exc}",
                             timestamp=_now(),
-                        )
+                        ) from exc
 
                 cron_dir.mkdir(parents=True, exist_ok=True)
                 resource: dict[str, Any] = {
@@ -299,7 +297,7 @@ def make_cron_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=resource, status_code=201)
 
@@ -356,7 +354,7 @@ def make_cron_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         detail={"cron_id": cron_id, "message": err2.message},
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return Response(status_code=204)
 

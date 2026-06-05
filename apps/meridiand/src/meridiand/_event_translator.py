@@ -7,10 +7,12 @@ remains the authoritative record of what the model produced.
 Translation table
 -----------------
 TextDeltaEvent       → message.delta        {"kind": "text", "text": ..., "model_call_number": N}
-ThinkingDeltaEvent   → message.delta        {"kind": "thinking", "thinking": ..., "model_call_number": N}
+ThinkingDeltaEvent   → message.delta        {"kind": "thinking", "thinking": ...,
+                                             "model_call_number": N}
 ToolUseStartEvent    → (buffered; no immediate row)
 ToolInputDeltaEvent  → (appended to tool buffer; no immediate row)
-MessageStopEvent     → model_call.completed {"stop_reason": ..., token counts, "model_call_number": N}
+MessageStopEvent     → model_call.completed {"stop_reason": ..., token counts,
+                                             "model_call_number": N}
 MessageStartEvent    → (no row; model_call.started is written before the call)
 MessageDeltaEvent    → (stop_reason captured; no row)
 
@@ -22,6 +24,7 @@ and hook dispatch.
 On event-log append failure the caller receives the exception directly (the
 EventLogRuntime already writes to the audit log before raising).
 """
+
 from __future__ import annotations
 
 from typing import Any

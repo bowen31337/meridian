@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import json
 from collections.abc import AsyncIterator, Iterator
+import contextlib
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any
 
@@ -129,10 +130,8 @@ def make_events_router(
             effective_since = since
             last_event_id = request.headers.get("last-event-id")
             if last_event_id is not None:
-                try:
+                with contextlib.suppress(ValueError):
                     effective_since = int(last_event_id)
-                except ValueError:
-                    pass
 
             now = _now()
             tracer = get_tracer()
@@ -169,7 +168,9 @@ def make_events_router(
                                 watermark = event.seq
                         except Exception as exc:
                             err = SessionEventsError(
-                                message=f"Failed to stream events for session {session_id!r}: {exc}",
+                                message=(
+                                    f"Failed to stream events for session {session_id!r}: {exc}"
+                                ),
                                 timestamp=_now(),
                                 cause=exc,
                             )
@@ -210,14 +211,16 @@ def make_events_router(
                                         },
                                     )
                                 )
-                                lagged_data = json.dumps({
-                                    "code": "subscriber_lagged",
-                                    "message": (
-                                        f"Subscriber dropped: in-process queue overflowed "
-                                        f"(capacity={SUBSCRIBER_CHANNEL_SIZE}). "
-                                        "Re-subscribe using the last received seq as since."
-                                    ),
-                                })
+                                lagged_data = json.dumps(
+                                    {
+                                        "code": "subscriber_lagged",
+                                        "message": (
+                                            f"Subscriber dropped: in-process queue overflowed "
+                                            f"(capacity={SUBSCRIBER_CHANNEL_SIZE}). "
+                                            "Re-subscribe using the last received seq as since."
+                                        ),
+                                    }
+                                )
                                 yield f"event: subscriber_lagged\ndata: {lagged_data}\n\n"
                                 return
 
@@ -314,7 +317,7 @@ def make_events_router(
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         accept = request.headers.get("accept", "")
         if "application/x-ndjson" in accept:
@@ -367,9 +370,7 @@ def make_events_router(
                 reader = LocalEventLogReader(storage_root)
                 raw_events = reader.read_after(session_id, -1)
                 sdk_events = [
-                    ev
-                    for e in raw_events
-                    if (ev := _to_sdk_event(e, session_id)) is not None
+                    ev for e in raw_events if (ev := _to_sdk_event(e, session_id)) is not None
                 ]
                 total = len(sdk_events)
                 page = sdk_events[offset : offset + limit]
@@ -378,9 +379,7 @@ def make_events_router(
                 raise
             except Exception as exc:
                 err = SessionEventsError(
-                    message=(
-                        f"Failed to read SDK events for session {session_id!r}: {exc}"
-                    ),
+                    message=(f"Failed to read SDK events for session {session_id!r}: {exc}"),
                     timestamp=_now(),
                     cause=exc,
                 )
@@ -397,7 +396,7 @@ def make_events_router(
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(content={"events": page, "total": total})
 

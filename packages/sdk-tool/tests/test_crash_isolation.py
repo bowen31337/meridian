@@ -15,9 +15,7 @@ from __future__ import annotations
 import json
 import sys
 import textwrap
-from pathlib import Path
-from typing import Any
-from unittest.mock import MagicMock, patch
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from opentelemetry.sdk.trace import TracerProvider
@@ -26,10 +24,12 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanE
 from opentelemetry.trace import StatusCode
 
 from meridian_sdk_tool import ToolContext, subprocess_tool
-from meridian_sdk_tool._execution import execute_tool
 from meridian_sdk_tool._otel import record_tool_call_error, record_tool_call_result
-from meridian_sdk_tool._types import ToolDefinition, ToolError, ToolResult
+from meridian_sdk_tool._types import ToolResult
 from meridian_sdk_tool.subprocess_tool import SubprocessCrashError
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 _CTX = ToolContext(workspace="/workspace", session_id="sess_iso")
 
@@ -51,7 +51,6 @@ def otel_exporter(monkeypatch: pytest.MonkeyPatch) -> InMemorySpanExporter:
     monkeypatch.setattr(otel_trace, "get_tracer_provider", lambda: provider)
 
     # Patch the module-level get_tracer call used by sdk_tool's _otel.py
-    real_get_tracer = otel_trace.get_tracer
 
     def patched_get_tracer(*args: Any, **kwargs: Any) -> Any:
         return provider.get_tracer(*args, **kwargs)
@@ -139,9 +138,7 @@ class TestRecordToolCallError:
         event = next(e for e in spans[0].events if e.name == "tool_call.error")
         assert event.attributes["subprocess.stderr_tail"] == "last line"
 
-    def test_event_omits_stderr_tail_when_absent(
-        self, otel_exporter: InMemorySpanExporter
-    ) -> None:
+    def test_event_omits_stderr_tail_when_absent(self, otel_exporter: InMemorySpanExporter) -> None:
         import opentelemetry.trace as otel_trace
 
         tracer = otel_trace.get_tracer("test")
@@ -406,9 +403,7 @@ class TestRecordToolCallResult:
         event = next(e for e in spans[0].events if e.name == "tool_call.result")
         assert event.attributes["subprocess.stderr_tail"] == "some debug output"
 
-    def test_event_omits_stderr_tail_when_absent(
-        self, otel_exporter: InMemorySpanExporter
-    ) -> None:
+    def test_event_omits_stderr_tail_when_absent(self, otel_exporter: InMemorySpanExporter) -> None:
         import opentelemetry.trace as otel_trace
 
         tracer = otel_trace.get_tracer("test")
@@ -524,9 +519,7 @@ class TestSubprocessSuccessStderr:
         assert "subprocess.stderr_tail" not in event.attributes
 
     @pytest.mark.anyio
-    async def test_application_error_response_has_stderr_in_details(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_application_error_response_has_stderr_in_details(self, tmp_path: Path) -> None:
         """Subprocess returning {"error": ...} includes stderr_tail in error details."""
         script = tmp_path / "app_error_tool.py"
         script.write_text(
@@ -536,7 +529,9 @@ class TestSubprocessSuccessStderr:
                 sys.stderr.write("app error context\\n")
                 sys.stderr.flush()
                 _ = sys.stdin.read()
-                sys.stdout.write(json.dumps({{"error": {{"code": "not_found", "message": "item missing"}}}}))
+                sys.stdout.write(
+                    json.dumps({{"error": {{"code": "not_found", "message": "item missing"}}}})
+                )
                 sys.stdout.flush()
             """)
         )
@@ -556,9 +551,7 @@ class TestSubprocessSuccessStderr:
         assert "app error context" in result.error.details["stderr_tail"]
 
     @pytest.mark.anyio
-    async def test_application_error_response_writes_audit_log(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_application_error_response_writes_audit_log(self, tmp_path: Path) -> None:
         """Subprocess returning {"error": ...} writes to the audit log."""
         script = tmp_path / "app_error_tool2.py"
         script.write_text(
@@ -566,7 +559,9 @@ class TestSubprocessSuccessStderr:
                 #!{sys.executable}
                 import json, sys
                 _ = sys.stdin.read()
-                sys.stdout.write(json.dumps({{"error": {{"code": "bad_state", "message": "oops"}}}}))
+                sys.stdout.write(
+                    json.dumps({{"error": {{"code": "bad_state", "message": "oops"}}}})
+                )
                 sys.stdout.flush()
             """)
         )

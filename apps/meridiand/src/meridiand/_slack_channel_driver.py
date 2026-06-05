@@ -27,13 +27,13 @@ before re-raising.
 from __future__ import annotations
 
 import asyncio
-import json
-import uuid
+import contextlib
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
+import uuid
 
-import httpx
 from core_errors import (
     AuditLog,
     AuditLogEntry,
@@ -42,6 +42,7 @@ from core_errors import (
     get_tracer,
     record_invocation_event,
 )
+import httpx
 from opentelemetry.trace import StatusCode
 from sdk_channel import (
     ChannelCapabilities,
@@ -133,9 +134,7 @@ class SlackChannelDriver(ChannelDriver):
         self._resolver = secret_resolver or NoopSecretResolver()
         self._audit_log = audit_log or NoopAuditLog()
         self._http_client = http_client
-        self._socket_mode_client: SocketModeClient = (
-            socket_mode_client or NoopSocketModeClient()
-        )
+        self._socket_mode_client: SocketModeClient = socket_mode_client or NoopSocketModeClient()
         self._socket_tasks: dict[str, asyncio.Task[None]] = {}
 
     # ------------------------------------------------------------------
@@ -228,7 +227,7 @@ class SlackChannelDriver(ChannelDriver):
                     session_id=request.session_id,
                     timestamp=_now(),
                     cause=exc,
-                )
+                ) from exc
             blocks = blocks_data if isinstance(blocks_data, list) else [blocks_data]
             payload["blocks"] = blocks
             # Slack requires a fallback text field alongside blocks.
@@ -267,9 +266,7 @@ class SlackChannelDriver(ChannelDriver):
         if app_token is None:
             raise ChannelFailure(
                 code="CHAN_APP_TOKEN_UNRESOLVABLE",
-                message=(
-                    f"slack_app_token_ref '{app_token_ref}' could not be resolved from Vault"
-                ),
+                message=(f"slack_app_token_ref '{app_token_ref}' could not be resolved from Vault"),
                 channel_id=request.channel_id,
                 channel_kind=request.channel_kind,
                 session_id=request.session_id,
@@ -356,9 +353,7 @@ class SlackChannelDriver(ChannelDriver):
                     error_code = response_data.get("error", "unknown_error")
                     raise RuntimeError(f"Slack API error: {error_code}")
 
-                message_ts: str = response_data.get(
-                    "ts", f"slack_{uuid.uuid4().hex}"
-                )
+                message_ts: str = response_data.get("ts", f"slack_{uuid.uuid4().hex}")
                 message_id = f"{slack_channel_id}:{message_ts}"
 
             except ChannelFailure:
@@ -404,10 +399,8 @@ class SlackChannelDriver(ChannelDriver):
         task = self._socket_tasks.pop(request.channel_id, None)
         if task is not None and not task.done():
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
-            except (asyncio.CancelledError, Exception):
-                pass
 
     def capabilities(self) -> ChannelCapabilities:
         return ChannelCapabilities(

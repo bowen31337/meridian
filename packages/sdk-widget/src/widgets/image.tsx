@@ -1,4 +1,4 @@
-import React from "react";
+import type React from "react";
 import { defineWidget } from "../contract.js";
 import type { WidgetProps } from "../contract.js";
 
@@ -38,11 +38,7 @@ function ImageWidgetImpl({ props }: WidgetProps<ImageProps>): React.ReactElement
       data-widget-kind="meridian.image"
       style={{ margin: 0, display: "inline-block", maxWidth: "100%" }}
     >
-      <img
-        src={src}
-        alt={alt}
-        style={{ display: "block", maxWidth: "100%", height: "auto" }}
-      />
+      <img src={src} alt={alt} style={{ display: "block", maxWidth: "100%", height: "auto" }} />
       {caption != null && (
         <figcaption
           data-testid="image-caption"

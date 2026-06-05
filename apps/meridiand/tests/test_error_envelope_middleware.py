@@ -31,15 +31,12 @@ from __future__ import annotations
 import json
 from typing import Any
 
-import pytest
-from opentelemetry.trace import StatusCode
-
 from core_errors import AuditLog, AuditLogEntry, MeridianError, NoopAuditLog
 from meridiand._app import create_app
 from meridiand._error_envelope_middleware import ErrorEnvelopeMiddleware
+from opentelemetry.trace import StatusCode
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -56,7 +53,9 @@ class _CapturingAuditLog(AuditLog):
 
 class _SampleError(MeridianError):
     def __init__(self, *, message: str = "something went wrong") -> None:
-        super().__init__(code="sample_error", message=message, timestamp="2026-01-01T00:00:00+00:00")
+        super().__init__(
+            code="sample_error", message=message, timestamp="2026-01-01T00:00:00+00:00"
+        )
 
     def http_status(self) -> int:
         return 418
@@ -110,9 +109,7 @@ async def _invoke(
 
     await middleware(scope, receive, send)
 
-    status = next(
-        (m["status"] for m in messages if m.get("type") == "http.response.start"), None
-    )
+    status = next((m["status"] for m in messages if m.get("type") == "http.response.start"), None)
     body = next(
         (m.get("body", b"") for m in messages if m.get("type") == "http.response.body"), b""
     )
@@ -270,9 +267,7 @@ class TestGenericException:
 
     async def test_generic_exception_audit_detail_has_error_type(self) -> None:
         audit = _CapturingAuditLog()
-        mw = _make_middleware(
-            inner_app=_make_raising_app(ValueError("bad value")), audit_log=audit
-        )
+        mw = _make_middleware(inner_app=_make_raising_app(ValueError("bad value")), audit_log=audit)
         await _invoke(mw)
         entry = next(e for e in audit.entries if e.code == "internal_server_error")
         assert entry.detail is not None
@@ -392,7 +387,7 @@ class TestSendFailure:
             return {"type": "http.request", "body": b"", "more_body": False}
 
         async def failing_send(msg: dict[str, Any]) -> None:
-            raise IOError("connection lost")
+            raise OSError("connection lost")
 
         await mw(scope, receive, failing_send)
         assert any(e.code == "error_envelope_send_failed" for e in audit.entries)
@@ -415,7 +410,7 @@ class TestSendFailure:
             return {"type": "http.request", "body": b"", "more_body": False}
 
         async def failing_send(msg: dict[str, Any]) -> None:
-            raise IOError("connection lost")
+            raise OSError("connection lost")
 
         await mw(scope, receive, failing_send)
         entry = next(e for e in audit.entries if e.code == "error_envelope_send_failed")

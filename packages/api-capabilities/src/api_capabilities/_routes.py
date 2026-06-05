@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import datetime
 
-from fastapi import APIRouter
-
 from core_errors import SchemaInvalidError
+from fastapi import APIRouter
 from sdk_capabilities import KNOWN_CAPABILITIES, param_expected
 
 from ._audit import AuditLog, NoopAuditLog

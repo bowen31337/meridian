@@ -128,7 +128,9 @@ def _text_stream(
         {
             "id": "chatcmpl-x",
             "model": model,
-            "choices": [{"delta": {"role": "assistant", "content": ""}, "index": 0, "finish_reason": None}],
+            "choices": [
+                {"delta": {"role": "assistant", "content": ""}, "index": 0, "finish_reason": None}
+            ],
         },
         {
             "id": "chatcmpl-x",
@@ -221,9 +223,7 @@ def _make_provider(
     elif chat_status != 200:
         routes[_CHAT_PATH] = httpx.Response(chat_status, text="error body")
     transport = _AsyncTransport(routes)
-    http_client = httpx.AsyncClient(
-        transport=transport, base_url="https://openrouter.ai/api/v1"
-    )
+    http_client = httpx.AsyncClient(transport=transport, base_url="https://openrouter.ai/api/v1")
     return OpenRouterProvider(
         _API_KEY, name="test-openrouter", audit_log=audit_log, _http=http_client
     )
@@ -422,10 +422,29 @@ class TestCallStreamingEvents:
 
     async def test_multiple_text_chunks(self, mock_span: MockSpan) -> None:
         body = _sse(
-            {"model": "openai/gpt-4o", "choices": [{"delta": {"role": "assistant", "content": ""}, "index": 0, "finish_reason": None}]},
-            {"model": "openai/gpt-4o", "choices": [{"delta": {"content": "A"}, "index": 0, "finish_reason": None}]},
-            {"model": "openai/gpt-4o", "choices": [{"delta": {"content": "B"}, "index": 0, "finish_reason": None}]},
-            {"model": "openai/gpt-4o", "choices": [{"delta": {}, "index": 0, "finish_reason": "stop"}], "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}},
+            {
+                "model": "openai/gpt-4o",
+                "choices": [
+                    {
+                        "delta": {"role": "assistant", "content": ""},
+                        "index": 0,
+                        "finish_reason": None,
+                    }
+                ],
+            },
+            {
+                "model": "openai/gpt-4o",
+                "choices": [{"delta": {"content": "A"}, "index": 0, "finish_reason": None}],
+            },
+            {
+                "model": "openai/gpt-4o",
+                "choices": [{"delta": {"content": "B"}, "index": 0, "finish_reason": None}],
+            },
+            {
+                "model": "openai/gpt-4o",
+                "choices": [{"delta": {}, "index": 0, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
+            },
         )
         provider = _make_provider(chat_body=body)
         events = [e async for e in provider.call(_make_opts())]
@@ -516,8 +535,18 @@ class TestCallToolEvents:
                             "role": "assistant",
                             "content": None,
                             "tool_calls": [
-                                {"index": 0, "id": "call_a", "type": "function", "function": {"name": "fn_a", "arguments": ""}},
-                                {"index": 1, "id": "call_b", "type": "function", "function": {"name": "fn_b", "arguments": ""}},
+                                {
+                                    "index": 0,
+                                    "id": "call_a",
+                                    "type": "function",
+                                    "function": {"name": "fn_a", "arguments": ""},
+                                },
+                                {
+                                    "index": 1,
+                                    "id": "call_b",
+                                    "type": "function",
+                                    "function": {"name": "fn_b", "arguments": ""},
+                                },
                             ],
                         },
                         "index": 0,

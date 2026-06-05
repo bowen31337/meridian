@@ -29,14 +29,12 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from storage_event_log import LocalEventLogWriter
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -109,10 +107,14 @@ class TestSessionEventsEndpoint:
         assert body == []
 
     def test_returns_all_events(self, storage_root: Path) -> None:
-        _seed_many(storage_root, "multi-sess", [
-            ("session.created", {"reason": "init"}),
-            ("session.phase_change", {"before": "created", "after": "running"}),
-        ])
+        _seed_many(
+            storage_root,
+            "multi-sess",
+            [
+                ("session.created", {"reason": "init"}),
+                ("session.phase_change", {"before": "created", "after": "running"}),
+            ],
+        )
         client = _make_client(storage_root)
         body = client.get("/v1/sessions/multi-sess/events").json()
         assert len(body) == 2
@@ -169,19 +171,27 @@ class TestSessionEventsEndpoint:
 
 class TestSinceFilter:
     def test_since_minus_one_returns_all(self, storage_root: Path) -> None:
-        _seed_many(storage_root, "since-all", [
-            ("session.created", {}),
-            ("session.phase_change", {"before": "created", "after": "running"}),
-        ])
+        _seed_many(
+            storage_root,
+            "since-all",
+            [
+                ("session.created", {}),
+                ("session.phase_change", {"before": "created", "after": "running"}),
+            ],
+        )
         client = _make_client(storage_root)
         body = client.get("/v1/sessions/since-all/events?since=-1").json()
         assert len(body) == 2
 
     def test_since_zero_excludes_seq_zero(self, storage_root: Path) -> None:
-        _seed_many(storage_root, "since-zero", [
-            ("session.created", {}),
-            ("session.phase_change", {"before": "created", "after": "running"}),
-        ])
+        _seed_many(
+            storage_root,
+            "since-zero",
+            [
+                ("session.created", {}),
+                ("session.phase_change", {"before": "created", "after": "running"}),
+            ],
+        )
         client = _make_client(storage_root)
         body = client.get("/v1/sessions/since-zero/events?since=0").json()
         seqs = [e["seq"] for e in body]
@@ -208,30 +218,42 @@ class TestSinceFilter:
 
 class TestTypeFilter:
     def test_type_filter_returns_only_matching_type(self, storage_root: Path) -> None:
-        _seed_many(storage_root, "type-filt", [
-            ("session.created", {}),
-            ("session.phase_change", {"before": "created", "after": "running"}),
-        ])
+        _seed_many(
+            storage_root,
+            "type-filt",
+            [
+                ("session.created", {}),
+                ("session.phase_change", {"before": "created", "after": "running"}),
+            ],
+        )
         client = _make_client(storage_root)
         body = client.get("/v1/sessions/type-filt/events?type=session.created").json()
         assert all(e["type"] == "session.created" for e in body)
         assert len(body) == 1
 
     def test_type_filter_excludes_other_types(self, storage_root: Path) -> None:
-        _seed_many(storage_root, "type-excl", [
-            ("session.created", {}),
-            ("session.phase_change", {"before": "created", "after": "running"}),
-        ])
+        _seed_many(
+            storage_root,
+            "type-excl",
+            [
+                ("session.created", {}),
+                ("session.phase_change", {"before": "created", "after": "running"}),
+            ],
+        )
         client = _make_client(storage_root)
         body = client.get("/v1/sessions/type-excl/events?type=session.phase_change").json()
         assert not any(e["type"] == "session.created" for e in body)
 
     def test_type_filter_multiple_types(self, storage_root: Path) -> None:
-        _seed_many(storage_root, "type-multi", [
-            ("session.created", {}),
-            ("session.phase_change", {"before": "created", "after": "running"}),
-            ("error", {"msg": "boom"}),
-        ])
+        _seed_many(
+            storage_root,
+            "type-multi",
+            [
+                ("session.created", {}),
+                ("session.phase_change", {"before": "created", "after": "running"}),
+                ("error", {"msg": "boom"}),
+            ],
+        )
         client = _make_client(storage_root)
         body = client.get(
             "/v1/sessions/type-multi/events?type=session.created,session.phase_change"
@@ -247,11 +269,15 @@ class TestTypeFilter:
         assert body == []
 
     def test_since_and_type_combined(self, storage_root: Path) -> None:
-        _seed_many(storage_root, "combo", [
-            ("session.created", {}),
-            ("session.phase_change", {"before": "created", "after": "running"}),
-            ("session.phase_change", {"before": "running", "after": "done"}),
-        ])
+        _seed_many(
+            storage_root,
+            "combo",
+            [
+                ("session.created", {}),
+                ("session.phase_change", {"before": "created", "after": "running"}),
+                ("session.phase_change", {"before": "running", "after": "done"}),
+            ],
+        )
         client = _make_client(storage_root)
         body = client.get("/v1/sessions/combo/events?since=0&type=session.phase_change").json()
         assert all(e["type"] == "session.phase_change" for e in body)
@@ -281,10 +307,14 @@ class TestNdjsonFormat:
         assert "application/x-ndjson" in resp.headers["content-type"]
 
     def test_ndjson_each_line_is_valid_json(self, storage_root: Path) -> None:
-        _seed_many(storage_root, "ndjson-lines", [
-            ("session.created", {}),
-            ("session.phase_change", {"before": "created", "after": "running"}),
-        ])
+        _seed_many(
+            storage_root,
+            "ndjson-lines",
+            [
+                ("session.created", {}),
+                ("session.phase_change", {"before": "created", "after": "running"}),
+            ],
+        )
         client = _make_client(storage_root)
         resp = client.get(
             "/v1/sessions/ndjson-lines/events",
@@ -306,10 +336,14 @@ class TestNdjsonFormat:
         assert resp.text.strip() == ""
 
     def test_ndjson_since_filter_applies(self, storage_root: Path) -> None:
-        _seed_many(storage_root, "ndjson-since", [
-            ("session.created", {}),
-            ("session.phase_change", {"before": "created", "after": "running"}),
-        ])
+        _seed_many(
+            storage_root,
+            "ndjson-since",
+            [
+                ("session.created", {}),
+                ("session.phase_change", {"before": "created", "after": "running"}),
+            ],
+        )
         client = _make_client(storage_root)
         resp = client.get(
             "/v1/sessions/ndjson-since/events?since=0",
@@ -413,11 +447,11 @@ def _parse_sse_frames(body: str) -> list[dict[str, Any]]:
         for line in block.splitlines():
             line = line.strip()
             if line.startswith("event:"):
-                frame["event"] = line[len("event:"):].strip()
+                frame["event"] = line[len("event:") :].strip()
             elif line.startswith("id:"):
-                frame["id"] = line[len("id:"):].strip()
+                frame["id"] = line[len("id:") :].strip()
             elif line.startswith("data:"):
-                frame["data"] = json.loads(line[len("data:"):].strip())
+                frame["data"] = json.loads(line[len("data:") :].strip())
         if frame:
             frames.append(frame)
     return frames
@@ -462,7 +496,12 @@ class TestSseStream:
         assert isinstance(frames[0]["data"]["seq"], int)
 
     def test_stream_data_contains_type(self, storage_root: Path) -> None:
-        _seed(storage_root, "sse-type", "session.phase_change", {"before": "created", "after": "running"})
+        _seed(
+            storage_root,
+            "sse-type",
+            "session.phase_change",
+            {"before": "created", "after": "running"},
+        )
         client = _make_client(storage_root)
         frames = _parse_sse_frames(client.get("/v1/sessions/sse-type/events?stream=true").text)
         assert frames[0]["data"]["type"] == "session.phase_change"
@@ -480,11 +519,15 @@ class TestSseStream:
         assert frames[0]["id"] == str(frames[0]["data"]["seq"])
 
     def test_stream_multiple_events_in_order(self, storage_root: Path) -> None:
-        _seed_many(storage_root, "sse-multi", [
-            ("session.created", {}),
-            ("session.phase_change", {"before": "created", "after": "running"}),
-            ("session.phase_change", {"before": "running", "after": "done"}),
-        ])
+        _seed_many(
+            storage_root,
+            "sse-multi",
+            [
+                ("session.created", {}),
+                ("session.phase_change", {"before": "created", "after": "running"}),
+                ("session.phase_change", {"before": "running", "after": "done"}),
+            ],
+        )
         client = _make_client(storage_root)
         frames = _parse_sse_frames(client.get("/v1/sessions/sse-multi/events?stream=true").text)
         seqs = [int(f["id"]) for f in frames]
@@ -497,10 +540,14 @@ class TestSseStream:
         assert frames == []
 
     def test_stream_since_filter(self, storage_root: Path) -> None:
-        seqs = _seed_many(storage_root, "sse-since", [
-            ("session.created", {}),
-            ("session.phase_change", {"before": "created", "after": "running"}),
-        ])
+        seqs = _seed_many(
+            storage_root,
+            "sse-since",
+            [
+                ("session.created", {}),
+                ("session.phase_change", {"before": "created", "after": "running"}),
+            ],
+        )
         client = _make_client(storage_root)
         frames = _parse_sse_frames(
             client.get(f"/v1/sessions/sse-since/events?stream=true&since={seqs[0]}").text
@@ -509,10 +556,14 @@ class TestSseStream:
         assert all(int(f["id"]) > seqs[0] for f in frames)
 
     def test_stream_type_filter(self, storage_root: Path) -> None:
-        _seed_many(storage_root, "sse-tf", [
-            ("session.created", {}),
-            ("session.phase_change", {"before": "created", "after": "running"}),
-        ])
+        _seed_many(
+            storage_root,
+            "sse-tf",
+            [
+                ("session.created", {}),
+                ("session.phase_change", {"before": "created", "after": "running"}),
+            ],
+        )
         client = _make_client(storage_root)
         frames = _parse_sse_frames(
             client.get("/v1/sessions/sse-tf/events?stream=true&type=session.created").text
@@ -521,11 +572,15 @@ class TestSseStream:
         assert all(f["event"] == "session.created" for f in frames)
 
     def test_stream_last_event_id_resumes_from_watermark(self, storage_root: Path) -> None:
-        seqs = _seed_many(storage_root, "sse-lei", [
-            ("session.created", {}),
-            ("session.phase_change", {"before": "created", "after": "running"}),
-            ("error", {"msg": "oops"}),
-        ])
+        seqs = _seed_many(
+            storage_root,
+            "sse-lei",
+            [
+                ("session.created", {}),
+                ("session.phase_change", {"before": "created", "after": "running"}),
+                ("error", {"msg": "oops"}),
+            ],
+        )
         client = _make_client(storage_root)
         frames = _parse_sse_frames(
             client.get(
@@ -537,10 +592,14 @@ class TestSseStream:
         assert all(int(f["id"]) > seqs[0] for f in frames)
 
     def test_stream_last_event_id_overrides_since(self, storage_root: Path) -> None:
-        seqs = _seed_many(storage_root, "sse-lei-override", [
-            ("session.created", {}),
-            ("session.phase_change", {"before": "created", "after": "running"}),
-        ])
+        seqs = _seed_many(
+            storage_root,
+            "sse-lei-override",
+            [
+                ("session.created", {}),
+                ("session.phase_change", {"before": "created", "after": "running"}),
+            ],
+        )
         client = _make_client(storage_root)
         # since=-1 would return all events; Last-Event-ID=seqs[0] narrows to events after seqs[0]
         frames = _parse_sse_frames(
@@ -557,9 +616,7 @@ class TestSseStream:
         bad_file.write_text("not-valid-json\n")
         audit = FileAuditLog(storage_root)
         client = _make_client(storage_root, audit)
-        frames = _parse_sse_frames(
-            client.get("/v1/sessions/sse-fail/events?stream=true").text
-        )
+        frames = _parse_sse_frames(client.get("/v1/sessions/sse-fail/events?stream=true").text)
         assert any(f.get("event") == "error" for f in frames)
 
     def test_stream_failure_error_event_has_code(self, storage_root: Path) -> None:
@@ -567,9 +624,7 @@ class TestSseStream:
         bad_file.write_text("not-valid-json\n")
         audit = FileAuditLog(storage_root)
         client = _make_client(storage_root, audit)
-        frames = _parse_sse_frames(
-            client.get("/v1/sessions/sse-fail-code/events?stream=true").text
-        )
+        frames = _parse_sse_frames(client.get("/v1/sessions/sse-fail-code/events?stream=true").text)
         err_frame = next(f for f in frames if f.get("event") == "error")
         assert err_frame["data"]["code"] == "session_events_failed"
 
@@ -604,6 +659,7 @@ class TestSseStream:
 
     def test_stream_otel_span_emitted(self, storage_root: Path) -> None:
         from tests._otel_shared import otel_exporter as _otel_exporter
+
         _otel_exporter.clear()
         _seed(storage_root, "sse-otel", "session.created", {})
         client = _make_client(storage_root)
@@ -709,11 +765,15 @@ class TestSdkEventsEndpoint:
         assert "sdk-id" in body["events"][0]["id"]
 
     def test_internal_events_not_included(self, storage_root: Path) -> None:
-        _seed_many(storage_root, "sdk-filter", [
-            ("session.created", {"x": 1}),
-            ("session.phase_change", {"before": "a", "after": "b"}),
-            ("canvas_op", _canvas_op_data()),
-        ])
+        _seed_many(
+            storage_root,
+            "sdk-filter",
+            [
+                ("session.created", {"x": 1}),
+                ("session.phase_change", {"before": "a", "after": "b"}),
+                ("canvas_op", _canvas_op_data()),
+            ],
+        )
         client = _make_client(storage_root)
         body = client.get("/sessions/sdk-filter/events").json()
         kinds = {e["kind"] for e in body["events"]}
@@ -728,7 +788,12 @@ class TestSdkEventsEndpoint:
         assert any(e["kind"] == "message" for e in body["events"])
 
     def test_tool_call_requested_mapped_to_tool_call_kind(self, storage_root: Path) -> None:
-        _seed(storage_root, "sdk-tc", "tool_call.requested", {"tool_id": "t1", "tool_name": "bash", "args": {}})
+        _seed(
+            storage_root,
+            "sdk-tc",
+            "tool_call.requested",
+            {"tool_id": "t1", "tool_name": "bash", "args": {}},
+        )
         client = _make_client(storage_root)
         body = client.get("/sessions/sdk-tc/events").json()
         assert any(e["kind"] == "tool_call" for e in body["events"])
@@ -746,37 +811,47 @@ class TestSdkEventsEndpoint:
         assert any(e["kind"] == "error" for e in body["events"])
 
     def test_total_reflects_only_mapped_events(self, storage_root: Path) -> None:
-        _seed_many(storage_root, "sdk-total", [
-            ("session.created", {}),         # excluded
-            ("canvas_op", _canvas_op_data()),  # included
-            ("message.added", {"role": "user", "content": "hi"}),  # included
-        ])
+        _seed_many(
+            storage_root,
+            "sdk-total",
+            [
+                ("session.created", {}),  # excluded
+                ("canvas_op", _canvas_op_data()),  # included
+                ("message.added", {"role": "user", "content": "hi"}),  # included
+            ],
+        )
         client = _make_client(storage_root)
         body = client.get("/sessions/sdk-total/events").json()
         assert body["total"] == 2
 
     def test_limit_paginates_results(self, storage_root: Path) -> None:
-        _seed_many(storage_root, "sdk-limit", [
-            ("canvas_op", {**_canvas_op_data(), "sequence": i}) for i in range(5)
-        ])
+        _seed_many(
+            storage_root,
+            "sdk-limit",
+            [("canvas_op", {**_canvas_op_data(), "sequence": i}) for i in range(5)],
+        )
         client = _make_client(storage_root)
         body = client.get("/sessions/sdk-limit/events?limit=3").json()
         assert len(body["events"]) == 3
         assert body["total"] == 5
 
     def test_offset_skips_events(self, storage_root: Path) -> None:
-        _seed_many(storage_root, "sdk-offset", [
-            ("canvas_op", {**_canvas_op_data(), "sequence": i}) for i in range(4)
-        ])
+        _seed_many(
+            storage_root,
+            "sdk-offset",
+            [("canvas_op", {**_canvas_op_data(), "sequence": i}) for i in range(4)],
+        )
         client = _make_client(storage_root)
         body = client.get("/sessions/sdk-offset/events?offset=2").json()
         assert len(body["events"]) == 2
         assert body["total"] == 4
 
     def test_limit_and_offset_combined(self, storage_root: Path) -> None:
-        _seed_many(storage_root, "sdk-combo", [
-            ("canvas_op", {**_canvas_op_data(), "sequence": i}) for i in range(6)
-        ])
+        _seed_many(
+            storage_root,
+            "sdk-combo",
+            [("canvas_op", {**_canvas_op_data(), "sequence": i}) for i in range(6)],
+        )
         client = _make_client(storage_root)
         body = client.get("/sessions/sdk-combo/events?limit=2&offset=3").json()
         assert len(body["events"]) == 2
@@ -819,6 +894,7 @@ class TestSdkEventsEndpoint:
 
     def test_otel_span_emitted_on_success(self, storage_root: Path) -> None:
         from tests._otel_shared import otel_exporter as _exp
+
         _exp.clear()
         client = _make_client(storage_root)
         client.get("/sessions/sdk-otel/events")

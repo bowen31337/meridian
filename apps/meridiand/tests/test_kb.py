@@ -41,14 +41,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
-from meridiand._kb import _load_status
+import pytest
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -79,9 +77,7 @@ class TestKbIndexEndpoint:
         resp = client.post("/v1/x/kb/index", json={"path": str(f)})
         assert resp.status_code == 200
 
-    def test_response_has_scope_global_by_default(
-        self, storage_root: Path, tmp_path: Path
-    ) -> None:
+    def test_response_has_scope_global_by_default(self, storage_root: Path, tmp_path: Path) -> None:
         f = _make_py_file(tmp_path)
         client = _make_client(storage_root)
         body = client.post("/v1/x/kb/index", json={"path": str(f)}).json()
@@ -134,9 +130,7 @@ class TestKbIndexEndpoint:
         data = json.loads((storage_root / "kb" / "status.json").read_text())
         assert data["last_updated"] is not None
 
-    def test_status_json_row_count_keyed_by_scope(
-        self, storage_root: Path, tmp_path: Path
-    ) -> None:
+    def test_status_json_row_count_keyed_by_scope(self, storage_root: Path, tmp_path: Path) -> None:
         f = _make_py_file(tmp_path)
         client = _make_client(storage_root)
         client.post("/v1/x/kb/index", json={"path": str(f)})
@@ -149,13 +143,13 @@ class TestKbIndexEndpoint:
     ) -> None:
         _make_py_file(tmp_path)
         client = _make_client(storage_root)
-        client.post("/v1/x/kb/index", json={"path": str(tmp_path / "sample.py"), "scope": "project"})
+        client.post(
+            "/v1/x/kb/index", json={"path": str(tmp_path / "sample.py"), "scope": "project"}
+        )
         data = json.loads((storage_root / "kb" / "status.json").read_text())
         assert "project" in data["row_counts"]
 
-    def test_row_counts_accumulate_across_scopes(
-        self, storage_root: Path, tmp_path: Path
-    ) -> None:
+    def test_row_counts_accumulate_across_scopes(self, storage_root: Path, tmp_path: Path) -> None:
         f1 = _make_py_file(tmp_path, "a.py")
         f2 = _make_py_file(tmp_path, "b.py")
         client = _make_client(storage_root)
@@ -316,9 +310,7 @@ class TestKbStatusFailure:
         resp = client.get("/v1/x/kb")
         assert resp.status_code == 422
 
-    def test_corrupt_status_json_returns_kb_status_failed_code(
-        self, storage_root: Path
-    ) -> None:
+    def test_corrupt_status_json_returns_kb_status_failed_code(self, storage_root: Path) -> None:
         kb_dir = storage_root / "kb"
         kb_dir.mkdir(parents=True, exist_ok=True)
         (kb_dir / "status.json").write_text("{not valid json{{")
@@ -360,9 +352,7 @@ class TestKbAppWiring:
         resp = client.get("/v1/x/kb")
         assert resp.status_code == 404
 
-    def test_with_storage_root_index_route_exists(
-        self, storage_root: Path, tmp_path: Path
-    ) -> None:
+    def test_with_storage_root_index_route_exists(self, storage_root: Path, tmp_path: Path) -> None:
         f = _make_py_file(tmp_path)
         client = _make_client(storage_root)
         resp = client.post("/v1/x/kb/index", json={"path": str(f)})
@@ -388,9 +378,7 @@ class TestKbOtel:
         app = create_app(audit, storage_root=storage_root)
         return TestClient(app, raise_server_exceptions=False)
 
-    def test_index_success_emits_kb_index_span(
-        self, storage_root: Path, tmp_path: Path
-    ) -> None:
+    def test_index_success_emits_kb_index_span(self, storage_root: Path, tmp_path: Path) -> None:
         f = _make_py_file(tmp_path)
         client = self._make_client(storage_root)
         client.post("/v1/x/kb/index", json={"path": str(f)})
@@ -413,9 +401,7 @@ class TestKbOtel:
         span_names = [s.name for s in _otel_exporter.get_finished_spans()]
         assert "kb.status" in span_names
 
-    def test_query_success_emits_kb_query_span(
-        self, storage_root: Path, tmp_path: Path
-    ) -> None:
+    def test_query_success_emits_kb_query_span(self, storage_root: Path, tmp_path: Path) -> None:
         f = _make_py_file(tmp_path)
         client = self._make_client(storage_root)
         client.post("/v1/x/kb/index", json={"path": str(f)})
@@ -516,9 +502,7 @@ class TestKbQueryEndpoint:
         body = client.post("/v1/x/kb/query", json={"query": "foo", "method": "vector"}).json()
         assert body["count"] >= 1
 
-    def test_hybrid_returns_results_after_index(
-        self, storage_root: Path, tmp_path: Path
-    ) -> None:
+    def test_hybrid_returns_results_after_index(self, storage_root: Path, tmp_path: Path) -> None:
         f = _make_py_file(tmp_path)
         client = _make_client(storage_root)
         client.post("/v1/x/kb/index", json={"path": str(f)})
@@ -577,9 +561,7 @@ class TestKbQueryEndpoint:
         assert body["count"] >= 1
         assert body["results"][0]["scope"] == "global"
 
-    def test_scope_filter_narrows_bm25_results(
-        self, storage_root: Path, tmp_path: Path
-    ) -> None:
+    def test_scope_filter_narrows_bm25_results(self, storage_root: Path, tmp_path: Path) -> None:
         f1 = _make_py_file(tmp_path, "a.py")
         f2 = _make_py_file(tmp_path, "b.py")
         client = _make_client(storage_root)
@@ -605,9 +587,7 @@ class TestKbQueryEndpoint:
         assert body["count"] <= 1
         assert len(body["results"]) <= 1
 
-    def test_reindex_updates_stored_chunks(
-        self, storage_root: Path, tmp_path: Path
-    ) -> None:
+    def test_reindex_updates_stored_chunks(self, storage_root: Path, tmp_path: Path) -> None:
         f = _make_py_file(tmp_path)
         client = _make_client(storage_root)
         client.post("/v1/x/kb/index", json={"path": str(f)})
@@ -691,9 +671,7 @@ class TestKbQueryWiring:
         resp = client.post("/v1/x/kb/query", json={"query": "foo"})
         assert resp.status_code == 404
 
-    def test_with_storage_root_query_route_exists(
-        self, storage_root: Path
-    ) -> None:
+    def test_with_storage_root_query_route_exists(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         resp = client.post("/v1/x/kb/query", json={"query": "foo"})
         assert resp.status_code != 404

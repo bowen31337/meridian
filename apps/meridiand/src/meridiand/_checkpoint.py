@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import json
 import os
-import tempfile
-from datetime import UTC, datetime
 from pathlib import Path
+import tempfile
 from typing import Any
 
 from core_errors import (
@@ -71,9 +71,7 @@ class SessionCheckpoint(BaseModel):
 
 def _write_atomic(path: Path, data: bytes) -> None:
     """Write data to path via a temp file in the same directory (atomic rename)."""
-    with tempfile.NamedTemporaryFile(
-        dir=path.parent, suffix=".tmp", delete=False
-    ) as tf:
+    with tempfile.NamedTemporaryFile(dir=path.parent, suffix=".tmp", delete=False) as tf:
         tf.write(data)
         tf.flush()
         os.fsync(tf.fileno())
@@ -149,7 +147,9 @@ def make_checkpoint_router(*, audit_log: AuditLog, storage_root: Path) -> APIRou
                             except Exception:
                                 pass
                         for call in completed:
-                            tool_name = call.get("name", "unknown") if isinstance(call, dict) else "unknown"
+                            tool_name = (
+                                call.get("name", "unknown") if isinstance(call, dict) else "unknown"
+                            )
                             tool_calls_total.labels(
                                 tool=tool_name, backend="unknown", result="success"
                             ).inc()
@@ -189,7 +189,7 @@ def make_checkpoint_router(*, audit_log: AuditLog, storage_root: Path) -> APIRou
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(
             content={

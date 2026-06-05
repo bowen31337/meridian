@@ -1,9 +1,9 @@
+import { ALL_WIDGETS, defaultRegistry } from "@meridian/sdk-widget";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import React from "react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ALL_WIDGETS, defaultRegistry } from "@meridian/sdk-widget";
 import { MeridianApiProvider } from "../api/context.js";
 import { NoopAuditLog } from "../workspace/audit.js";
 import type { AuditLogEntry } from "../workspace/types.js";
@@ -76,14 +76,22 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-function makeCanvasEvent(
-  id: string,
-  op: Record<string, unknown>,
-): Record<string, unknown> {
-  return { id, session_id: "sess1", kind: "canvas_op", payload: op, timestamp: "2026-05-21T00:00:00Z" };
+function makeCanvasEvent(id: string, op: Record<string, unknown>): Record<string, unknown> {
+  return {
+    id,
+    session_id: "sess1",
+    kind: "canvas_op",
+    payload: op,
+    timestamp: "2026-05-21T00:00:00Z",
+  };
 }
 
-function textOp(widgetId: string, text: string, seq: number, opKind = "set"): Record<string, unknown> {
+function textOp(
+  widgetId: string,
+  text: string,
+  seq: number,
+  opKind = "set",
+): Record<string, unknown> {
   return {
     op: opKind,
     widget_id: widgetId,
@@ -175,7 +183,9 @@ describe("LiveCanvasPanel — rendering widgets", () => {
     const { container } = render(<LiveCanvasPanel sessionId="sess1" />, {
       wrapper: createWrapper(),
     });
-    await waitFor(() => expect(container.querySelector("[data-widget-id='my-widget']")).toBeTruthy());
+    await waitFor(() =>
+      expect(container.querySelector("[data-widget-id='my-widget']")).toBeTruthy(),
+    );
   });
 });
 

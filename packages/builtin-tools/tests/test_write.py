@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from meridian_sdk_tool import ToolContext
 
 from meridian_builtin_tools.write import (
     _INPUT_SCHEMA,
@@ -14,7 +15,6 @@ from meridian_builtin_tools.write import (
     _resolve_safe,
     write_tool,
 )
-from meridian_sdk_tool import ToolContext
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -163,33 +163,23 @@ async def test_write_created_true_for_new_file(ws_ctx: ToolContext) -> None:
 
 
 @pytest.mark.anyio
-async def test_write_created_false_when_overwriting(
-    ws_ctx: ToolContext, workspace: Path
-) -> None:
+async def test_write_created_false_when_overwriting(ws_ctx: ToolContext, workspace: Path) -> None:
     (workspace / "existing.txt").write_text("old content", encoding="utf-8")
-    result = await write_tool.execute(
-        {"path": "existing.txt", "content": "new content"}, ws_ctx
-    )
+    result = await write_tool.execute({"path": "existing.txt", "content": "new content"}, ws_ctx)
     assert not result.is_error
     assert result.result["created"] is False
 
 
 @pytest.mark.anyio
-async def test_write_overwrite_replaces_content(
-    ws_ctx: ToolContext, workspace: Path
-) -> None:
+async def test_write_overwrite_replaces_content(ws_ctx: ToolContext, workspace: Path) -> None:
     (workspace / "f.txt").write_text("old", encoding="utf-8")
     await write_tool.execute({"path": "f.txt", "content": "new", "mode": "overwrite"}, ws_ctx)
     assert (workspace / "f.txt").read_text(encoding="utf-8") == "new"
 
 
 @pytest.mark.anyio
-async def test_write_creates_parent_directories(
-    ws_ctx: ToolContext, workspace: Path
-) -> None:
-    result = await write_tool.execute(
-        {"path": "a/b/c/nested.txt", "content": "deep"}, ws_ctx
-    )
+async def test_write_creates_parent_directories(ws_ctx: ToolContext, workspace: Path) -> None:
+    result = await write_tool.execute({"path": "a/b/c/nested.txt", "content": "deep"}, ws_ctx)
     assert not result.is_error
     assert (workspace / "a" / "b" / "c" / "nested.txt").read_text(encoding="utf-8") == "deep"
 
@@ -217,9 +207,7 @@ async def test_write_custom_encoding(ws_ctx: ToolContext, workspace: Path) -> No
 
 
 @pytest.mark.anyio
-async def test_write_mode_create_fails_if_exists(
-    ws_ctx: ToolContext, workspace: Path
-) -> None:
+async def test_write_mode_create_fails_if_exists(ws_ctx: ToolContext, workspace: Path) -> None:
     (workspace / "exists.txt").write_text("already here", encoding="utf-8")
     result = await write_tool.execute(
         {"path": "exists.txt", "content": "new", "mode": "create"}, ws_ctx
@@ -228,9 +216,7 @@ async def test_write_mode_create_fails_if_exists(
 
 
 @pytest.mark.anyio
-async def test_write_mode_create_does_not_overwrite(
-    ws_ctx: ToolContext, workspace: Path
-) -> None:
+async def test_write_mode_create_does_not_overwrite(ws_ctx: ToolContext, workspace: Path) -> None:
     (workspace / "preserve.txt").write_text("original", encoding="utf-8")
     await write_tool.execute(
         {"path": "preserve.txt", "content": "replaced", "mode": "create"}, ws_ctx
@@ -248,9 +234,7 @@ async def test_write_mode_create_succeeds_for_new_file(ws_ctx: ToolContext) -> N
 
 
 @pytest.mark.anyio
-async def test_write_default_mode_is_overwrite(
-    ws_ctx: ToolContext, workspace: Path
-) -> None:
+async def test_write_default_mode_is_overwrite(ws_ctx: ToolContext, workspace: Path) -> None:
     (workspace / "default.txt").write_text("old", encoding="utf-8")
     result = await write_tool.execute({"path": "default.txt", "content": "new"}, ws_ctx)
     assert not result.is_error
@@ -325,17 +309,13 @@ async def test_empty_path_returns_is_error() -> None:
 
 @pytest.mark.anyio
 async def test_invalid_mode_returns_is_error() -> None:
-    result = await write_tool.execute(
-        {"path": "f.txt", "content": "x", "mode": "append"}, _CTX
-    )
+    result = await write_tool.execute({"path": "f.txt", "content": "x", "mode": "append"}, _CTX)
     assert result.is_error
 
 
 @pytest.mark.anyio
 async def test_extra_field_returns_is_error() -> None:
-    result = await write_tool.execute(
-        {"path": "f.txt", "content": "x", "unknown": True}, _CTX
-    )
+    result = await write_tool.execute({"path": "f.txt", "content": "x", "unknown": True}, _CTX)
     assert result.is_error
 
 
@@ -359,9 +339,7 @@ async def test_validation_error_code_contains_validation() -> None:
 
 
 @pytest.mark.anyio
-async def test_confinement_failure_writes_audit_log(
-    tmp_path: Path, ws_ctx: ToolContext
-) -> None:
+async def test_confinement_failure_writes_audit_log(tmp_path: Path, ws_ctx: ToolContext) -> None:
     from meridian_sdk_tool import meridian_tool as _mk_tool
 
     audit_path = str(tmp_path / "audit.ndjson")
@@ -372,9 +350,7 @@ async def test_confinement_failure_writes_audit_log(
         output_schema=_OUTPUT_SCHEMA,
         audit_log_path=audit_path,
     )
-    async def _tool_with_audit(
-        args: dict[str, Any], ctx: ToolContext
-    ) -> dict[str, Any]:
+    async def _tool_with_audit(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         from meridian_builtin_tools.write import _resolve_safe
 
         target = _resolve_safe(ctx.workspace, args["path"])
@@ -387,9 +363,7 @@ async def test_confinement_failure_writes_audit_log(
             "created": True,
         }
 
-    result = await _tool_with_audit.execute(
-        {"path": "../outside.txt", "content": "x"}, ws_ctx
-    )
+    result = await _tool_with_audit.execute({"path": "../outside.txt", "content": "x"}, ws_ctx)
     assert result.is_error
 
     lines = Path(audit_path).read_text(encoding="utf-8").strip().splitlines()
@@ -411,9 +385,7 @@ async def test_validation_failure_writes_audit_log(tmp_path: Path) -> None:
         output_schema=_OUTPUT_SCHEMA,
         audit_log_path=audit_path,
     )
-    async def _tool_with_audit(
-        args: dict[str, Any], ctx: ToolContext
-    ) -> dict[str, Any]:
+    async def _tool_with_audit(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         return {"path": "x", "bytes_written": 0, "created": True}
 
     result = await _tool_with_audit.execute({}, _CTX)

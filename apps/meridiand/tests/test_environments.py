@@ -70,13 +70,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -178,60 +176,53 @@ class TestEnvironmentCreateResponse:
 
     def test_response_has_image_field(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.post(
-            "/v1/environments", json=_body(image="ubuntu:22.04")
-        ).json()
+        body = client.post("/v1/environments", json=_body(image="ubuntu:22.04")).json()
         assert body["image"] == "ubuntu:22.04"
 
     def test_response_has_template_field(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.post(
-            "/v1/environments", json=_body(template="python-3.11")
-        ).json()
+        body = client.post("/v1/environments", json=_body(template="python-3.11")).json()
         assert body["template"] == "python-3.11"
 
     def test_response_has_workspace_path_field(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.post(
-            "/v1/environments", json=_body(workspace_path="/workspace")
-        ).json()
+        body = client.post("/v1/environments", json=_body(workspace_path="/workspace")).json()
         assert body["workspace_path"] == "/workspace"
 
     def test_response_has_env_passthrough_field(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.post(
-            "/v1/environments", json=_body(env_passthrough=["HOME", "PATH"])
-        ).json()
+        body = client.post("/v1/environments", json=_body(env_passthrough=["HOME", "PATH"])).json()
         assert body["env_passthrough"] == ["HOME", "PATH"]
 
     def test_response_has_network_policy_field(self, storage_root: Path) -> None:
         policy = {"egress_allowed": True, "allowed_hosts": ["example.com"]}
         client = _make_client(storage_root)
-        body = client.post(
-            "/v1/environments", json=_body(network_policy=policy)
-        ).json()
+        body = client.post("/v1/environments", json=_body(network_policy=policy)).json()
         assert body["network_policy"] == policy
 
     def test_response_has_caps_envelope_field(self, storage_root: Path) -> None:
         caps = {"cpu_millicores": 500, "memory_mb": 256}
         client = _make_client(storage_root)
-        body = client.post(
-            "/v1/environments", json=_body(caps_envelope=caps)
-        ).json()
+        body = client.post("/v1/environments", json=_body(caps_envelope=caps)).json()
         assert body["caps_envelope"] == caps
 
     def test_response_has_default_timeout_ms_field(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.post(
-            "/v1/environments", json=_body(default_timeout_ms=30000)
-        ).json()
+        body = client.post("/v1/environments", json=_body(default_timeout_ms=30000)).json()
         assert body["default_timeout_ms"] == 30000
 
     def test_optional_fields_null_when_omitted(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         body = client.post("/v1/environments", json=_body()).json()
-        for field in ("image", "template", "workspace_path", "env_passthrough",
-                      "network_policy", "caps_envelope", "default_timeout_ms"):
+        for field in (
+            "image",
+            "template",
+            "workspace_path",
+            "env_passthrough",
+            "network_policy",
+            "caps_envelope",
+            "default_timeout_ms",
+        ):
             assert body[field] is None
 
 
@@ -248,17 +239,13 @@ class TestEnvironmentPersistence:
 
     def test_persisted_name(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        env_id = client.post(
-            "/v1/environments", json=_body(name="persist-env")
-        ).json()["id"]
+        env_id = client.post("/v1/environments", json=_body(name="persist-env")).json()["id"]
         resource = _env_resource(storage_root, env_id)
         assert resource["name"] == "persist-env"
 
     def test_persisted_backend(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        env_id = client.post(
-            "/v1/environments", json=_body(backend="firecracker")
-        ).json()["id"]
+        env_id = client.post("/v1/environments", json=_body(backend="firecracker")).json()["id"]
         resource = _env_resource(storage_root, env_id)
         assert resource["backend"] == "firecracker"
 
@@ -329,8 +316,7 @@ class TestEnvironmentCreateAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/environments", json=_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "environment.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "environment.create.failed"
         )
         assert record["level"] == "error"
 
@@ -338,8 +324,7 @@ class TestEnvironmentCreateAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/environments", json=_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "environment.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "environment.create.failed"
         )
         assert record["code"] == "environment_invalid_request"
 
@@ -347,8 +332,7 @@ class TestEnvironmentCreateAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/environments", json=_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "environment.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "environment.create.failed"
         )
         assert record["detail"]["environment_id"].startswith("env_")
 
@@ -356,8 +340,7 @@ class TestEnvironmentCreateAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/environments", json=_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "environment.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "environment.create.failed"
         )
         assert "name" in record["detail"]
 
@@ -365,8 +348,7 @@ class TestEnvironmentCreateAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/environments", json=_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "environment.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "environment.create.failed"
         )
         assert "message" in record["detail"]
         assert len(record["detail"]["message"]) > 0
@@ -623,8 +605,7 @@ class TestEnvironmentGetNotFound:
         client = _make_client(storage_root)
         client.get("/v1/environments/env_missing")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "environment.get.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "environment.get.failed"
         )
         assert record["code"] == "environment_not_found"
 
@@ -692,33 +673,25 @@ class TestEnvironmentUpdateSuccess:
     def test_updates_name(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         env_id = _create_env(client)["id"]
-        body = client.patch(
-            f"/v1/environments/{env_id}", json={"name": "new-name"}
-        ).json()
+        body = client.patch(f"/v1/environments/{env_id}", json={"name": "new-name"}).json()
         assert body["name"] == "new-name"
 
     def test_updates_image(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         env_id = _create_env(client)["id"]
-        body = client.patch(
-            f"/v1/environments/{env_id}", json={"image": "debian:12"}
-        ).json()
+        body = client.patch(f"/v1/environments/{env_id}", json={"image": "debian:12"}).json()
         assert body["image"] == "debian:12"
 
     def test_updates_template(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         env_id = _create_env(client)["id"]
-        body = client.patch(
-            f"/v1/environments/{env_id}", json={"template": "node-18"}
-        ).json()
+        body = client.patch(f"/v1/environments/{env_id}", json={"template": "node-18"}).json()
         assert body["template"] == "node-18"
 
     def test_updates_workspace_path(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         env_id = _create_env(client)["id"]
-        body = client.patch(
-            f"/v1/environments/{env_id}", json={"workspace_path": "/repo"}
-        ).json()
+        body = client.patch(f"/v1/environments/{env_id}", json={"workspace_path": "/repo"}).json()
         assert body["workspace_path"] == "/repo"
 
     def test_updates_env_passthrough(self, storage_root: Path) -> None:
@@ -733,26 +706,20 @@ class TestEnvironmentUpdateSuccess:
         client = _make_client(storage_root)
         env_id = _create_env(client)["id"]
         policy = {"egress_allowed": False}
-        body = client.patch(
-            f"/v1/environments/{env_id}", json={"network_policy": policy}
-        ).json()
+        body = client.patch(f"/v1/environments/{env_id}", json={"network_policy": policy}).json()
         assert body["network_policy"] == policy
 
     def test_updates_caps_envelope(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         env_id = _create_env(client)["id"]
         caps = {"memory_mb": 1024}
-        body = client.patch(
-            f"/v1/environments/{env_id}", json={"caps_envelope": caps}
-        ).json()
+        body = client.patch(f"/v1/environments/{env_id}", json={"caps_envelope": caps}).json()
         assert body["caps_envelope"] == caps
 
     def test_updates_default_timeout_ms(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         env_id = _create_env(client)["id"]
-        body = client.patch(
-            f"/v1/environments/{env_id}", json={"default_timeout_ms": 60000}
-        ).json()
+        body = client.patch(f"/v1/environments/{env_id}", json={"default_timeout_ms": 60000}).json()
         assert body["default_timeout_ms"] == 60000
 
     def test_updates_updated_at(self, storage_root: Path) -> None:
@@ -760,18 +727,14 @@ class TestEnvironmentUpdateSuccess:
         created = _create_env(client)
         env_id = created["id"]
         original_created_at = created["created_at"]
-        body = client.patch(
-            f"/v1/environments/{env_id}", json={"name": "patched"}
-        ).json()
+        body = client.patch(f"/v1/environments/{env_id}", json={"name": "patched"}).json()
         assert "updated_at" in body
         assert body["created_at"] == original_created_at
 
     def test_preserves_backend_on_patch(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         env_id = _create_env(client, backend="firecracker")["id"]
-        body = client.patch(
-            f"/v1/environments/{env_id}", json={"name": "patched"}
-        ).json()
+        body = client.patch(f"/v1/environments/{env_id}", json={"name": "patched"}).json()
         assert body["backend"] == "firecracker"
 
     def test_patch_persisted_to_disk(self, storage_root: Path) -> None:
@@ -807,9 +770,7 @@ class TestEnvironmentUpdateErrors:
 
     def test_not_found_error_code(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.patch(
-            "/v1/environments/env_nonexistent", json={"name": "x"}
-        ).json()
+        body = client.patch("/v1/environments/env_nonexistent", json={"name": "x"}).json()
         assert body["error"]["code"] == "environment_not_found"
 
     def test_not_found_writes_audit(self, storage_root: Path) -> None:
@@ -822,8 +783,7 @@ class TestEnvironmentUpdateErrors:
         client = _make_client(storage_root)
         client.patch("/v1/environments/env_missing", json={"name": "x"})
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "environment.update.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "environment.update.failed"
         )
         assert record["level"] == "error"
 
@@ -934,12 +894,16 @@ class TestEnvironmentUpdateConflict:
         env_id = _create_env(client)["id"]
         session_id = "sess_active"
         _write_active_session_for_env(storage_root, env_id, session_id=session_id)
-        assert client.patch(f"/v1/environments/{env_id}", json={"name": "updated"}).status_code == 409
+        assert (
+            client.patch(f"/v1/environments/{env_id}", json={"name": "updated"}).status_code == 409
+        )
         manifest_path = storage_root / "sessions" / session_id / "manifest.json"
         manifest = json.loads(manifest_path.read_text())
         manifest["status"] = "idle"
         manifest_path.write_text(json.dumps(manifest))
-        assert client.patch(f"/v1/environments/{env_id}", json={"name": "updated"}).status_code == 200
+        assert (
+            client.patch(f"/v1/environments/{env_id}", json={"name": "updated"}).status_code == 200
+        )
 
     def test_conflict_writes_audit_log(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
@@ -960,7 +924,8 @@ class TestEnvironmentUpdateConflict:
         client.patch(f"/v1/environments/{env_id}", json={"name": "updated"})
         records = _audit_records(storage_root)
         record = next(
-            r for r in records
+            r
+            for r in records
             if r.get("event") == "environment.update.failed"
             and r.get("code") == "environment_active_session"
         )
@@ -1044,8 +1009,7 @@ class TestEnvironmentDeleteAuditLog:
         client = _make_client(storage_root)
         client.delete("/v1/environments/env_missing")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "environment.delete.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "environment.delete.failed"
         )
         assert record["level"] == "error"
 
@@ -1053,8 +1017,7 @@ class TestEnvironmentDeleteAuditLog:
         client = _make_client(storage_root)
         client.delete("/v1/environments/env_missing")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "environment.delete.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "environment.delete.failed"
         )
         assert record["code"] == "environment_not_found"
 
@@ -1062,8 +1025,7 @@ class TestEnvironmentDeleteAuditLog:
         client = _make_client(storage_root)
         client.delete("/v1/environments/env_missing")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "environment.delete.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "environment.delete.failed"
         )
         assert record["detail"]["environment_id"] == "env_missing"
 
@@ -1071,8 +1033,7 @@ class TestEnvironmentDeleteAuditLog:
         client = _make_client(storage_root)
         client.delete("/v1/environments/env_missing")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "environment.delete.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "environment.delete.failed"
         )
         assert len(record["detail"]["message"]) > 0
 
@@ -1208,8 +1169,7 @@ class TestEnvironmentDeleteConflict:
         client.delete(f"/v1/environments/{env_id}")
         records = _audit_records(storage_root)
         assert any(
-            r.get("event") == "environment.delete.failed"
-            and r.get("code") == "environment_in_use"
+            r.get("event") == "environment.delete.failed" and r.get("code") == "environment_in_use"
             for r in records
         )
 
@@ -1220,7 +1180,8 @@ class TestEnvironmentDeleteConflict:
         client.delete(f"/v1/environments/{env_id}")
         records = _audit_records(storage_root)
         record = next(
-            r for r in records
+            r
+            for r in records
             if r.get("event") == "environment.delete.failed"
             and r.get("code") == "environment_in_use"
         )

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import time
+import contextlib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+import time
 
-from ._audit import NoopAuditLog
 from ._runtime import EnvironmentRuntime, RuntimeOptions
 from ._telemetry import get_tracer, record_pool_event
 from ._types import (
@@ -30,8 +30,8 @@ class _WorkerEntry:
     session_id: str
     last_used_at: float = field(default_factory=time.monotonic)
     provisioned: bool = False
-    _provision_error: EnvironmentFailure | None = field(default=None, repr=False)
-    _provision_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    provision_error: EnvironmentFailure | None = field(default=None, repr=False)
+    provision_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
 
 class WorkerPool:
@@ -95,18 +95,14 @@ class WorkerPool:
     async def start(self) -> None:
         """Start the background idle-TTL reaper."""
         if self._reaper_task is None or self._reaper_task.done():
-            self._reaper_task = asyncio.create_task(
-                self._reaper_loop(), name="env-pool-reaper"
-            )
+            self._reaper_task = asyncio.create_task(self._reaper_loop(), name="env-pool-reaper")
 
     async def stop(self) -> None:
         """Cancel the reaper and reclaim all remaining pool workers."""
         if self._reaper_task is not None:
             self._reaper_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._reaper_task
-            except asyncio.CancelledError:
-                pass
             self._reaper_task = None
         await self._reclaim_all(reason="pool_drain")
 
@@ -159,9 +155,7 @@ class WorkerPool:
     # Pool path (provision-on-first-use / warm pool)
     # ------------------------------------------------------------------
 
-    async def _execute_pooled(
-        self, request: ExecuteRequest, opts: RuntimeOptions
-    ) -> ExecuteResult:
+    async def _execute_pooled(self, request: ExecuteRequest, opts: RuntimeOptions) -> ExecuteResult:
         entry = await self._get_or_provision(request, opts)
         result = await self._runtime.execute(request, opts)
         entry.last_used_at = time.monotonic()
@@ -201,9 +195,9 @@ class WorkerPool:
             await self._reclaim_entry(evict_entry, reason="pool_size_eviction")
 
         if not entry.provisioned:
-            async with entry._provision_lock:
-                if entry._provision_error is not None:
-                    raise entry._provision_error
+            async with entry.provision_lock:
+                if entry.provision_error is not None:
+                    raise entry.provision_error
                 if not entry.provisioned:
                     await self._provision_entry(entry, opts)
 
@@ -239,7 +233,7 @@ class WorkerPool:
             try:
                 await self._runtime.provision(provision_req, opts)
             except EnvironmentFailure as exc:
-                entry._provision_error = exc
+                entry.provision_error = exc
                 async with self._dict_lock:
                     self._workers.pop(entry.environment_id, None)
                 raise
@@ -261,9 +255,7 @@ class WorkerPool:
 
         async with self._dict_lock:
             expired = [
-                eid
-                for eid, e in self._workers.items()
-                if e.provisioned and e.last_used_at < cutoff
+                eid for eid, e in self._workers.items() if e.provisioned and e.last_used_at < cutoff
             ]
             for eid in expired:
                 to_reclaim.append(self._workers.pop(eid))
@@ -306,7 +298,6 @@ class WorkerPool:
                 environment_kind=entry.environment_kind,
                 session_id=entry.session_id,
             )
-            try:
+            # runtime already marked the span and wrote the audit entry
+            with contextlib.suppress(EnvironmentFailure):
                 await self._runtime.reclaim(reclaim_req)
-            except EnvironmentFailure:
-                pass  # runtime already marked the span and wrote the audit entry

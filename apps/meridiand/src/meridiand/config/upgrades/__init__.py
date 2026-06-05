@@ -7,7 +7,7 @@ in sequence by the ``meridian config migrate`` CLI command.
 
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from . import v1_to_v2
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 
 from core_errors import (
@@ -102,9 +102,7 @@ def make_resume_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         raise err
 
                 # Step 2: Re-dispatch tool calls whose result is missing
-                pending_tool_calls = (
-                    checkpoint.get("pending_tool_calls", []) if checkpoint else []
-                )
+                pending_tool_calls = checkpoint.get("pending_tool_calls", []) if checkpoint else []
                 sandbox_adapter = FakeSandboxAdapter(fixture_dir / "tool_responses.ndjson")
                 tool_calls_dispatched = 0
                 for _ in pending_tool_calls:
@@ -146,7 +144,7 @@ def make_resume_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(
             content={

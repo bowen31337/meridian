@@ -26,8 +26,12 @@ from typing import Any
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
-from storage_event_log import SUBSCRIBER_CHANNEL_SIZE, LocalEventLogWriter, SessionEvent, SubscriberBus
-
+from storage_event_log import (
+    SUBSCRIBER_CHANNEL_SIZE,
+    LocalEventLogWriter,
+    SessionEvent,
+    SubscriberBus,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -67,11 +71,11 @@ def _parse_sse_frames(body: str) -> list[dict[str, Any]]:
         for line in block.splitlines():
             line = line.strip()
             if line.startswith("event:"):
-                frame["event"] = line[len("event:"):].strip()
+                frame["event"] = line[len("event:") :].strip()
             elif line.startswith("id:"):
-                frame["id"] = line[len("id:"):].strip()
+                frame["id"] = line[len("id:") :].strip()
             elif line.startswith("data:"):
-                frame["data"] = json.loads(line[len("data:"):].strip())
+                frame["data"] = json.loads(line[len("data:") :].strip())
         if frame:
             frames.append(frame)
     return frames
@@ -111,10 +115,14 @@ def _make_lagged_bus() -> SubscriberBus:
 
 class TestNoBusBackwardCompat:
     def test_no_bus_streams_historical_events(self, storage_root: Path) -> None:
-        _seed_many(storage_root, "hist-sess", [
-            ("session.created", {}),
-            ("session.phase_change", {"before": "created", "after": "running"}),
-        ])
+        _seed_many(
+            storage_root,
+            "hist-sess",
+            [
+                ("session.created", {}),
+                ("session.phase_change", {"before": "created", "after": "running"}),
+            ],
+        )
         client = _make_client(storage_root)
         frames = _parse_sse_frames(client.get("/v1/sessions/hist-sess/events?stream=true").text)
         assert len(frames) == 2
@@ -138,26 +146,20 @@ class TestSubscriberLagged:
     def test_lagged_yields_subscriber_lagged_event(self, storage_root: Path) -> None:
         bus = _make_lagged_bus()
         client = _make_client(storage_root, subscriber_bus=bus)
-        frames = _parse_sse_frames(
-            client.get("/v1/sessions/lag-event/events?stream=true").text
-        )
+        frames = _parse_sse_frames(client.get("/v1/sessions/lag-event/events?stream=true").text)
         assert any(f.get("event") == "subscriber_lagged" for f in frames)
 
     def test_lagged_event_has_code_subscriber_lagged(self, storage_root: Path) -> None:
         bus = _make_lagged_bus()
         client = _make_client(storage_root, subscriber_bus=bus)
-        frames = _parse_sse_frames(
-            client.get("/v1/sessions/lag-code/events?stream=true").text
-        )
+        frames = _parse_sse_frames(client.get("/v1/sessions/lag-code/events?stream=true").text)
         lag_frame = next(f for f in frames if f.get("event") == "subscriber_lagged")
         assert lag_frame["data"]["code"] == "subscriber_lagged"
 
     def test_lagged_event_message_mentions_capacity(self, storage_root: Path) -> None:
         bus = _make_lagged_bus()
         client = _make_client(storage_root, subscriber_bus=bus)
-        frames = _parse_sse_frames(
-            client.get("/v1/sessions/lag-msg/events?stream=true").text
-        )
+        frames = _parse_sse_frames(client.get("/v1/sessions/lag-msg/events?stream=true").text)
         lag_frame = next(f for f in frames if f.get("event") == "subscriber_lagged")
         assert str(SUBSCRIBER_CHANNEL_SIZE) in lag_frame["data"]["message"]
 
@@ -173,7 +175,9 @@ class TestSubscriberLagged:
         client = _make_client(storage_root, subscriber_bus=bus)
         client.get("/v1/sessions/lag-lvl/events?stream=true")
         records = _read_audit(storage_root)
-        rec = next(r for r in records if r.get("event") == "session.events.stream.subscriber_lagged")
+        rec = next(
+            r for r in records if r.get("event") == "session.events.stream.subscriber_lagged"
+        )
         assert rec["level"] == "warn"
 
     def test_lagged_audit_detail_has_session_id(self, storage_root: Path) -> None:
@@ -181,7 +185,9 @@ class TestSubscriberLagged:
         client = _make_client(storage_root, subscriber_bus=bus)
         client.get("/v1/sessions/lag-sid/events?stream=true")
         records = _read_audit(storage_root)
-        rec = next(r for r in records if r.get("event") == "session.events.stream.subscriber_lagged")
+        rec = next(
+            r for r in records if r.get("event") == "session.events.stream.subscriber_lagged"
+        )
         assert rec["detail"]["session_id"] == "lag-sid"
 
     def test_lagged_audit_detail_has_since(self, storage_root: Path) -> None:
@@ -189,7 +195,9 @@ class TestSubscriberLagged:
         client = _make_client(storage_root, subscriber_bus=bus)
         client.get("/v1/sessions/lag-snc/events?stream=true&since=3")
         records = _read_audit(storage_root)
-        rec = next(r for r in records if r.get("event") == "session.events.stream.subscriber_lagged")
+        rec = next(
+            r for r in records if r.get("event") == "session.events.stream.subscriber_lagged"
+        )
         assert rec["detail"]["since"] == 3
 
     def test_lagged_audit_detail_has_capacity(self, storage_root: Path) -> None:
@@ -197,7 +205,9 @@ class TestSubscriberLagged:
         client = _make_client(storage_root, subscriber_bus=bus)
         client.get("/v1/sessions/lag-cap/events?stream=true")
         records = _read_audit(storage_root)
-        rec = next(r for r in records if r.get("event") == "session.events.stream.subscriber_lagged")
+        rec = next(
+            r for r in records if r.get("event") == "session.events.stream.subscriber_lagged"
+        )
         assert rec["detail"]["capacity"] == SUBSCRIBER_CHANNEL_SIZE
 
 
@@ -208,15 +218,17 @@ class TestSubscriberLagged:
 
 class TestHistoryReplayWithBus:
     def test_history_events_delivered_before_lagged(self, storage_root: Path) -> None:
-        _seed_many(storage_root, "hist-bus", [
-            ("session.created", {}),
-            ("session.phase_change", {"before": "created", "after": "running"}),
-        ])
+        _seed_many(
+            storage_root,
+            "hist-bus",
+            [
+                ("session.created", {}),
+                ("session.phase_change", {"before": "created", "after": "running"}),
+            ],
+        )
         bus = _make_lagged_bus()
         client = _make_client(storage_root, subscriber_bus=bus)
-        frames = _parse_sse_frames(
-            client.get("/v1/sessions/hist-bus/events?stream=true").text
-        )
+        frames = _parse_sse_frames(client.get("/v1/sessions/hist-bus/events?stream=true").text)
         # Both historical events plus the lagged frame
         history = [f for f in frames if f.get("event") != "subscriber_lagged"]
         lag = [f for f in frames if f.get("event") == "subscriber_lagged"]
@@ -227,19 +239,21 @@ class TestHistoryReplayWithBus:
         _seed(storage_root, "hist-order", "session.created", {})
         bus = _make_lagged_bus()
         client = _make_client(storage_root, subscriber_bus=bus)
-        frames = _parse_sse_frames(
-            client.get("/v1/sessions/hist-order/events?stream=true").text
-        )
+        frames = _parse_sse_frames(client.get("/v1/sessions/hist-order/events?stream=true").text)
         events_order = [f.get("event") for f in frames]
         lag_idx = events_order.index("subscriber_lagged")
         # All frames before the lag must not be subscriber_lagged
         assert all(e != "subscriber_lagged" for e in events_order[:lag_idx])
 
     def test_since_filter_applies_to_history_replay(self, storage_root: Path) -> None:
-        seqs = _seed_many(storage_root, "hist-since", [
-            ("session.created", {}),
-            ("session.phase_change", {"before": "created", "after": "running"}),
-        ])
+        seqs = _seed_many(
+            storage_root,
+            "hist-since",
+            [
+                ("session.created", {}),
+                ("session.phase_change", {"before": "created", "after": "running"}),
+            ],
+        )
         bus = _make_lagged_bus()
         client = _make_client(storage_root, subscriber_bus=bus)
         frames = _parse_sse_frames(
@@ -250,10 +264,14 @@ class TestHistoryReplayWithBus:
         assert all(int(f["id"]) > seqs[0] for f in history)
 
     def test_type_filter_applies_to_history_replay(self, storage_root: Path) -> None:
-        _seed_many(storage_root, "hist-type", [
-            ("session.created", {}),
-            ("session.phase_change", {"before": "created", "after": "running"}),
-        ])
+        _seed_many(
+            storage_root,
+            "hist-type",
+            [
+                ("session.created", {}),
+                ("session.phase_change", {"before": "created", "after": "running"}),
+            ],
+        )
         bus = _make_lagged_bus()
         client = _make_client(storage_root, subscriber_bus=bus)
         frames = _parse_sse_frames(
@@ -286,12 +304,12 @@ class TestLiveDelivery:
         loop = asyncio.new_event_loop()
         try:
             q = bus.subscribe("live-sess")
-            loop.run_until_complete(
-                writer.append("live-sess", "session.created", {"live": True})
-            )
+            loop.run_until_complete(writer.append("live-sess", "session.created", {"live": True}))
             # Put lagged sentinel so the stream terminates after consuming the event
             q.put_nowait(None)
-            bus.unsubscribe("live-sess", q)  # remove so subscribe() in the handler creates a fresh one
+            bus.unsubscribe(
+                "live-sess", q
+            )  # remove so subscribe() in the handler creates a fresh one
         finally:
             loop.close()
 
@@ -300,9 +318,7 @@ class TestLiveDelivery:
         bus.unsubscribe = lambda session_id, queue: None  # type: ignore[method-assign]
 
         client = _make_client(storage_root, subscriber_bus=bus)
-        frames = _parse_sse_frames(
-            client.get("/v1/sessions/live-sess/events?stream=true").text
-        )
+        frames = _parse_sse_frames(client.get("/v1/sessions/live-sess/events?stream=true").text)
         # The historical read yields the event from disk; the queue item is seq-deduplicated
         history = [f for f in frames if f.get("event") != "subscriber_lagged"]
         assert len(history) == 1

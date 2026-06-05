@@ -26,13 +26,13 @@ before re-raising.
 from __future__ import annotations
 
 import asyncio
-import json
-import uuid
+import contextlib
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
+import uuid
 
-import httpx
 from core_errors import (
     AuditLog,
     AuditLogEntry,
@@ -41,6 +41,7 @@ from core_errors import (
     get_tracer,
     record_invocation_event,
 )
+import httpx
 from opentelemetry.trace import StatusCode
 from sdk_channel import (
     ChannelCapabilities,
@@ -330,9 +331,7 @@ class TelegramChannelDriver(ChannelDriver):
                     raise RuntimeError(f"Telegram API error: {description}")
 
                 result_data: dict[str, Any] = response_data.get("result", {})
-                message_id = str(
-                    result_data.get("message_id", f"tg_{uuid.uuid4().hex}")
-                )
+                message_id = str(result_data.get("message_id", f"tg_{uuid.uuid4().hex}"))
 
             except ChannelFailure:
                 raise
@@ -377,10 +376,8 @@ class TelegramChannelDriver(ChannelDriver):
         task = self._poll_tasks.pop(request.channel_id, None)
         if task is not None and not task.done():
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
-            except (asyncio.CancelledError, Exception):
-                pass
 
     def capabilities(self) -> ChannelCapabilities:
         return ChannelCapabilities(

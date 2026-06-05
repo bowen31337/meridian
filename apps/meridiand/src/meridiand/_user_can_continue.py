@@ -111,7 +111,7 @@ def make_user_can_continue_router(
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(
             content={

@@ -13,9 +13,9 @@ span and writes an error-level audit entry before re-raising.
 
 from __future__ import annotations
 
-import json
 from collections import defaultdict
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any
 
@@ -88,9 +88,8 @@ class _Totals:
     def add(self, data: dict[str, Any]) -> None:
         self.input_tokens += int(data.get("prompt_tokens", 0))
         self.output_tokens += int(data.get("completion_tokens", 0))
-        self.cache_tokens += (
-            int(data.get("cache_creation_tokens", 0))
-            + int(data.get("cache_read_tokens", 0))
+        self.cache_tokens += int(data.get("cache_creation_tokens", 0)) + int(
+            data.get("cache_read_tokens", 0)
         )
 
     def to_dict(self) -> dict[str, int]:
@@ -158,9 +157,7 @@ def _lookup_agent_id(
     """Read agent_id from a session manifest (cached)."""
     if session_id not in cache:
         try:
-            manifest = json.loads(
-                (sessions_root / session_id / "manifest.json").read_text()
-            )
+            manifest = json.loads((sessions_root / session_id / "manifest.json").read_text())
             cache[session_id] = manifest.get("agent_id")
         except Exception:
             cache[session_id] = None
@@ -180,9 +177,7 @@ def _build_agent_report(
 ) -> list[dict[str, Any]]:
     totals: dict[str, _Totals] = defaultdict(_Totals)
     cache: dict[str, str | None] = {}
-    for session_id, record in _scan_events(
-        events_root, frozenset({"usage.delta"}), since, until
-    ):
+    for session_id, record in _scan_events(events_root, frozenset({"usage.delta"}), since, until):
         agent_id = _lookup_agent_id(sessions_root, session_id, cache) or ""
         totals[agent_id].add(record.get("data", {}))
     return [{"agent_id": k, **v.to_dict()} for k, v in sorted(totals.items())]
@@ -196,9 +191,7 @@ def _build_session_report(
 ) -> list[dict[str, Any]]:
     totals: dict[str, _Totals] = defaultdict(_Totals)
     cache: dict[str, str | None] = {}
-    for session_id, record in _scan_events(
-        events_root, frozenset({"usage.delta"}), since, until
-    ):
+    for session_id, record in _scan_events(events_root, frozenset({"usage.delta"}), since, until):
         totals[session_id].add(record.get("data", {}))
     return [
         {
@@ -216,17 +209,12 @@ def _build_model_report(
     until: str | None,
 ) -> list[dict[str, Any]]:
     totals: dict[tuple[str, str], _Totals] = defaultdict(_Totals)
-    for _sid, record in _scan_events(
-        events_root, frozenset({"usage.delta"}), since, until
-    ):
+    for _sid, record in _scan_events(events_root, frozenset({"usage.delta"}), since, until):
         data = record.get("data", {})
         provider = str(data.get("provider") or "")
         model = str(data.get("model") or "")
         totals[(provider, model)].add(data)
-    return [
-        {"provider": p, "model": m, **t.to_dict()}
-        for (p, m), t in sorted(totals.items())
-    ]
+    return [{"provider": p, "model": m, **t.to_dict()} for (p, m), t in sorted(totals.items())]
 
 
 def _build_tool_report(
@@ -235,9 +223,7 @@ def _build_tool_report(
     until: str | None,
 ) -> list[dict[str, Any]]:
     counts: dict[str, int] = defaultdict(int)
-    for _sid, record in _scan_events(
-        events_root, frozenset({"tool_call.requested"}), since, until
-    ):
+    for _sid, record in _scan_events(events_root, frozenset({"tool_call.requested"}), since, until):
         tool_name = str(record.get("data", {}).get("tool_name") or "")
         if tool_name:
             counts[tool_name] += 1
@@ -315,7 +301,7 @@ def make_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(
             content={

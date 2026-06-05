@@ -39,13 +39,13 @@ from ._types import (
     ReclaimRequest,
 )
 
+_asyncssh: Any
 try:
-    import asyncssh as _asyncssh
-
-    _ASYNCSSH_AVAILABLE = True
+    import asyncssh as _asyncssh  # pyright: ignore[reportMissingImports]
 except ImportError:
-    _asyncssh = None  # type: ignore[assignment]
-    _ASYNCSSH_AVAILABLE = False
+    _asyncssh = None
+
+_ASYNCSSH_AVAILABLE = _asyncssh is not None
 
 
 def _ms_since(start: float) -> float:
@@ -186,14 +186,15 @@ class SshBackendDriver(EnvironmentDriver):
     async def _rsync_to_remote(self, environment_id: str, timeout_s: float) -> None:
         """Sync the local scratch directory to the remote host via rsync over SSH."""
         local_src = self._local_dir(environment_id) + "/"
-        remote_dst = (
-            f"{self._username}@{self._host}:{self._remote_dir(environment_id)}/"
-        )
+        remote_dst = f"{self._username}@{self._host}:{self._remote_dir(environment_id)}/"
         ssh_parts = [
             "ssh",
-            "-p", str(self._port),
-            "-o", f"UserKnownHostsFile={self._known_hosts}",
-            "-o", "StrictHostKeyChecking=yes",
+            "-p",
+            str(self._port),
+            "-o",
+            f"UserKnownHostsFile={self._known_hosts}",
+            "-o",
+            "StrictHostKeyChecking=yes",
         ]
         if self._private_key_path:
             ssh_parts += ["-i", os.path.expanduser(self._private_key_path)]
@@ -201,7 +202,8 @@ class SshBackendDriver(EnvironmentDriver):
             self._rsync_binary,
             "-az",
             "--delete",
-            "-e", shlex.join(ssh_parts),
+            "-e",
+            shlex.join(ssh_parts),
             local_src,
             remote_dst,
         ]
@@ -211,10 +213,8 @@ class SshBackendDriver(EnvironmentDriver):
             stderr=asyncio.subprocess.PIPE,
         )
         try:
-            _, stderr_b = await asyncio.wait_for(
-                proc.communicate(), timeout=timeout_s
-            )
-        except asyncio.TimeoutError:
+            _, stderr_b = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
+        except TimeoutError:
             proc.kill()
             raise
         if proc.returncode != 0:
@@ -233,8 +233,7 @@ class SshBackendDriver(EnvironmentDriver):
         result = await conn.run(f"mkdir -p {shlex.quote(remote_dir)}")
         if result.exit_status != 0:
             raise RuntimeError(
-                f"Failed to create remote scratch directory {remote_dir!r}: "
-                f"{result.stderr}"
+                f"Failed to create remote scratch directory {remote_dir!r}: {result.stderr}"
             )
 
     async def execute(self, request: ExecuteRequest) -> ExecuteResult:
@@ -253,9 +252,7 @@ class SshBackendDriver(EnvironmentDriver):
         await self._rsync_to_remote(request.environment_id, timeout_s)
 
         remote_dir = self._remote_dir(request.environment_id)
-        env_exports = " && ".join(
-            f"export {k}={shlex.quote(v)}" for k, v in request.env.items()
-        )
+        env_exports = " && ".join(f"export {k}={shlex.quote(v)}" for k, v in request.env.items())
         command_str = shlex.join(request.command)
         full_command = (
             f"cd {shlex.quote(remote_dir)}"
@@ -269,7 +266,7 @@ class SshBackendDriver(EnvironmentDriver):
                 conn.run(full_command, input=request.stdin or ""),
                 timeout=timeout_s,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise
         duration_ms = _ms_since(start)
 

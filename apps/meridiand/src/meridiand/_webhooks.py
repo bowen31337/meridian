@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import json
-import uuid
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
+import json
 from pathlib import Path
 from typing import Any
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -30,7 +30,7 @@ def _now() -> str:
 # ---------------------------------------------------------------------------
 
 
-class BackoffType(str, Enum):
+class BackoffType(StrEnum):
     exponential = "exponential"
     linear = "linear"
 
@@ -58,9 +58,7 @@ class WebhookCreateError(MeridianError):
 
 class WebhookInvalidRequestError(MeridianError):
     def __init__(self, *, message: str, timestamp: str) -> None:
-        super().__init__(
-            code="webhook_invalid_request", message=message, timestamp=timestamp
-        )
+        super().__init__(code="webhook_invalid_request", message=message, timestamp=timestamp)
 
     def http_status(self) -> int:
         return 422
@@ -227,7 +225,7 @@ def make_webhooks_router(*, audit_log: AuditLog, storage_root: Path) -> APIRoute
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=resource, status_code=201)
 
@@ -284,7 +282,7 @@ def make_webhooks_router(*, audit_log: AuditLog, storage_root: Path) -> APIRoute
                         detail={"webhook_id": webhook_id, "message": err2.message},
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return Response(status_code=204)
 

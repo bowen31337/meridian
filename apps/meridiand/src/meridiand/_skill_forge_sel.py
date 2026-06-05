@@ -12,12 +12,12 @@ before re-raising.
 
 from __future__ import annotations
 
-import json
-import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -186,9 +186,7 @@ def cluster_trajectories(summaries: list[SessionSummary]) -> list[Cluster]:
         )
 
     clusters: list[Cluster] = []
-    for key, members in sorted(
-        buckets.items(), key=lambda item: (-len(item[1]), item[0])
-    ):
+    for key, members in sorted(buckets.items(), key=lambda item: (-len(item[1]), item[0])):
         cluster_id = f"cluster_{uuid.uuid5(uuid.NAMESPACE_DNS, str(key)).hex}"
         clusters.append(Cluster(id=cluster_id, members=members))
     return clusters
@@ -270,6 +268,6 @@ async def run_forge_session_selector(
                     detail={"message": err.message},
                 )
             )
-            raise err
+            raise err from exc
 
     return result

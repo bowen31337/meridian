@@ -26,8 +26,6 @@ Covers:
 
 from __future__ import annotations
 
-import importlib
-import sys
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -95,7 +93,14 @@ def _execute_ok_response(
     duration_ms: float = 5.0,
 ) -> MagicMock:
     return _ok_response(
-        {"result": {"stdout": stdout, "stderr": stderr, "exit_code": exit_code, "duration_ms": duration_ms}}
+        {
+            "result": {
+                "stdout": stdout,
+                "stderr": stderr,
+                "exit_code": exit_code,
+                "duration_ms": duration_ms,
+            }
+        }
     )
 
 
@@ -275,9 +280,11 @@ class TestProvisionErrors:
     async def test_server_error_raises_runtime_error(self) -> None:
         driver = _driver()
         client_ctx = _make_client_mock(_error_response(message="disk full"))
-        with patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx):
-            with pytest.raises(RuntimeError, match="disk full"):
-                await driver.provision(_provision_req())
+        with (
+            patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx),
+            pytest.raises(RuntimeError, match="disk full"),
+        ):
+            await driver.provision(_provision_req())
 
     async def test_http_transport_error_propagates(self) -> None:
         import httpx
@@ -288,9 +295,11 @@ class TestProvisionErrors:
         client_ctx = MagicMock()
         client_ctx.__aenter__ = AsyncMock(return_value=client_mock)
         client_ctx.__aexit__ = AsyncMock(return_value=False)
-        with patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx):
-            with pytest.raises(httpx.ConnectError):
-                await driver.provision(_provision_req())
+        with (
+            patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx),
+            pytest.raises(httpx.ConnectError),
+        ):
+            await driver.provision(_provision_req())
 
     async def test_runtime_wraps_as_env_provision_failed(
         self, mock_span: MockSpan, audit_log: CapturingAuditLog
@@ -299,9 +308,11 @@ class TestProvisionErrors:
         rt = EnvironmentRuntime()
         rt.register(driver)
         client_ctx = _make_client_mock(_error_response(message="out of capacity"))
-        with patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx):
-            with pytest.raises(EnvironmentFailure) as exc_info:
-                await rt.provision(_provision_req(), _make_options(audit_log))
+        with (
+            patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx),
+            pytest.raises(EnvironmentFailure) as exc_info,
+        ):
+            await rt.provision(_provision_req(), _make_options(audit_log))
         assert exc_info.value.code == "ENV_PROVISION_FAILED"
         assert "out of capacity" in exc_info.value.message
 
@@ -312,9 +323,11 @@ class TestProvisionErrors:
         rt = EnvironmentRuntime()
         rt.register(driver)
         client_ctx = _make_client_mock(_error_response())
-        with patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx):
-            with pytest.raises(EnvironmentFailure):
-                await rt.provision(_provision_req(), _make_options(audit_log))
+        with (
+            patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx),
+            pytest.raises(EnvironmentFailure),
+        ):
+            await rt.provision(_provision_req(), _make_options(audit_log))
         assert len(audit_log.entries) == 1
         entry: AuditLogEntry = audit_log.entries[0]
         assert entry.level == "error"
@@ -442,9 +455,11 @@ class TestExecuteErrors:
     async def test_server_error_raises_runtime_error(self) -> None:
         driver = _driver()
         client_ctx = _make_client_mock(_error_response(message="command not found"))
-        with patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx):
-            with pytest.raises(RuntimeError, match="command not found"):
-                await driver.execute(_execute_req())
+        with (
+            patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx),
+            pytest.raises(RuntimeError, match="command not found"),
+        ):
+            await driver.execute(_execute_req())
 
     async def test_http_transport_error_propagates(self) -> None:
         import httpx
@@ -455,9 +470,11 @@ class TestExecuteErrors:
         client_ctx = MagicMock()
         client_ctx.__aenter__ = AsyncMock(return_value=client_mock)
         client_ctx.__aexit__ = AsyncMock(return_value=False)
-        with patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx):
-            with pytest.raises(httpx.TimeoutException):
-                await driver.execute(_execute_req())
+        with (
+            patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx),
+            pytest.raises(httpx.TimeoutException),
+        ):
+            await driver.execute(_execute_req())
 
     async def test_runtime_wraps_as_env_execute_failed(
         self, mock_span: MockSpan, audit_log: CapturingAuditLog
@@ -466,9 +483,11 @@ class TestExecuteErrors:
         rt = EnvironmentRuntime()
         rt.register(driver)
         client_ctx = _make_client_mock(_error_response(message="oom"))
-        with patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx):
-            with pytest.raises(EnvironmentFailure) as exc_info:
-                await rt.execute(_execute_req(), _make_options(audit_log))
+        with (
+            patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx),
+            pytest.raises(EnvironmentFailure) as exc_info,
+        ):
+            await rt.execute(_execute_req(), _make_options(audit_log))
         assert exc_info.value.code == "ENV_EXECUTE_FAILED"
         assert "oom" in exc_info.value.message
 
@@ -479,9 +498,11 @@ class TestExecuteErrors:
         rt = EnvironmentRuntime()
         rt.register(driver)
         client_ctx = _make_client_mock(_error_response())
-        with patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx):
-            with pytest.raises(EnvironmentFailure):
-                await rt.execute(_execute_req(), _make_options(audit_log))
+        with (
+            patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx),
+            pytest.raises(EnvironmentFailure),
+        ):
+            await rt.execute(_execute_req(), _make_options(audit_log))
         assert len(audit_log.entries) == 1
         assert audit_log.entries[0].event == "environment.execute.failed"
 
@@ -498,9 +519,11 @@ class TestExecuteErrors:
         client_ctx = MagicMock()
         client_ctx.__aenter__ = AsyncMock(return_value=client_mock)
         client_ctx.__aexit__ = AsyncMock(return_value=False)
-        with patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx):
-            with pytest.raises(EnvironmentFailure):
-                await rt.execute(_execute_req(), _make_options(audit_log))
+        with (
+            patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx),
+            pytest.raises(EnvironmentFailure),
+        ):
+            await rt.execute(_execute_req(), _make_options(audit_log))
         assert len(audit_log.entries) == 1
 
 
@@ -546,9 +569,11 @@ class TestReclaimErrors:
     async def test_server_error_raises_runtime_error(self) -> None:
         driver = _driver()
         client_ctx = _make_client_mock(_error_response(message="still running"))
-        with patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx):
-            with pytest.raises(RuntimeError, match="still running"):
-                await driver.reclaim(_reclaim_req())
+        with (
+            patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx),
+            pytest.raises(RuntimeError, match="still running"),
+        ):
+            await driver.reclaim(_reclaim_req())
 
     async def test_runtime_wraps_as_env_reclaim_failed(
         self, mock_span: MockSpan, audit_log: CapturingAuditLog
@@ -557,9 +582,11 @@ class TestReclaimErrors:
         rt = EnvironmentRuntime()
         rt.register(driver)
         client_ctx = _make_client_mock(_error_response(message="container locked"))
-        with patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx):
-            with pytest.raises(EnvironmentFailure) as exc_info:
-                await rt.reclaim(_reclaim_req(), _make_options(audit_log))
+        with (
+            patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx),
+            pytest.raises(EnvironmentFailure) as exc_info,
+        ):
+            await rt.reclaim(_reclaim_req(), _make_options(audit_log))
         assert exc_info.value.code == "ENV_RECLAIM_FAILED"
 
     async def test_runtime_writes_audit_on_reclaim_failure(
@@ -569,9 +596,11 @@ class TestReclaimErrors:
         rt = EnvironmentRuntime()
         rt.register(driver)
         client_ctx = _make_client_mock(_error_response())
-        with patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx):
-            with pytest.raises(EnvironmentFailure):
-                await rt.reclaim(_reclaim_req(), _make_options(audit_log))
+        with (
+            patch("sdk_environment._http_driver._httpx.AsyncClient", return_value=client_ctx),
+            pytest.raises(EnvironmentFailure),
+        ):
+            await rt.reclaim(_reclaim_req(), _make_options(audit_log))
         assert len(audit_log.entries) == 1
         assert audit_log.entries[0].event == "environment.reclaim.failed"
 
@@ -583,19 +612,25 @@ class TestReclaimErrors:
 
 class TestHttpxUnavailable:
     async def test_provision_raises_when_httpx_missing(self) -> None:
-        with patch("sdk_environment._http_driver._HTTPX_AVAILABLE", False):
-            with pytest.raises(RuntimeError, match="httpx"):
-                await _driver().provision(_provision_req())
+        with (
+            patch("sdk_environment._http_driver._HTTPX_AVAILABLE", False),
+            pytest.raises(RuntimeError, match="httpx"),
+        ):
+            await _driver().provision(_provision_req())
 
     async def test_execute_raises_when_httpx_missing(self) -> None:
-        with patch("sdk_environment._http_driver._HTTPX_AVAILABLE", False):
-            with pytest.raises(RuntimeError, match="httpx"):
-                await _driver().execute(_execute_req())
+        with (
+            patch("sdk_environment._http_driver._HTTPX_AVAILABLE", False),
+            pytest.raises(RuntimeError, match="httpx"),
+        ):
+            await _driver().execute(_execute_req())
 
     async def test_reclaim_raises_when_httpx_missing(self) -> None:
-        with patch("sdk_environment._http_driver._HTTPX_AVAILABLE", False):
-            with pytest.raises(RuntimeError, match="httpx"):
-                await _driver().reclaim(_reclaim_req())
+        with (
+            patch("sdk_environment._http_driver._HTTPX_AVAILABLE", False),
+            pytest.raises(RuntimeError, match="httpx"),
+        ):
+            await _driver().reclaim(_reclaim_req())
 
 
 # ---------------------------------------------------------------------------

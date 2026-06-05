@@ -83,8 +83,10 @@ Tests cover:
   - POST /v1/skills/install source_type is "registry" for agentskills.io URL.
   - POST /v1/skills/install source_url matches the original source string.
   - POST /v1/skills/install persists version with provenance to disk.
-  - POST /v1/skills/install with invalid source returns 422 with code "skill_install_invalid_source".
-  - POST /v1/skills/install with missing skill.json returns 422 with code "skill_install_source_load_failed".
+  - POST /v1/skills/install with invalid source returns 422 with code
+    "skill_install_invalid_source".
+  - POST /v1/skills/install with missing skill.json returns 422 with code
+    "skill_install_source_load_failed".
   - POST /v1/skills/install with invalid JSON in skill.json returns 422.
   - POST /v1/skills/install loader failure returns 422 with code "skill_install_source_load_failed".
   - POST /v1/skills/install invalid source audit log event is "skill.install.failed".
@@ -99,12 +101,11 @@ Tests cover:
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 from typing import Any
 
-import pytest
+from core_errors import HandlerOptions, install_error_handler
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
@@ -114,10 +115,8 @@ from meridiand._skills import (
     _content_version_id,
     make_skills_router,
 )
-from core_errors import HandlerOptions, install_error_handler
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -267,9 +266,7 @@ class TestSkillCreateResponse:
 
     def test_version_has_instructions(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.post(
-            "/v1/skills", json=_body(instructions="Do the thing carefully")
-        ).json()
+        body = client.post("/v1/skills", json=_body(instructions="Do the thing carefully")).json()
         assert body["version"]["instructions"] == "Do the thing carefully"
 
     def test_version_has_tools(self, storage_root: Path) -> None:
@@ -400,9 +397,7 @@ class TestSkillPersistence:
 
     def test_persisted_version_instructions(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.post(
-            "/v1/skills", json=_body(instructions="Persisted instructions")
-        ).json()
+        body = client.post("/v1/skills", json=_body(instructions="Persisted instructions")).json()
         version = _version_resource(storage_root, body["version"]["id"])
         assert version["instructions"] == "Persisted instructions"
 
@@ -1229,7 +1224,15 @@ class TestSkillInstallFileSuccess:
     def test_response_has_name(self, storage_root: Path) -> None:
         client = _make_install_client(storage_root)
         source_dir = storage_root / "source"
-        _write_skill_json(source_dir, {"name": "file-skill", "description": "d", "instructions": "i", "tools": [{"name": "bash"}]})
+        _write_skill_json(
+            source_dir,
+            {
+                "name": "file-skill",
+                "description": "d",
+                "instructions": "i",
+                "tools": [{"name": "bash"}],
+            },
+        )
         body = client.post("/v1/skills/install", json={"source": f"file://{source_dir}"}).json()
         assert body["name"] == "file-skill"
 
@@ -1586,7 +1589,7 @@ class TestSkillVersionContentAddressed:
         body = client.post("/v1/skills", json=_body()).json()
         ver_id = body["version"]["id"]
         assert ver_id.startswith("skillver_")
-        hex_part = ver_id[len("skillver_"):]
+        hex_part = ver_id[len("skillver_") :]
         assert len(hex_part) == 64
         assert all(c in "0123456789abcdef" for c in hex_part)
 

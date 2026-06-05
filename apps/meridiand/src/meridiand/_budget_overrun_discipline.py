@@ -14,9 +14,8 @@ error-level audit entry and surfaces the error to the caller.
 
 from __future__ import annotations
 
-import json
-from collections import defaultdict
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any
 
@@ -213,9 +212,7 @@ def _build_hard_transition_stats(
 # ---------------------------------------------------------------------------
 
 
-def make_budget_overrun_discipline_router(
-    *, audit_log: AuditLog, storage_root: Path
-) -> APIRouter:
+def make_budget_overrun_discipline_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
     router = APIRouter()
     events_root = storage_root / "events"
 
@@ -247,9 +244,7 @@ def make_budget_overrun_discipline_router(
                 discipline = BudgetOverrunDiscipline(
                     BudgetOverrunDisciplineOptions(audit_log=audit_log)
                 )
-                soft_overrun = _build_soft_overrun_stats(
-                    events_root, since, until, discipline
-                )
+                soft_overrun = _build_soft_overrun_stats(events_root, since, until, discipline)
                 hard_transitions = _build_hard_transition_stats(
                     events_root, since, until, discipline
                 )
@@ -277,7 +272,7 @@ def make_budget_overrun_discipline_router(
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(
             content={

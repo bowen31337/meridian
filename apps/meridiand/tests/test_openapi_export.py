@@ -28,17 +28,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-import yaml
+from core_errors import HandlerOptions, NoopAuditLog, install_error_handler
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from meridiand._openapi_export import make_openapi_export_router
-from core_errors import HandlerOptions, NoopAuditLog, install_error_handler
+import yaml
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -276,9 +274,7 @@ class TestOpenApiExportAppWiring:
         routes = [r.path for r in app.routes if hasattr(r, "path")]
         assert "/v1/openapi" in routes
 
-    def test_create_app_wires_openapi_route_with_storage_root(
-        self, storage_root: Path
-    ) -> None:
+    def test_create_app_wires_openapi_route_with_storage_root(self, storage_root: Path) -> None:
         app = create_app(NoopAuditLog(), storage_root=storage_root)
         routes = [r.path for r in app.routes if hasattr(r, "path")]
         assert "/v1/openapi" in routes

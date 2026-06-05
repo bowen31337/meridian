@@ -2,9 +2,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MeridianApiProvider } from "../api/context.js";
 import { NoopAuditLog } from "../workspace/audit.js";
 import type { AuditLogEntry } from "../workspace/types.js";
-import { MeridianApiProvider } from "../api/context.js";
 import { ChatComposer } from "./ChatComposer.js";
 
 // ---------------------------------------------------------------------------
@@ -94,7 +94,13 @@ const SESSION = {
 };
 
 const AGENT = { id: "a1", name: "Test Agent", kind: "system", created_at: "2026-01-01T00:00:00Z" };
-const CHANNEL = { id: "ch1", kind: "slack", name: "Slack", status: "active", created_at: "2026-01-01T00:00:00Z" };
+const CHANNEL = {
+  id: "ch1",
+  kind: "slack",
+  name: "Slack",
+  status: "active",
+  created_at: "2026-01-01T00:00:00Z",
+};
 
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn());
@@ -247,7 +253,7 @@ describe("ChatComposer submit (existing session)", () => {
       const calls = vi.mocked(fetch).mock.calls;
       const messageCall = calls.find((c) => (c[0] as string).includes("/messages"));
       expect(messageCall).toBeTruthy();
-      const body = JSON.parse((messageCall![1] as RequestInit).body as string) as unknown;
+      const body = JSON.parse((messageCall?.[1] as RequestInit).body as string) as unknown;
       expect(body).toEqual(expect.objectContaining({ channel_id: "ch1" }));
     });
   });

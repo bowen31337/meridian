@@ -25,8 +25,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-import pytest
 from opentelemetry.trace import StatusCode
+import pytest
 from sdk_environment import (
     AgentNetworkPolicy,
     AuditLogEntry,

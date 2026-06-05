@@ -98,8 +98,7 @@ def migrate(conn: sqlite3.Connection, *, applied_at: str) -> int:
     """
     conn.execute(_TRACKING_DDL)
     applied: set[int] = {
-        row[0]
-        for row in conn.execute("SELECT version FROM _schema_migrations").fetchall()
+        row[0] for row in conn.execute("SELECT version FROM _schema_migrations").fetchall()
     }
     count = 0
     for version, name, sql in _MIGRATIONS:

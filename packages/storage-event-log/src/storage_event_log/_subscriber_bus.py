@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 
 from ._types import SessionEvent
 
@@ -37,10 +38,8 @@ class SubscriberBus:
         """Remove queue from the registry.  Safe to call even after the queue was dropped."""
         bucket = self._subs.get(session_id)
         if bucket is not None:
-            try:
+            with contextlib.suppress(ValueError):
                 bucket.remove(queue)
-            except ValueError:
-                pass
             if not bucket:
                 del self._subs[session_id]
 
@@ -56,10 +55,8 @@ class SubscriberBus:
         """Evict queue from registry and enqueue the lagged sentinel (None)."""
         bucket = self._subs.get(session_id)
         if bucket is not None:
-            try:
+            with contextlib.suppress(ValueError):
                 bucket.remove(queue)
-            except ValueError:
-                pass
             if not bucket:
                 del self._subs[session_id]
         # Drain to make room — safe because asyncio is single-threaded and there

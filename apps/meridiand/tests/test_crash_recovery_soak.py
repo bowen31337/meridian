@@ -47,8 +47,6 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
@@ -60,9 +58,9 @@ from meridiand._crash_recovery_soak import (
     _seed_synthetic_session,
     make_crash_recovery_soak_router,
 )
+import pytest
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -188,6 +186,7 @@ class TestAttemptRecovery:
 
     def test_returns_false_for_idle_phase(self, storage_root: Path) -> None:
         import asyncio
+
         from storage_event_log import LocalEventLogWriter
 
         session_id = "rec-idle-1"
@@ -206,6 +205,7 @@ class TestAttemptRecovery:
 
     def test_returns_false_for_terminated_phase(self, storage_root: Path) -> None:
         import asyncio
+
         from storage_event_log import LocalEventLogWriter
 
         session_id = "rec-term-1"
@@ -224,6 +224,7 @@ class TestAttemptRecovery:
 
     def test_returns_false_for_paused_phase(self, storage_root: Path) -> None:
         import asyncio
+
         from storage_event_log import LocalEventLogWriter
 
         session_id = "rec-paused-1"
@@ -248,9 +249,7 @@ class TestAttemptRecovery:
         def _bad_reader(*a: Any, **kw: Any) -> None:
             raise RuntimeError("simulated read error")
 
-        monkeypatch.setattr(
-            "meridiand._crash_recovery_soak.LocalEventLogReader", _bad_reader
-        )
+        monkeypatch.setattr("meridiand._crash_recovery_soak.LocalEventLogReader", _bad_reader)
         assert _attempt_recovery(storage_root, "rec-exc-1") is False
 
 
@@ -428,57 +427,43 @@ class TestCrashRecoverySoakAuditFailure:
     def test_failure_audit_level_is_error(self, storage_root: Path) -> None:
         _post_failing_soak(storage_root)
         records = _read_audit(storage_root)
-        record = next(
-            r for r in records if r.get("event") == "crash.recovery.soak.run.failed"
-        )
+        record = next(r for r in records if r.get("event") == "crash.recovery.soak.run.failed")
         assert record["level"] == "error"
 
     def test_failure_audit_detail_has_run_id(self, storage_root: Path) -> None:
         _post_failing_soak(storage_root)
         records = _read_audit(storage_root)
-        record = next(
-            r for r in records if r.get("event") == "crash.recovery.soak.run.failed"
-        )
+        record = next(r for r in records if r.get("event") == "crash.recovery.soak.run.failed")
         assert "run_id" in record["detail"]
 
     def test_failure_audit_detail_has_crash_count(self, storage_root: Path) -> None:
         _post_failing_soak(storage_root, crash_count=10)
         records = _read_audit(storage_root)
-        record = next(
-            r for r in records if r.get("event") == "crash.recovery.soak.run.failed"
-        )
+        record = next(r for r in records if r.get("event") == "crash.recovery.soak.run.failed")
         assert record["detail"]["crash_count"] == 10
 
     def test_failure_audit_detail_has_resume_count(self, storage_root: Path) -> None:
         _post_failing_soak(storage_root)
         records = _read_audit(storage_root)
-        record = next(
-            r for r in records if r.get("event") == "crash.recovery.soak.run.failed"
-        )
+        record = next(r for r in records if r.get("event") == "crash.recovery.soak.run.failed")
         assert "resume_count" in record["detail"]
 
     def test_failure_audit_detail_has_failure_count(self, storage_root: Path) -> None:
         _post_failing_soak(storage_root)
         records = _read_audit(storage_root)
-        record = next(
-            r for r in records if r.get("event") == "crash.recovery.soak.run.failed"
-        )
+        record = next(r for r in records if r.get("event") == "crash.recovery.soak.run.failed")
         assert "failure_count" in record["detail"]
 
     def test_failure_audit_detail_has_resume_rate(self, storage_root: Path) -> None:
         _post_failing_soak(storage_root)
         records = _read_audit(storage_root)
-        record = next(
-            r for r in records if r.get("event") == "crash.recovery.soak.run.failed"
-        )
+        record = next(r for r in records if r.get("event") == "crash.recovery.soak.run.failed")
         assert "resume_rate" in record["detail"]
 
     def test_failure_audit_detail_has_message(self, storage_root: Path) -> None:
         _post_failing_soak(storage_root)
         records = _read_audit(storage_root)
-        record = next(
-            r for r in records if r.get("event") == "crash.recovery.soak.run.failed"
-        )
+        record = next(r for r in records if r.get("event") == "crash.recovery.soak.run.failed")
         assert "message" in record["detail"]
         assert len(record["detail"]["message"]) > 0
 

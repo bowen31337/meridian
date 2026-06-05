@@ -78,9 +78,7 @@ def _convert_message(msg: Any) -> dict[str, Any]:
         if btype == "text":
             text_parts.append(block.text)
         elif btype == "tool_use":
-            tool_calls.append(
-                {"function": {"name": block.name, "arguments": block.input}}
-            )
+            tool_calls.append({"function": {"name": block.name, "arguments": block.input}})
         elif btype == "tool_result":
             raw = block.content
             tool_result = raw if isinstance(raw, str) else " ".join(str(c) for c in raw)
@@ -149,9 +147,7 @@ class OllamaProvider:
         self._base_url = base_url.rstrip("/")
         self._audit_log: AuditLog = audit_log if audit_log is not None else NoopAuditLog()
         self._timeout = timeout
-        self._http = _http or httpx.AsyncClient(
-            base_url=self._base_url, timeout=self._timeout
-        )
+        self._http = _http or httpx.AsyncClient(base_url=self._base_url, timeout=self._timeout)
 
     async def call(self, opts: ModelCallOpts) -> AsyncIterator[ModelEvent]:
         tracer = get_tracer()
@@ -277,7 +273,8 @@ class OllamaProvider:
             if not response.is_success:
                 _LOG.warning(
                     "OllamaProvider(%s).list_models failed: HTTP %s",
-                    self.name, response.status_code,
+                    self.name,
+                    response.status_code,
                 )
                 return []
         except Exception as exc:

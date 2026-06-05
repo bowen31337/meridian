@@ -60,8 +60,6 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
@@ -77,9 +75,9 @@ from meridiand._e8_hardening_soak import (
     _seed_tool_worker_kill_session,
     make_e8_hardening_soak_router,
 )
+import pytest
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -164,30 +162,22 @@ class TestSeedHarnessKillSession:
 
     def test_manifest_kill_layer_is_harness(self, storage_root: Path) -> None:
         _seed_harness_kill_session(storage_root, "sess-h-2", "agent_0", "cli", "t")
-        data = json.loads(
-            (storage_root / "sessions" / "sess-h-2" / "manifest.json").read_text()
-        )
+        data = json.loads((storage_root / "sessions" / "sess-h-2" / "manifest.json").read_text())
         assert data["kill_layer"] == "harness"
 
     def test_manifest_has_agent_id(self, storage_root: Path) -> None:
         _seed_harness_kill_session(storage_root, "sess-h-3", "agent_2", "webhook", "t")
-        data = json.loads(
-            (storage_root / "sessions" / "sess-h-3" / "manifest.json").read_text()
-        )
+        data = json.loads((storage_root / "sessions" / "sess-h-3" / "manifest.json").read_text())
         assert data["agent_id"] == "agent_2"
 
     def test_manifest_has_channel_id(self, storage_root: Path) -> None:
         _seed_harness_kill_session(storage_root, "sess-h-4", "agent_0", "telegram", "t")
-        data = json.loads(
-            (storage_root / "sessions" / "sess-h-4" / "manifest.json").read_text()
-        )
+        data = json.loads((storage_root / "sessions" / "sess-h-4" / "manifest.json").read_text())
         assert data["channel_id"] == "telegram"
 
     def test_manifest_status_is_active(self, storage_root: Path) -> None:
         _seed_harness_kill_session(storage_root, "sess-h-5", "agent_0", "cli", "t")
-        data = json.loads(
-            (storage_root / "sessions" / "sess-h-5" / "manifest.json").read_text()
-        )
+        data = json.loads((storage_root / "sessions" / "sess-h-5" / "manifest.json").read_text())
         assert data["status"] == "active"
 
 
@@ -198,35 +188,23 @@ class TestSeedToolWorkerKillSession:
 
     def test_manifest_kill_layer_is_tool_worker(self, storage_root: Path) -> None:
         _seed_tool_worker_kill_session(storage_root, "sess-tw-2", "agent_0", "cli", "t")
-        data = json.loads(
-            (storage_root / "sessions" / "sess-tw-2" / "manifest.json").read_text()
-        )
+        data = json.loads((storage_root / "sessions" / "sess-tw-2" / "manifest.json").read_text())
         assert data["kill_layer"] == "tool_worker"
 
     def test_manifest_has_pending_tool_call_id(self, storage_root: Path) -> None:
         _seed_tool_worker_kill_session(storage_root, "sess-tw-3", "agent_0", "cli", "t")
-        data = json.loads(
-            (storage_root / "sessions" / "sess-tw-3" / "manifest.json").read_text()
-        )
+        data = json.loads((storage_root / "sessions" / "sess-tw-3" / "manifest.json").read_text())
         assert "pending_tool_call_id" in data
         assert data["pending_tool_call_id"] == "tool_sess-tw-3"
 
     def test_manifest_has_agent_id(self, storage_root: Path) -> None:
-        _seed_tool_worker_kill_session(
-            storage_root, "sess-tw-4", "agent_3", "slack", "t"
-        )
-        data = json.loads(
-            (storage_root / "sessions" / "sess-tw-4" / "manifest.json").read_text()
-        )
+        _seed_tool_worker_kill_session(storage_root, "sess-tw-4", "agent_3", "slack", "t")
+        data = json.loads((storage_root / "sessions" / "sess-tw-4" / "manifest.json").read_text())
         assert data["agent_id"] == "agent_3"
 
     def test_manifest_has_channel_id(self, storage_root: Path) -> None:
-        _seed_tool_worker_kill_session(
-            storage_root, "sess-tw-5", "agent_0", "slack", "t"
-        )
-        data = json.loads(
-            (storage_root / "sessions" / "sess-tw-5" / "manifest.json").read_text()
-        )
+        _seed_tool_worker_kill_session(storage_root, "sess-tw-5", "agent_0", "slack", "t")
+        data = json.loads((storage_root / "sessions" / "sess-tw-5" / "manifest.json").read_text())
         assert data["channel_id"] == "slack"
 
 
@@ -237,30 +215,22 @@ class TestSeedDaemonKillSession:
 
     def test_manifest_kill_layer_is_daemon(self, storage_root: Path) -> None:
         _seed_daemon_kill_session(storage_root, "sess-d-2", "agent_0", "cli", "t")
-        data = json.loads(
-            (storage_root / "sessions" / "sess-d-2" / "manifest.json").read_text()
-        )
+        data = json.loads((storage_root / "sessions" / "sess-d-2" / "manifest.json").read_text())
         assert data["kill_layer"] == "daemon"
 
     def test_manifest_has_agent_id(self, storage_root: Path) -> None:
         _seed_daemon_kill_session(storage_root, "sess-d-3", "agent_4", "webhook", "t")
-        data = json.loads(
-            (storage_root / "sessions" / "sess-d-3" / "manifest.json").read_text()
-        )
+        data = json.loads((storage_root / "sessions" / "sess-d-3" / "manifest.json").read_text())
         assert data["agent_id"] == "agent_4"
 
     def test_manifest_has_channel_id(self, storage_root: Path) -> None:
         _seed_daemon_kill_session(storage_root, "sess-d-4", "agent_0", "webhook", "t")
-        data = json.loads(
-            (storage_root / "sessions" / "sess-d-4" / "manifest.json").read_text()
-        )
+        data = json.loads((storage_root / "sessions" / "sess-d-4" / "manifest.json").read_text())
         assert data["channel_id"] == "webhook"
 
     def test_manifest_status_is_active(self, storage_root: Path) -> None:
         _seed_daemon_kill_session(storage_root, "sess-d-5", "agent_0", "cli", "t")
-        data = json.loads(
-            (storage_root / "sessions" / "sess-d-5" / "manifest.json").read_text()
-        )
+        data = json.loads((storage_root / "sessions" / "sess-d-5" / "manifest.json").read_text())
         assert data["status"] == "active"
 
 
@@ -270,21 +240,15 @@ class TestSeedDaemonKillSession:
 
 
 class TestAttemptRecovery:
-    def test_returns_true_for_valid_harness_kill_session(
-        self, storage_root: Path
-    ) -> None:
+    def test_returns_true_for_valid_harness_kill_session(self, storage_root: Path) -> None:
         _seed_harness_kill_session(storage_root, "rec-h-1", "agent_0", "cli", "t")
         assert _attempt_recovery(storage_root, "rec-h-1") is True
 
-    def test_returns_true_for_valid_tool_worker_kill_session(
-        self, storage_root: Path
-    ) -> None:
+    def test_returns_true_for_valid_tool_worker_kill_session(self, storage_root: Path) -> None:
         _seed_tool_worker_kill_session(storage_root, "rec-tw-1", "agent_0", "cli", "t")
         assert _attempt_recovery(storage_root, "rec-tw-1") is True
 
-    def test_returns_true_for_valid_daemon_kill_session(
-        self, storage_root: Path
-    ) -> None:
+    def test_returns_true_for_valid_daemon_kill_session(self, storage_root: Path) -> None:
         _seed_daemon_kill_session(storage_root, "rec-d-1", "agent_0", "cli", "t")
         assert _attempt_recovery(storage_root, "rec-d-1") is True
 
@@ -371,9 +335,7 @@ class TestAttemptRecovery:
         def _bad_reader(*a: Any, **kw: Any) -> None:
             raise RuntimeError("simulated read error")
 
-        monkeypatch.setattr(
-            "meridiand._e8_hardening_soak.LocalEventLogReader", _bad_reader
-        )
+        monkeypatch.setattr("meridiand._e8_hardening_soak.LocalEventLogReader", _bad_reader)
         assert _attempt_recovery(storage_root, "rec-exc-1") is False
 
 
@@ -410,9 +372,7 @@ class TestE8HardeningSoakSuccess:
         body = _post_soak(storage_root, sessions_per_combo=3).json()
         assert body["total_sessions"] == AGENT_COUNT * CHANNEL_COUNT * 3
 
-    def test_resume_count_equals_total_when_all_recover(
-        self, storage_root: Path
-    ) -> None:
+    def test_resume_count_equals_total_when_all_recover(self, storage_root: Path) -> None:
         body = _post_soak(storage_root, sessions_per_combo=3).json()
         assert body["resume_count"] == body["total_sessions"]
 
@@ -424,9 +384,7 @@ class TestE8HardeningSoakSuccess:
         body = _post_soak(storage_root).json()
         assert body["resume_rate"] == pytest.approx(1.0)
 
-    def test_sample_failures_is_empty_when_all_recover(
-        self, storage_root: Path
-    ) -> None:
+    def test_sample_failures_is_empty_when_all_recover(self, storage_root: Path) -> None:
         body = _post_soak(storage_root).json()
         assert body["sample_failures"] == []
 
@@ -438,18 +396,12 @@ class TestE8HardeningSoakSuccess:
         body = _post_soak(storage_root, sessions_per_combo=3).json()
         assert set(body["layer_results"].keys()) == {"harness", "tool_worker", "daemon"}
 
-    def test_layer_results_totals_sum_to_total_sessions(
-        self, storage_root: Path
-    ) -> None:
+    def test_layer_results_totals_sum_to_total_sessions(self, storage_root: Path) -> None:
         body = _post_soak(storage_root, sessions_per_combo=3).json()
-        total_from_layers = sum(
-            v["total"] for v in body["layer_results"].values()
-        )
+        total_from_layers = sum(v["total"] for v in body["layer_results"].values())
         assert total_from_layers == body["total_sessions"]
 
-    def test_layer_results_each_layer_has_nonzero_total(
-        self, storage_root: Path
-    ) -> None:
+    def test_layer_results_each_layer_has_nonzero_total(self, storage_root: Path) -> None:
         # sessions_per_combo=3 ensures one session per layer per (agent, channel) combo
         body = _post_soak(storage_root, sessions_per_combo=3).json()
         for layer in ("harness", "tool_worker", "daemon"):
@@ -491,13 +443,9 @@ class TestE8HardeningSoakSuccess:
 
 
 class TestE8HardeningSoakFailure:
-    def _failing_client(
-        self, storage_root: Path, sessions_per_combo: int = 3
-    ) -> TestClient:
+    def _failing_client(self, storage_root: Path, sessions_per_combo: int = 3) -> TestClient:
         audit = FileAuditLog(storage_root)
-        return _make_soak_client(
-            storage_root, audit, sessions_per_combo=sessions_per_combo
-        )
+        return _make_soak_client(storage_root, audit, sessions_per_combo=sessions_per_combo)
 
     def test_returns_422_when_rate_below_threshold(self, storage_root: Path) -> None:
         client = self._failing_client(storage_root)
@@ -621,9 +569,7 @@ class TestE8HardeningSoakAuditSuccess:
         record = next(r for r in records if r.get("event") == "e8.hardening.soak.ran")
         assert record["detail"]["channel_count"] == CHANNEL_COUNT
 
-    def test_success_audit_detail_has_sessions_per_combo(
-        self, storage_root: Path
-    ) -> None:
+    def test_success_audit_detail_has_sessions_per_combo(self, storage_root: Path) -> None:
         _post_soak(storage_root, sessions_per_combo=3)
         records = _read_audit(storage_root)
         record = next(r for r in records if r.get("event") == "e8.hardening.soak.ran")
@@ -639,72 +585,54 @@ class TestE8HardeningSoakAuditFailure:
     def test_failure_writes_audit_log_entry(self, storage_root: Path) -> None:
         _post_failing_soak(storage_root)
         records = _read_audit(storage_root)
-        assert any(
-            r.get("event") == "e8.hardening.soak.run.failed" for r in records
-        )
+        assert any(r.get("event") == "e8.hardening.soak.run.failed" for r in records)
 
     def test_failure_audit_level_is_error(self, storage_root: Path) -> None:
         _post_failing_soak(storage_root)
         records = _read_audit(storage_root)
-        record = next(
-            r for r in records if r.get("event") == "e8.hardening.soak.run.failed"
-        )
+        record = next(r for r in records if r.get("event") == "e8.hardening.soak.run.failed")
         assert record["level"] == "error"
 
     def test_failure_audit_detail_has_run_id(self, storage_root: Path) -> None:
         _post_failing_soak(storage_root)
         records = _read_audit(storage_root)
-        record = next(
-            r for r in records if r.get("event") == "e8.hardening.soak.run.failed"
-        )
+        record = next(r for r in records if r.get("event") == "e8.hardening.soak.run.failed")
         assert "run_id" in record["detail"]
 
     def test_failure_audit_detail_has_total_sessions(self, storage_root: Path) -> None:
         _post_failing_soak(storage_root)
         records = _read_audit(storage_root)
-        record = next(
-            r for r in records if r.get("event") == "e8.hardening.soak.run.failed"
-        )
+        record = next(r for r in records if r.get("event") == "e8.hardening.soak.run.failed")
         assert "total_sessions" in record["detail"]
 
     def test_failure_audit_detail_has_resume_count(self, storage_root: Path) -> None:
         _post_failing_soak(storage_root)
         records = _read_audit(storage_root)
-        record = next(
-            r for r in records if r.get("event") == "e8.hardening.soak.run.failed"
-        )
+        record = next(r for r in records if r.get("event") == "e8.hardening.soak.run.failed")
         assert "resume_count" in record["detail"]
 
     def test_failure_audit_detail_has_failure_count(self, storage_root: Path) -> None:
         _post_failing_soak(storage_root)
         records = _read_audit(storage_root)
-        record = next(
-            r for r in records if r.get("event") == "e8.hardening.soak.run.failed"
-        )
+        record = next(r for r in records if r.get("event") == "e8.hardening.soak.run.failed")
         assert "failure_count" in record["detail"]
 
     def test_failure_audit_detail_has_resume_rate(self, storage_root: Path) -> None:
         _post_failing_soak(storage_root)
         records = _read_audit(storage_root)
-        record = next(
-            r for r in records if r.get("event") == "e8.hardening.soak.run.failed"
-        )
+        record = next(r for r in records if r.get("event") == "e8.hardening.soak.run.failed")
         assert "resume_rate" in record["detail"]
 
     def test_failure_audit_detail_has_layer_results(self, storage_root: Path) -> None:
         _post_failing_soak(storage_root)
         records = _read_audit(storage_root)
-        record = next(
-            r for r in records if r.get("event") == "e8.hardening.soak.run.failed"
-        )
+        record = next(r for r in records if r.get("event") == "e8.hardening.soak.run.failed")
         assert "layer_results" in record["detail"]
 
     def test_failure_audit_detail_has_message(self, storage_root: Path) -> None:
         _post_failing_soak(storage_root)
         records = _read_audit(storage_root)
-        record = next(
-            r for r in records if r.get("event") == "e8.hardening.soak.run.failed"
-        )
+        record = next(r for r in records if r.get("event") == "e8.hardening.soak.run.failed")
         assert "message" in record["detail"]
         assert len(record["detail"]["message"]) > 0
 
@@ -718,16 +646,12 @@ class TestE8HardeningSoakOtel:
     def setup_method(self) -> None:
         _otel_exporter.clear()
 
-    def test_success_emits_e8_hardening_soak_run_span(
-        self, storage_root: Path
-    ) -> None:
+    def test_success_emits_e8_hardening_soak_run_span(self, storage_root: Path) -> None:
         _post_soak(storage_root)
         span_names = [s.name for s in _otel_exporter.get_finished_spans()]
         assert "e8.hardening.soak.run" in span_names
 
-    def test_failure_emits_e8_hardening_soak_run_span(
-        self, storage_root: Path
-    ) -> None:
+    def test_failure_emits_e8_hardening_soak_run_span(self, storage_root: Path) -> None:
         _post_failing_soak(storage_root)
         span_names = [s.name for s in _otel_exporter.get_finished_spans()]
         assert "e8.hardening.soak.run" in span_names
@@ -836,18 +760,12 @@ class TestLayerDistribution:
         _seed_harness_kill_session(storage_root, "ld-h", "agent_0", "cli", "t")
         _seed_daemon_kill_session(storage_root, "ld-d", "agent_0", "cli", "t")
         for sid in ("ld-h", "ld-d"):
-            data = json.loads(
-                (storage_root / "sessions" / sid / "manifest.json").read_text()
-            )
+            data = json.loads((storage_root / "sessions" / sid / "manifest.json").read_text())
             assert "pending_tool_call_id" not in data
 
-    def test_tool_worker_sessions_have_pending_tool_call(
-        self, storage_root: Path
-    ) -> None:
+    def test_tool_worker_sessions_have_pending_tool_call(self, storage_root: Path) -> None:
         _seed_tool_worker_kill_session(storage_root, "ld-tw", "agent_0", "cli", "t")
-        data = json.loads(
-            (storage_root / "sessions" / "ld-tw" / "manifest.json").read_text()
-        )
+        data = json.loads((storage_root / "sessions" / "ld-tw" / "manifest.json").read_text())
         assert "pending_tool_call_id" in data
 
 
@@ -857,9 +775,7 @@ class TestLayerDistribution:
 
 
 class TestE8HardeningSoakRouterWiring:
-    def test_soak_route_registered_with_storage_root(
-        self, storage_root: Path
-    ) -> None:
+    def test_soak_route_registered_with_storage_root(self, storage_root: Path) -> None:
         audit = FileAuditLog(storage_root)
         app = create_app(audit, storage_root=storage_root)
         routes = [r.path for r in app.routes]  # type: ignore[attr-defined]

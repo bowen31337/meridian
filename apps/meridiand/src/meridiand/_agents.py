@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import hashlib
 import json
-import uuid
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -21,11 +21,10 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 from sdk_capabilities import CapabilityParseError, parse as _parse_capability
 
-from meridiand._config import RoutingConfig
-
+from meridiand._config import RoutingDefaultConfig
 from meridiand._pagination import (
-    CursorDecodeError,
     DEFAULT_PAGE_SIZE,
+    CursorDecodeError,
     apply_cursor_filter,
     decode_cursor,
     make_cursor_page,
@@ -58,21 +57,17 @@ class _AgentBodyValidator(BaseModel):
     @classmethod
     def _check_instructions_length(cls, v: str) -> str:
         if len(v) > _INSTRUCTIONS_MAX_LEN:
-            raise ValueError(
-                f"'instructions' must not exceed {_INSTRUCTIONS_MAX_LEN} characters"
-            )
+            raise ValueError(f"'instructions' must not exceed {_INSTRUCTIONS_MAX_LEN} characters")
         return v
 
     @field_validator("model_routing")
     @classmethod
     def _check_model_routing_rules(cls, v: dict[str, Any]) -> dict[str, Any]:
         try:
-            RoutingConfig.model_validate(v)
+            RoutingDefaultConfig.model_validate(v)
         except ValidationError as exc:
             first = exc.errors()[0]
-            raise ValueError(
-                f"'model_routing' is malformed: {first['msg']}"
-            ) from exc
+            raise ValueError(f"'model_routing' is malformed: {first['msg']}") from exc
         return v
 
     @field_validator("capabilities")
@@ -152,9 +147,7 @@ class AgentGetError(MeridianError):
         timestamp: str,
         cause: BaseException | None = None,
     ) -> None:
-        super().__init__(
-            code="agent_get_failed", message=message, timestamp=timestamp, cause=cause
-        )
+        super().__init__(code="agent_get_failed", message=message, timestamp=timestamp, cause=cause)
 
     def http_status(self) -> int:
         return 500
@@ -513,7 +506,7 @@ def make_agents_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=agent_record, status_code=201)
 
@@ -547,9 +540,15 @@ def make_agents_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                             continue
                         if name is not None and not record.get("name", "").startswith(name):
                             continue
-                        if created_after is not None and record.get("created_at", "") <= created_after:
+                        if (
+                            created_after is not None
+                            and record.get("created_at", "") <= created_after
+                        ):
                             continue
-                        if created_before is not None and record.get("created_at", "") >= created_before:
+                        if (
+                            created_before is not None
+                            and record.get("created_at", "") >= created_before
+                        ):
                             continue
                         all_agents.append(record)
 
@@ -593,7 +592,7 @@ def make_agents_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         detail={"message": err2.message},
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         response_headers: dict[str, str] = {}
         if next_cursor is not None:
@@ -662,7 +661,7 @@ def make_agents_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         detail={"agent_id": agent_id, "message": err2.message},
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=agent_record, status_code=200)
 
@@ -722,14 +721,12 @@ def make_agents_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         detail={"agent_id": agent_id, "message": err2.message},
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return Response(status_code=204)
 
     @router.post("/v1/agents/{agent_id}/versions")
-    async def create_agent_version(
-        agent_id: str, body: AgentVersionCreateRequest
-    ) -> JSONResponse:
+    async def create_agent_version(agent_id: str, body: AgentVersionCreateRequest) -> JSONResponse:
         now = _now()
         tracer = get_tracer()
         version_record: dict[str, Any] = {}
@@ -841,7 +838,7 @@ def make_agents_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         detail={"agent_id": agent_id, "message": err2.message},
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=version_record, status_code=status_code)
 
@@ -915,7 +912,7 @@ def make_agents_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         detail={"agent_id": agent_id, "message": err2.message},
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         response_headers: dict[str, str] = {}
         if next_cursor is not None:
@@ -1000,7 +997,7 @@ def make_agents_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=version_record, status_code=200)
 

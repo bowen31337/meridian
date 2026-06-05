@@ -18,20 +18,13 @@ Instrumentation:
 
 from __future__ import annotations
 
-import hashlib
+from datetime import UTC, datetime, timedelta
 import hmac
 import json
-import time
-import uuid
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
+import time
 from typing import Any
-
-# PRD §6.1: channel inbound → harness wake must be < 1 s p95 end-to-end.
-_INBOUND_LATENCY_TARGET_MS = 1000.0
-
-# Quarantine sessions expire after this many minutes of silence.
-_QUARANTINE_SILENCE_TIMEOUT_MINUTES = 15
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -52,12 +45,17 @@ from sdk_channel import (
     RuntimeOptions,
     SendRequest,
 )
-
 from sdk_sandbox import ExecutionContext
 
 from ._hook_dispatch import dispatch_hooks
 from ._metrics_registry import channel_inbound_total, channel_outbound_total
-from ._webhook_channel_driver import SecretResolver, NoopSecretResolver, _sign_payload
+from ._webhook_channel_driver import NoopSecretResolver, SecretResolver, _sign_payload
+
+# PRD §6.1: channel inbound → harness wake must be < 1 s p95 end-to-end.
+_INBOUND_LATENCY_TARGET_MS = 1000.0
+
+# Quarantine sessions expire after this many minutes of silence.
+_QUARANTINE_SILENCE_TIMEOUT_MINUTES = 15
 
 
 def _now() -> str:
@@ -258,7 +256,7 @@ def _check_hmac_signature(raw_body: bytes, secret: str, signature_header: str | 
     prefix = "sha256="
     if not signature_header.startswith(prefix):
         return False
-    provided = signature_header[len(prefix):]
+    provided = signature_header[len(prefix) :]
     expected = _sign_payload(raw_body, secret)
     return hmac.compare_digest(provided.encode(), expected.encode())
 
@@ -298,7 +296,9 @@ def make_system_channel_router(
     secret_resolver: SecretResolver | None = None,
 ) -> APIRouter:
     router = APIRouter()
-    _resolver: SecretResolver = secret_resolver if secret_resolver is not None else NoopSecretResolver()
+    _resolver: SecretResolver = (
+        secret_resolver if secret_resolver is not None else NoopSecretResolver()
+    )
 
     channels_dir = storage_root / "channels"
     hooks_dir = storage_root / "hooks"
@@ -312,9 +312,7 @@ def make_system_channel_router(
     # -----------------------------------------------------------------------
 
     @router.post("/v1/pairing_tokens/{token}/redeem", status_code=200)
-    async def redeem_pairing_token(
-        token: str, body: RedeemPairingTokenRequest
-    ) -> JSONResponse:
+    async def redeem_pairing_token(token: str, body: RedeemPairingTokenRequest) -> JSONResponse:
         now = _now()
         tracer = get_tracer()
 
@@ -352,9 +350,7 @@ def make_system_channel_router(
                     "token": token,
                     "created_at": now,
                 }
-                (pairing_dir / f"{body.sender_id}.json").write_text(
-                    json.dumps(pairing_record)
-                )
+                (pairing_dir / f"{body.sender_id}.json").write_text(json.dumps(pairing_record))
 
                 token_record["redeemed"] = True
                 token_record["redeemed_at"] = now
@@ -390,7 +386,7 @@ def make_system_channel_router(
                         detail={"token": token, "message": err2.message},
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(
             content={
@@ -447,7 +443,11 @@ def make_system_channel_router(
                         event="channel.pairing.resolve.failed",
                         code=err.code,
                         timestamp=err.timestamp,
-                        detail={"channel_id": channel_id, "remote_id": remote_id, "message": err.message},
+                        detail={
+                            "channel_id": channel_id,
+                            "remote_id": remote_id,
+                            "message": err.message,
+                        },
                     )
                 )
                 raise
@@ -465,10 +465,14 @@ def make_system_channel_router(
                         event="channel.pairing.resolve.failed",
                         code=err2.code,
                         timestamp=err2.timestamp,
-                        detail={"channel_id": channel_id, "remote_id": remote_id, "message": err2.message},
+                        detail={
+                            "channel_id": channel_id,
+                            "remote_id": remote_id,
+                            "message": err2.message,
+                        },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(
             content={
@@ -522,9 +526,7 @@ def make_system_channel_router(
                         raw_body = await request.body()
                         sig_header = request.headers.get("X-Meridian-Signature")
                         if not _check_hmac_signature(raw_body, secret, sig_header):
-                            raise ChannelInboundHmacError(
-                                channel_id=channel_id, timestamp=now
-                            )
+                            raise ChannelInboundHmacError(channel_id=channel_id, timestamp=now)
 
                 await dispatch_hooks(
                     "pre_message",
@@ -588,8 +590,7 @@ def make_system_channel_router(
                         "filesystem": {"read_globs": [f"{sandbox_dir}/**"]},
                     }
                     expires_at = (
-                        datetime.now(UTC)
-                        + timedelta(minutes=_QUARANTINE_SILENCE_TIMEOUT_MINUTES)
+                        datetime.now(UTC) + timedelta(minutes=_QUARANTINE_SILENCE_TIMEOUT_MINUTES)
                     ).isoformat()
 
                     quarantine_id = f"quar_{uuid.uuid4().hex}"
@@ -745,7 +746,7 @@ def make_system_channel_router(
                         detail={"channel_id": channel_id, "message": err2.message},
                     )
                 )
-                raise err2
+                raise err2 from exc
 
             finally:
                 latency_ms = (time.perf_counter() - t0) * 1000
@@ -782,9 +783,7 @@ def make_system_channel_router(
     # -----------------------------------------------------------------------
 
     @router.post("/v1/channels/{channel_id}/outbound", status_code=200)
-    async def channel_outbound(
-        channel_id: str, body: OutboundMessageRequest
-    ) -> JSONResponse:
+    async def channel_outbound(channel_id: str, body: OutboundMessageRequest) -> JSONResponse:
         now = _now()
         tracer = get_tracer()
 
@@ -899,7 +898,7 @@ def make_system_channel_router(
                         detail={"channel_id": channel_id, "message": err3.message},
                     )
                 )
-                raise err3
+                raise err3 from exc
 
         return JSONResponse(
             content={
@@ -915,9 +914,7 @@ def make_system_channel_router(
     # -----------------------------------------------------------------------
 
     @router.post("/v1/sessions/{session_id}/outbound", status_code=200)
-    async def session_outbound(
-        session_id: str, body: SessionOutboundRequest
-    ) -> JSONResponse:
+    async def session_outbound(session_id: str, body: SessionOutboundRequest) -> JSONResponse:
         now = _now()
         tracer = get_tracer()
 
@@ -1067,7 +1064,7 @@ def make_system_channel_router(
                         detail={"session_id": session_id, "message": err2.message},
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(
             content={

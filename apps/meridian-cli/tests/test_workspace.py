@@ -5,9 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from meridian_cli.workspace import UvWorkspaceInitializer, WorkspaceError
+import pytest
 
 # ---------------------------------------------------------------------------
 # OTel mock — controllable span; no SDK bootstrap needed.
@@ -68,7 +67,11 @@ def test_init_emits_invocation_event(tmp_path: Path) -> None:
 
     _mock_span.add_event.assert_any_call(
         "meridian.cli.invocation",
-        {"event.name": "workspace.invocation", "workspace.operation": "init", "workspace.root": str(root)},
+        {
+            "event.name": "workspace.invocation",
+            "workspace.operation": "init",
+            "workspace.root": str(root),
+        },
     )
 
 
@@ -83,9 +86,13 @@ def test_init_emits_completed_event(tmp_path: Path) -> None:
 
 def test_init_writes_audit_log(tmp_path: Path) -> None:
     root = make_workspace_root(tmp_path, _ALL_MEMBERS)
-    with patch("meridian_cli.workspace.subprocess.run") as mock_run, patch(
-        "meridian_cli.workspace.AUDIT_DIR", tmp_path / ".meridian"
-    ), patch("meridian_cli.workspace.AUDIT_LOG", tmp_path / ".meridian" / "workspace-audit.ndjson"):
+    with (
+        patch("meridian_cli.workspace.subprocess.run") as mock_run,
+        patch("meridian_cli.workspace.AUDIT_DIR", tmp_path / ".meridian"),
+        patch(
+            "meridian_cli.workspace.AUDIT_LOG", tmp_path / ".meridian" / "workspace-audit.ndjson"
+        ),
+    ):
         mock_run.return_value = MagicMock(returncode=0, stderr="")
         UvWorkspaceInitializer(repo_root=root).init()
 

@@ -41,8 +41,8 @@ Covers:
 
 from __future__ import annotations
 
-import pytest
 from opentelemetry.trace import StatusCode
+import pytest
 from sdk_capabilities import (
     Capability,
     CapabilityDenied,

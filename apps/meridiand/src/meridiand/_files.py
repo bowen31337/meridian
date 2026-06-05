@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import base64
-import json
-import uuid
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -95,9 +95,7 @@ def make_files_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
         with tracer.start_as_current_span("files.upload") as span:
             record_invocation_event(
                 span,
-                StructuredEvent(
-                    name="files.upload.invocation", code="files_upload", timestamp=now
-                ),
+                StructuredEvent(name="files.upload.invocation", code="files_upload", timestamp=now),
             )
 
             try:
@@ -131,9 +129,7 @@ def make_files_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                             message=f"'content' is not valid base64: {exc}",
                             timestamp=_now(),
                         ) from exc
-                    content_type_value = str(
-                        body.get("content_type") or "application/octet-stream"
-                    )
+                    content_type_value = str(body.get("content_type") or "application/octet-stream")
 
                 else:
                     raise FilesInvalidRequestError(
@@ -185,7 +181,7 @@ def make_files_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         detail={"message": err2.message},
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=meta, status_code=201)
 
@@ -226,7 +222,7 @@ def make_files_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                             detail={"file_id": file_id},
                         )
                     )
-                    raise err
+                    raise err from exc
                 err2 = FilesUploadError(
                     message=f"Metadata read failed: {exc}",
                     timestamp=_now(),
@@ -242,7 +238,7 @@ def make_files_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         detail={"file_id": file_id, "message": err2.message},
                     )
                 )
-                raise err2
+                raise err2 from exc
             except Exception as exc:
                 err3 = FilesUploadError(
                     message=f"Metadata read failed: {exc}",
@@ -259,7 +255,7 @@ def make_files_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         detail={"file_id": file_id, "message": err3.message},
                     )
                 )
-                raise err3
+                raise err3 from exc
 
         return JSONResponse(content=meta)
 
@@ -292,7 +288,7 @@ def make_files_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         raise FilesNotFoundError(
                             message=f"File not found: {file_id}",
                             timestamp=_now(),
-                        )
+                        ) from exc
                     raise
 
                 data = await store.get(_blob_key(file_id))
@@ -326,7 +322,7 @@ def make_files_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         detail={"file_id": file_id, "message": err2.message},
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return Response(content=data, media_type=media_type)
 

@@ -19,20 +19,19 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from pathlib import Path
 from typing import Any
 
 import httpx
-import pytest
 from meridiand._telegram_channel_driver import (
-    TELEGRAM_MARKDOWN_CONTENT_TYPE,
-    NoopLongPollClient,
-    NoopSecretResolver,
-    TelegramChannelDriver,
     _DEFAULT_POLL_TIMEOUT,
+    TELEGRAM_MARKDOWN_CONTENT_TYPE,
+    TelegramChannelDriver,
 )
 from opentelemetry.trace import StatusCode
+import pytest
 from sdk_channel import (
     ChannelCapabilities,
     ChannelFailure,
@@ -42,7 +41,6 @@ from sdk_channel import (
 )
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -234,9 +232,7 @@ class TestDriverSendSuccess:
         transport = httpx.MockTransport(_handler)
         async with httpx.AsyncClient(transport=transport) as client:
             _make_channel_file(storage_root)
-            result = await _make_driver(storage_root, http_client=client).send(
-                _make_send_request()
-            )
+            result = await _make_driver(storage_root, http_client=client).send(_make_send_request())
 
         assert result.delivered is True
 
@@ -247,9 +243,7 @@ class TestDriverSendSuccess:
         transport = httpx.MockTransport(_handler)
         async with httpx.AsyncClient(transport=transport) as client:
             _make_channel_file(storage_root)
-            result = await _make_driver(storage_root, http_client=client).send(
-                _make_send_request()
-            )
+            result = await _make_driver(storage_root, http_client=client).send(_make_send_request())
 
         assert result.message_id == "42"
 
@@ -260,9 +254,7 @@ class TestDriverSendSuccess:
         transport = httpx.MockTransport(_handler)
         async with httpx.AsyncClient(transport=transport) as client:
             _make_channel_file(storage_root)
-            result = await _make_driver(storage_root, http_client=client).send(
-                _make_send_request()
-            )
+            result = await _make_driver(storage_root, http_client=client).send(_make_send_request())
 
         assert isinstance(result.timestamp, str) and len(result.timestamp) > 0
 
@@ -396,9 +388,7 @@ class TestDriverSendFailures:
     def _otel_clear(self) -> None:
         _otel_exporter.clear()
 
-    async def test_missing_config_raises_chan_config_not_found(
-        self, storage_root: Path
-    ) -> None:
+    async def test_missing_config_raises_chan_config_not_found(self, storage_root: Path) -> None:
         driver = _make_driver(storage_root)
         req = SendRequest(
             channel_id="ch_nonexistent",
@@ -425,9 +415,7 @@ class TestDriverSendFailures:
             await driver.send(_make_send_request())
         assert exc_info.value.code == "CHAN_BOT_TOKEN_UNRESOLVABLE"
 
-    async def test_missing_telegram_chat_id_raises_failure(
-        self, storage_root: Path
-    ) -> None:
+    async def test_missing_telegram_chat_id_raises_failure(self, storage_root: Path) -> None:
         _make_channel_file(storage_root, telegram_chat_id=None)
         driver = _make_driver(storage_root)
         with pytest.raises(ChannelFailure) as exc_info:
@@ -442,9 +430,7 @@ class TestDriverSendFailures:
         async with httpx.AsyncClient(transport=transport) as client:
             _make_channel_file(storage_root)
             with pytest.raises(ChannelFailure) as exc_info:
-                await _make_driver(storage_root, http_client=client).send(
-                    _make_send_request()
-                )
+                await _make_driver(storage_root, http_client=client).send(_make_send_request())
         assert exc_info.value.code == "CHAN_SEND_FAILED"
 
     async def test_network_error_raises_chan_send_failed(self, storage_root: Path) -> None:
@@ -455,14 +441,10 @@ class TestDriverSendFailures:
         async with httpx.AsyncClient(transport=transport) as client:
             _make_channel_file(storage_root)
             with pytest.raises(ChannelFailure) as exc_info:
-                await _make_driver(storage_root, http_client=client).send(
-                    _make_send_request()
-                )
+                await _make_driver(storage_root, http_client=client).send(_make_send_request())
         assert exc_info.value.code == "CHAN_SEND_FAILED"
 
-    async def test_telegram_api_ok_false_raises_chan_send_failed(
-        self, storage_root: Path
-    ) -> None:
+    async def test_telegram_api_ok_false_raises_chan_send_failed(self, storage_root: Path) -> None:
         async def _handler(request: httpx.Request) -> httpx.Response:
             return httpx.Response(
                 200,
@@ -473,9 +455,7 @@ class TestDriverSendFailures:
         async with httpx.AsyncClient(transport=transport) as client:
             _make_channel_file(storage_root)
             with pytest.raises(ChannelFailure) as exc_info:
-                await _make_driver(storage_root, http_client=client).send(
-                    _make_send_request()
-                )
+                await _make_driver(storage_root, http_client=client).send(_make_send_request())
         assert exc_info.value.code == "CHAN_SEND_FAILED"
 
     async def test_http_error_writes_audit_log(self, storage_root: Path) -> None:
@@ -511,9 +491,7 @@ class TestDriverSendFailures:
         async with httpx.AsyncClient(transport=transport) as client:
             _make_channel_file(storage_root)
             with pytest.raises(ChannelFailure):
-                await _make_driver(storage_root, http_client=client).send(
-                    _make_send_request()
-                )
+                await _make_driver(storage_root, http_client=client).send(_make_send_request())
 
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
         span = spans.get("telegram.channel.send")
@@ -527,9 +505,7 @@ class TestDriverSendFailures:
 
 
 class TestDriverStart:
-    async def test_start_long_poll_resolves_token_and_calls_poll(
-        self, storage_root: Path
-    ) -> None:
+    async def test_start_long_poll_resolves_token_and_calls_poll(self, storage_root: Path) -> None:
         received: list[tuple[str, int]] = []
 
         class RecordingLongPollClient:
@@ -575,9 +551,7 @@ class TestDriverStart:
         assert len(received) == 1
         assert received[0] == _DEFAULT_POLL_TIMEOUT
 
-    async def test_start_uses_custom_poll_timeout_from_config(
-        self, storage_root: Path
-    ) -> None:
+    async def test_start_uses_custom_poll_timeout_from_config(self, storage_root: Path) -> None:
         received: list[int] = []
 
         class RecordingLongPollClient:
@@ -617,9 +591,7 @@ class TestDriverStart:
         req = StartRequest(channel_id="ch_tg_1", channel_kind=_TELEGRAM_KIND, session_id="s1")
         await driver.start(req)
         await asyncio.sleep(0)
-        req2 = StartRequest(
-            channel_id="ch_tg_1", channel_kind=_TELEGRAM_KIND, session_id="s2"
-        )
+        req2 = StartRequest(channel_id="ch_tg_1", channel_kind=_TELEGRAM_KIND, session_id="s2")
         await driver.start(req2)
         await asyncio.sleep(0)
 
@@ -627,14 +599,10 @@ class TestDriverStart:
 
         for task in driver._poll_tasks.values():
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
-            except (asyncio.CancelledError, Exception):
-                pass
 
-    async def test_start_webhook_mode_does_not_start_poll_task(
-        self, storage_root: Path
-    ) -> None:
+    async def test_start_webhook_mode_does_not_start_poll_task(self, storage_root: Path) -> None:
         poll_called = False
 
         class TrackingLongPollClient:
@@ -656,9 +624,7 @@ class TestDriverStart:
         assert not poll_called
         assert "ch_tg_1" not in driver._poll_tasks
 
-    async def test_start_missing_bot_token_ref_raises_failure(
-        self, storage_root: Path
-    ) -> None:
+    async def test_start_missing_bot_token_ref_raises_failure(self, storage_root: Path) -> None:
         _make_channel_file(storage_root, bot_token_ref=None)
         driver = _make_driver(storage_root)
         with pytest.raises(ChannelFailure) as exc_info:

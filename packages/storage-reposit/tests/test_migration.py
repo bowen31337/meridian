@@ -32,13 +32,11 @@ Covers:
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
+import sqlite3
 
 import pytest
-from storage_reposit import SCHEMA_VERSION, SQLiteProjectionStore
-from storage_reposit import _migrations as _mig
-
+from storage_reposit import SCHEMA_VERSION, SQLiteProjectionStore, _migrations as _mig
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -52,18 +50,14 @@ def open_fresh(tmp_path: Path) -> sqlite3.Connection:
 def table_names(conn: sqlite3.Connection) -> set[str]:
     return {
         row[0]
-        for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
     }
 
 
 def index_names(conn: sqlite3.Connection) -> set[str]:
     return {
         row[0]
-        for row in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='index'"
-        ).fetchall()
+        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='index'").fetchall()
     }
 
 
@@ -159,8 +153,7 @@ class TestMigrateFunction:
             _mig.migrate(conn, applied_at="2024-01-01T00:00:00+00:00")
         with sqlite3.connect(tmp_path / "m.db") as conn:
             versions = {
-                row[0]
-                for row in conn.execute("SELECT version FROM _schema_migrations").fetchall()
+                row[0] for row in conn.execute("SELECT version FROM _schema_migrations").fetchall()
             }
         assert versions == {1, 2, 3}
 

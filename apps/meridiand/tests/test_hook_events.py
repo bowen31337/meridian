@@ -75,25 +75,23 @@ Tests cover:
 from __future__ import annotations
 
 import asyncio
-import json
-import uuid
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
+import uuid
 
-import pytest
 from core_errors import AuditLog, AuditLogEntry, NoopAuditLog
 from fastapi.testclient import TestClient
-from sdk_sandbox import ExecutionContext
-
 from meridiand._audit import FileAuditLog
 from meridiand._replay import (
     FakeModelAdapter,
     FakeSandboxAdapter,
     run_harness_loop,
 )
-
+import pytest
+from sdk_sandbox import ExecutionContext
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -350,7 +348,7 @@ class TestHarnessHookEvents:
 
     def test_on_model_call_dispatched_once_per_model_call(self, tmp_path: Path) -> None:
         hooks_dir = tmp_path / "hooks"
-        hook = _write_hook(hooks_dir, event="on_model_call")
+        _write_hook(hooks_dir, event="on_model_call")
         captured: list[dict[str, Any]] = []
 
         async def handler(input: dict[str, Any], context: ExecutionContext) -> Any:
@@ -462,7 +460,12 @@ class TestHarnessHookEvents:
 
             await dispatch_hooks(
                 "on_stop",
-                {"session_id": "sess_stop", "stop_reason": "end_turn", "model_calls": 1, "tool_calls": 0},
+                {
+                    "session_id": "sess_stop",
+                    "stop_reason": "end_turn",
+                    "model_calls": 1,
+                    "tool_calls": 0,
+                },
                 ExecutionContext(session_id="sess_stop"),
                 hooks_dir=hooks_dir,
                 audit_log=NoopAuditLog(),
@@ -874,14 +877,9 @@ class TestHandoffHookEvent:
 
 class TestCompactHookEvent:
     def _write_event_log(self, storage_root: Path, session_id: str, lines: int = 10) -> None:
-        from datetime import datetime
+
         now = datetime.now(UTC)
-        events_dir = (
-            storage_root / "events"
-            / str(now.year)
-            / f"{now.month:02d}"
-            / f"{now.day:02d}"
-        )
+        events_dir = storage_root / "events" / str(now.year) / f"{now.month:02d}" / f"{now.day:02d}"
         events_dir.mkdir(parents=True, exist_ok=True)
         content = "\n".join(json.dumps({"type": "ping", "i": i}) for i in range(lines))
         (events_dir / f"{session_id}.ndjson").write_text(content + "\n")
@@ -1172,7 +1170,7 @@ class TestOnErrorHookEvent:
         from meridiand._error_envelope_middleware import ErrorEnvelopeMiddleware
 
         hooks_dir = tmp_path / "hooks"
-        hook = _write_hook(hooks_dir, event="on_error", failure_mode="block")
+        _write_hook(hooks_dir, event="on_error", failure_mode="block")
 
         audit = _CapturingAuditLog()
         middleware = ErrorEnvelopeMiddleware(
@@ -1415,8 +1413,8 @@ class TestSdkToMeridianHookMapping:
         reader = _FakePhaseReader(["created", "created"])
 
         from meridiand._hook_dispatch import dispatch_hooks as _dh
-        from meridiand._replay import HarnessLoopError, run_harness_loop
         import meridiand._replay as _replay_mod
+        from meridiand._replay import HarnessLoopError, run_harness_loop
 
         async def _veto_handler(input: dict[str, Any], context: ExecutionContext) -> Any:
             return {"verdict": "veto", "reason": "blocked"}
@@ -1426,7 +1424,9 @@ class TestSdkToMeridianHookMapping:
         async def _patched(event: str, payload: dict, ctx: Any, **kwargs: Any) -> Any:
             if event == "pre_tool_call":
                 return await _dh(
-                    event, payload, ctx,
+                    event,
+                    payload,
+                    ctx,
                     in_process_handlers={hook["id"]: _veto_handler},
                     **kwargs,
                 )
@@ -1506,8 +1506,8 @@ class TestSdkToMeridianHookMapping:
         reader = _FakePhaseReader(["created", "waiting_for_tool", "created"])
 
         from meridiand._hook_dispatch import dispatch_hooks as _dh
-        from meridiand._replay import run_harness_loop
         import meridiand._replay as _replay_mod
+        from meridiand._replay import run_harness_loop
 
         async def _mutate_handler(input: dict[str, Any], context: ExecutionContext) -> Any:
             return {"verdict": "continue", "mutations": {"args": {"cmd": "ls -la"}}}
@@ -1517,7 +1517,9 @@ class TestSdkToMeridianHookMapping:
         async def _patched(event: str, payload: dict, ctx: Any, **kwargs: Any) -> Any:
             if event == "pre_tool_call":
                 return await _dh(
-                    event, payload, ctx,
+                    event,
+                    payload,
+                    ctx,
                     in_process_handlers={hook["id"]: _mutate_handler},
                     **kwargs,
                 )

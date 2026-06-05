@@ -11,6 +11,7 @@ src/sdk_sandbox/_dispatchers.py
 src/sdk_sandbox/_mcp_client.py
 src/sdk_sandbox/_runtime.py
 src/sdk_sandbox/_schema.py
+src/sdk_sandbox/_secret_refs.py
 src/sdk_sandbox/_telemetry.py
 src/sdk_sandbox/_types.py
 src/sdk_sandbox/_version.py
@@ -20,3 +21,4 @@ tests/test_dispatch_overhead.py
 tests/test_dispatchers.py
 tests/test_fake_dispatcher.py
 tests/test_mcp_server_integration.py
+tests/test_secret_refs.py

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import contextlib
+from datetime import UTC, datetime
 import json
 import logging
 import sys
-from datetime import UTC, datetime
 from typing import Any
 
 from core_errors import AuditLog, AuditLogEntry, MeridianError
@@ -98,7 +98,7 @@ def configure_json_logging(level: str, *, audit_log: AuditLog | None = None) -> 
                         detail={"message": str(exc)},
                     )
                 )
-        raise err
+        raise err from exc
 
 
 def emit_early_error(component: str, msg: str) -> None:

@@ -14,13 +14,13 @@ log.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import io
 import json
 import logging
-import uuid
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -164,10 +164,7 @@ def make_vault_leak_soak_router(
             canary_values: list[str] = (
                 list(_canary_override)
                 if _canary_override is not None
-                else [
-                    f"vault_soak_canary_{run_id}_{i}_plaintext"
-                    for i in range(CANARY_COUNT)
-                ]
+                else [f"vault_soak_canary_{run_id}_{i}_plaintext" for i in range(CANARY_COUNT)]
             )
             canary_count = len(canary_values)
             canary_keys = [f"soak_key_{i}" for i in range(canary_count)]
@@ -182,7 +179,7 @@ def make_vault_leak_soak_router(
 
             keyring = _MemoryKeyring()
             backend = OsKeychainVaultBackend(_keyring=keyring)
-            for key, value in zip(canary_keys, canary_values):
+            for key, value in zip(canary_keys, canary_values, strict=False):
                 backend.store_secret(vault_id, key, value, now)
 
             resolver = SecretRefResolver(
@@ -195,8 +192,7 @@ def make_vault_leak_soak_router(
 
             # Exercise 1 — hook stdin: all refs undeclared → resolver never invoked.
             hook_payload: dict[str, Any] = {
-                f"key_{key}": f"secret_ref://vault/{vault_id}/{key}"
-                for key in canary_keys
+                f"key_{key}": f"secret_ref://vault/{vault_id}/{key}" for key in canary_keys
             }
             hook_result = redact_vault_refs(
                 hook_payload,
@@ -213,9 +209,7 @@ def make_vault_leak_soak_router(
                 "timestamp": now,
                 "payload": hook_payload,
             }
-            (captures_dir / "event_log_entries.ndjson").write_text(
-                json.dumps(event_entry) + "\n"
-            )
+            (captures_dir / "event_log_entries.ndjson").write_text(json.dumps(event_entry) + "\n")
 
             # Exercise 3 — log messages: ref URIs logged, not plaintext values.
             log_capture = io.StringIO()

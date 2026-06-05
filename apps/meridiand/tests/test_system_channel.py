@@ -25,7 +25,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
@@ -40,7 +39,6 @@ from sdk_channel import (
 )
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Stub driver — records every call
@@ -117,7 +115,9 @@ def _create_channel(
     return resp.json()["id"]
 
 
-def _issue_pairing_token(client: TestClient, channel_id: str, user_profile_id: str | None = None) -> str:
+def _issue_pairing_token(
+    client: TestClient, channel_id: str, user_profile_id: str | None = None
+) -> str:
     body: dict = {}
     if user_profile_id is not None:
         body["user_profile_id"] = user_profile_id
@@ -213,45 +213,35 @@ class TestPairingRoundTrip:
         client = _make_client(storage_root)
         channel_id = _create_channel(client)
         token = _issue_pairing_token(client, channel_id, user_profile_id="user_abc")
-        resp = client.post(
-            f"/v1/pairing_tokens/{token}/redeem", json={"sender_id": "ext-1"}
-        )
+        resp = client.post(f"/v1/pairing_tokens/{token}/redeem", json={"sender_id": "ext-1"})
         assert resp.status_code == 200
 
     def test_redeem_response_has_token(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         channel_id = _create_channel(client)
         token = _issue_pairing_token(client, channel_id, user_profile_id="user_abc")
-        body = client.post(
-            f"/v1/pairing_tokens/{token}/redeem", json={"sender_id": "ext-1"}
-        ).json()
+        body = client.post(f"/v1/pairing_tokens/{token}/redeem", json={"sender_id": "ext-1"}).json()
         assert body["token"] == token
 
     def test_redeem_response_has_channel_id(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         channel_id = _create_channel(client)
         token = _issue_pairing_token(client, channel_id, user_profile_id="user_abc")
-        body = client.post(
-            f"/v1/pairing_tokens/{token}/redeem", json={"sender_id": "ext-1"}
-        ).json()
+        body = client.post(f"/v1/pairing_tokens/{token}/redeem", json={"sender_id": "ext-1"}).json()
         assert body["channel_id"] == channel_id
 
     def test_redeem_response_has_user_profile_id(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         channel_id = _create_channel(client)
         token = _issue_pairing_token(client, channel_id, user_profile_id="user_abc")
-        body = client.post(
-            f"/v1/pairing_tokens/{token}/redeem", json={"sender_id": "ext-1"}
-        ).json()
+        body = client.post(f"/v1/pairing_tokens/{token}/redeem", json={"sender_id": "ext-1"}).json()
         assert body["user_profile_id"] == "user_abc"
 
     def test_redeem_response_has_sender_id(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         channel_id = _create_channel(client)
         token = _issue_pairing_token(client, channel_id, user_profile_id="user_abc")
-        body = client.post(
-            f"/v1/pairing_tokens/{token}/redeem", json={"sender_id": "ext-1"}
-        ).json()
+        body = client.post(f"/v1/pairing_tokens/{token}/redeem", json={"sender_id": "ext-1"}).json()
         assert body["sender_id"] == "ext-1"
 
     def test_redeem_creates_pairing_record(self, storage_root: Path) -> None:
@@ -267,9 +257,7 @@ class TestPairingRoundTrip:
         channel_id = _create_channel(client)
         token = _issue_pairing_token(client, channel_id, user_profile_id="user_abc")
         client.post(f"/v1/pairing_tokens/{token}/redeem", json={"sender_id": "ext-1"})
-        token_record = json.loads(
-            (storage_root / "pairing_tokens" / f"{token}.json").read_text()
-        )
+        token_record = json.loads((storage_root / "pairing_tokens" / f"{token}.json").read_text())
         assert token_record["redeemed"] is True
 
     def test_paired_inbound_resolves_to_paired_user_profile(self, storage_root: Path) -> None:
@@ -455,9 +443,7 @@ class TestUntrustedInboundQuarantine:
         result = _inbound(client, channel_id, "untrusted-sender", content="bad message")
         quarantine_id = result["quarantine_id"]
         q_record = json.loads(
-            (
-                storage_root / "channel_quarantine" / channel_id / f"{quarantine_id}.json"
-            ).read_text()
+            (storage_root / "channel_quarantine" / channel_id / f"{quarantine_id}.json").read_text()
         )
         assert q_record["channel_id"] == channel_id
         assert q_record["sender_id"] == "untrusted-sender"
@@ -660,8 +646,7 @@ class TestPairedOnlyPolicy:
             json={"sender_id": "stranger", "content": "hi"},
         )
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "channel.inbound.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "channel.inbound.failed"
         )
         assert record["level"] == "error"
 
@@ -673,8 +658,7 @@ class TestPairedOnlyPolicy:
             json={"sender_id": "stranger", "content": "hi"},
         )
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "channel.inbound.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "channel.inbound.failed"
         )
         assert record["code"] == "channel_inbound_policy_rejected"
 
@@ -686,8 +670,7 @@ class TestPairedOnlyPolicy:
             json={"sender_id": "stranger", "content": "hi"},
         )
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "channel.inbound.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "channel.inbound.failed"
         )
         assert record["detail"]["channel_id"] == channel_id
 
@@ -739,8 +722,7 @@ class TestInboundChannelNotFound:
             json={"sender_id": "ext-1", "content": "hi"},
         )
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "channel.inbound.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "channel.inbound.failed"
         )
         assert record["level"] == "error"
 
@@ -899,7 +881,8 @@ class TestPairingTokenRedeemErrors:
             json={"sender_id": "ext-1"},
         )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "channel.pair.redeem.failed"
         )
         assert record["level"] == "error"
@@ -917,9 +900,7 @@ class TestPairingTokenRedeemErrors:
         channel_id = _create_channel(client)
         token = _issue_pairing_token(client, channel_id, user_profile_id="user_abc")
         client.post(f"/v1/pairing_tokens/{token}/redeem", json={"sender_id": "ext-1"})
-        body = client.post(
-            f"/v1/pairing_tokens/{token}/redeem", json={"sender_id": "ext-2"}
-        ).json()
+        body = client.post(f"/v1/pairing_tokens/{token}/redeem", json={"sender_id": "ext-2"}).json()
         assert body["error"]["code"] == "pairing_token_already_redeemed"
 
     def test_already_redeemed_writes_audit(self, storage_root: Path) -> None:
@@ -1369,8 +1350,7 @@ class TestSessionOutbound:
         client = _make_client(storage_root)
         client.post("/v1/sessions/sess_nonexistent/outbound", json={"content": "hello"})
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "session.outbound.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "session.outbound.failed"
         )
         assert record["level"] == "error"
 
@@ -1497,7 +1477,8 @@ def _resolve(client: TestClient, channel_id: str, remote_id: str) -> dict:
 
 
 class TestPairingRuleLookup:
-    """GET /v1/channels/{channel_id}/remote/{remote_id} deterministically resolves to UserProfile."""
+    """GET /v1/channels/{channel_id}/remote/{remote_id} deterministically resolves to
+    UserProfile."""
 
     def test_paired_remote_returns_200(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
@@ -1614,6 +1595,7 @@ class TestPairingRuleLookup:
 
     def test_otel_failure_span_has_error_status(self, storage_root: Path) -> None:
         from opentelemetry.trace import StatusCode
+
         from tests._otel_shared import otel_exporter
 
         otel_exporter.clear()
@@ -1729,7 +1711,7 @@ class TestCrossChannelSession:
             _redeem_token(client, tok, f"remote-{i}")
         result = _inbound(client, channels[0], "remote-0")
         session_id = result["session_id"]
-        for i, ch in enumerate(channels[1:], 1):
+        for ch in channels[1:]:
             assert (storage_root / "channel_sessions" / ch / f"{session_id}.json").exists()
         outbound = _session_outbound(client, session_id)
         assert len(outbound["results"]) == 3

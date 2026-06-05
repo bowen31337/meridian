@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-import json
-import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
+import json
 from pathlib import Path
-from typing import Callable
+import sys
 
 import click
-import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+import yaml
 
 from ._audit import write_audit
 from ._telemetry import get_tracer, record_failure, record_invocation_event
@@ -203,18 +203,12 @@ def _run_validate(path: Path) -> list[str]:
 
     version = raw.get("version", _CONFIG_VERSION)
     if version != _CONFIG_VERSION:
-        return [
-            f"version mismatch: config has version={version!r}, "
-            f"expected {_CONFIG_VERSION!r}"
-        ]
+        return [f"version mismatch: config has version={version!r}, expected {_CONFIG_VERSION!r}"]
 
     try:
         config = _MeridianConfig.model_validate(raw)
     except ValidationError as exc:
-        return [
-            f"  {'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}"
-            for e in exc.errors()
-        ]
+        return [f"  {'.'.join(str(loc) for loc in e['loc'])}: {e['msg']}" for e in exc.errors()]
 
     errors: list[str] = []
 
@@ -316,8 +310,7 @@ def _run_migrate(path: Path) -> _MigrateResult:
 
     if current > _CONFIG_VERSION:
         result.errors.append(
-            f"config version {current} is newer than this tool supports "
-            f"(max: {_CONFIG_VERSION})"
+            f"config version {current} is newer than this tool supports (max: {_CONFIG_VERSION})"
         )
         return result
 
@@ -386,9 +379,7 @@ def migrate(config_path: Path | None) -> None:
             return
 
         if not result.applied:
-            click.echo(
-                f"config is already at version {result.from_version}, nothing to migrate"
-            )
+            click.echo(f"config is already at version {result.from_version}, nothing to migrate")
             span.add_event("meridianconfig.migrate.noop")
             return
 

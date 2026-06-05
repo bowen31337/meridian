@@ -40,16 +40,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from storage_event_log import EventLogWriter, LocalEventLogWriter
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -89,11 +86,7 @@ def _read_events(storage_root: Path, session_id: str) -> list[dict[str, Any]]:
     files = list((storage_root / "events").glob(f"**/{session_id}.ndjson"))
     if not files:
         return []
-    return [
-        json.loads(line)
-        for line in files[0].read_text().splitlines()
-        if line.strip()
-    ]
+    return [json.loads(line) for line in files[0].read_text().splitlines() if line.strip()]
 
 
 def _seed_agent(storage_root: Path, agent_id: str, version_id: str) -> None:
@@ -253,9 +246,7 @@ class TestInitialThread:
         result = _post_session(_make_client(storage_root))
         session_id = result["session_id"]
         thread_id = result["thread_id"]
-        assert (
-            storage_root / "sessions" / session_id / "threads" / f"{thread_id}.json"
-        ).exists()
+        assert (storage_root / "sessions" / session_id / "threads" / f"{thread_id}.json").exists()
 
     def test_thread_file_has_thread_id(self, storage_root: Path) -> None:
         result = _post_session(_make_client(storage_root))

@@ -54,21 +54,19 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import httpx
-import pytest
 from meridiand._audit import FileAuditLog
 from meridiand._webhook_sender import (
     NoopSecretResolver,
-    SecretResolver,
     WebhookDeliveryError,
     _backoff_delay,
     _sign_payload,
     deliver_webhook_event,
     run_webhook_sender_loop,
 )
+import pytest
 from storage_event_log import SessionEvent
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -253,9 +251,13 @@ class TestDeliverWebhookSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
         assert len(transport.requests) == 1
@@ -269,9 +271,13 @@ class TestDeliverWebhookSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
         assert transport.requests[0].method == "POST"
@@ -284,9 +290,13 @@ class TestDeliverWebhookSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
         assert transport.requests[0].headers["content-type"] == "application/json"
@@ -299,9 +309,13 @@ class TestDeliverWebhookSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
         body = json.loads(transport.requests[0].content)
@@ -315,9 +329,13 @@ class TestDeliverWebhookSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-42",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-42",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
         body = json.loads(transport.requests[0].content)
@@ -331,9 +349,13 @@ class TestDeliverWebhookSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
         body = json.loads(transport.requests[0].content)
@@ -347,9 +369,13 @@ class TestDeliverWebhookSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
         body = json.loads(transport.requests[0].content)
@@ -363,9 +389,13 @@ class TestDeliverWebhookSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
         body = json.loads(transport.requests[0].content)
@@ -379,9 +409,13 @@ class TestDeliverWebhookSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
         body = json.loads(transport.requests[0].content)
@@ -403,9 +437,13 @@ class TestHmacSignature:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=resolver,
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=resolver,
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
         assert "x-meridian-signature" in transport.requests[0].headers
@@ -419,9 +457,13 @@ class TestHmacSignature:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=resolver,
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=resolver,
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
         sig = transport.requests[0].headers["x-meridian-signature"]
@@ -436,9 +478,13 @@ class TestHmacSignature:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=resolver,
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=resolver,
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
         req = transport.requests[0]
@@ -455,9 +501,13 @@ class TestHmacSignature:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
         assert "x-meridian-signature" not in transport.requests[0].headers
@@ -470,9 +520,13 @@ class TestHmacSignature:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
         assert "x-meridian-signature" not in transport.requests[0].headers
@@ -492,9 +546,13 @@ class TestDeliverAuditSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
         records = _audit_records(storage_root)
@@ -508,12 +566,18 @@ class TestDeliverAuditSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "webhook.sender.delivered")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "webhook.sender.delivered"
+        )
         assert record["level"] == "info"
 
     async def test_audit_detail_has_webhook_id(self, storage_root: Path) -> None:
@@ -524,12 +588,18 @@ class TestDeliverAuditSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "webhook.sender.delivered")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "webhook.sender.delivered"
+        )
         assert record["detail"]["webhook_id"] == "webhook_detail"
 
     async def test_audit_detail_has_delivery_id_prefix(self, storage_root: Path) -> None:
@@ -540,12 +610,18 @@ class TestDeliverAuditSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "webhook.sender.delivered")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "webhook.sender.delivered"
+        )
         assert record["detail"]["delivery_id"].startswith("delivery_")
 
     async def test_audit_detail_has_session_id(self, storage_root: Path) -> None:
@@ -556,12 +632,18 @@ class TestDeliverAuditSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-77",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-77",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "webhook.sender.delivered")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "webhook.sender.delivered"
+        )
         assert record["detail"]["session_id"] == "sess-77"
 
     async def test_audit_detail_has_event_seq(self, storage_root: Path) -> None:
@@ -572,12 +654,18 @@ class TestDeliverAuditSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "webhook.sender.delivered")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "webhook.sender.delivered"
+        )
         assert record["detail"]["event_seq"] == 5
 
     async def test_audit_detail_has_event_type(self, storage_root: Path) -> None:
@@ -588,12 +676,18 @@ class TestDeliverAuditSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "webhook.sender.delivered")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "webhook.sender.delivered"
+        )
         assert record["detail"]["event_type"] == "message.added"
 
 
@@ -614,9 +708,13 @@ class TestDeliverOtelSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
         span_names = [s.name for s in _otel_exporter.get_finished_spans()]
@@ -630,12 +728,18 @@ class TestDeliverOtelSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
-        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "webhook.sender.deliver")
+        span = next(
+            s for s in _otel_exporter.get_finished_spans() if s.name == "webhook.sender.deliver"
+        )
         assert span.attributes["webhook.id"] == "webhook_otel"
 
     async def test_span_has_webhook_url_attribute(self, storage_root: Path) -> None:
@@ -646,12 +750,18 @@ class TestDeliverOtelSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
-        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "webhook.sender.deliver")
+        span = next(
+            s for s in _otel_exporter.get_finished_spans() if s.name == "webhook.sender.deliver"
+        )
         assert span.attributes["webhook.url"] == "https://otel.example.com/hook"
 
     async def test_span_has_delivery_id_attribute(self, storage_root: Path) -> None:
@@ -662,12 +772,18 @@ class TestDeliverOtelSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
-        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "webhook.sender.deliver")
+        span = next(
+            s for s in _otel_exporter.get_finished_spans() if s.name == "webhook.sender.deliver"
+        )
         assert span.attributes["webhook.delivery_id"].startswith("delivery_")
 
     async def test_span_has_session_id_attribute(self, storage_root: Path) -> None:
@@ -678,12 +794,18 @@ class TestDeliverOtelSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-span",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-span",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
-        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "webhook.sender.deliver")
+        span = next(
+            s for s in _otel_exporter.get_finished_spans() if s.name == "webhook.sender.deliver"
+        )
         assert span.attributes["session.id"] == "sess-span"
 
     async def test_span_has_event_seq_attribute(self, storage_root: Path) -> None:
@@ -694,12 +816,18 @@ class TestDeliverOtelSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
-        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "webhook.sender.deliver")
+        span = next(
+            s for s in _otel_exporter.get_finished_spans() if s.name == "webhook.sender.deliver"
+        )
         assert span.attributes["event.seq"] == 3
 
     async def test_span_has_event_type_attribute(self, storage_root: Path) -> None:
@@ -710,12 +838,18 @@ class TestDeliverOtelSuccess:
         dlq_dir = storage_root / "webhooks" / "dlq"
 
         await deliver_webhook_event(
-            webhook, event, "sess-1",
-            client=client, secret_resolver=NoopSecretResolver(),
-            audit_log=audit, dlq_dir=dlq_dir,
+            webhook,
+            event,
+            "sess-1",
+            client=client,
+            secret_resolver=NoopSecretResolver(),
+            audit_log=audit,
+            dlq_dir=dlq_dir,
         )
 
-        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "webhook.sender.deliver")
+        span = next(
+            s for s in _otel_exporter.get_finished_spans() if s.name == "webhook.sender.deliver"
+        )
         assert span.attributes["event.type"] == "model_call.completed"
 
 
@@ -737,9 +871,13 @@ class TestRetryBehaviour:
 
         with patch("meridiand._webhook_sender.asyncio.sleep", new_callable=AsyncMock):
             await deliver_webhook_event(
-                webhook, event, "sess-1",
-                client=client, secret_resolver=NoopSecretResolver(),
-                audit_log=audit, dlq_dir=dlq_dir,
+                webhook,
+                event,
+                "sess-1",
+                client=client,
+                secret_resolver=NoopSecretResolver(),
+                audit_log=audit,
+                dlq_dir=dlq_dir,
             )
 
         assert len(transport.requests) == 2
@@ -751,19 +889,25 @@ class TestRetryBehaviour:
         event = _make_event()
         dlq_dir = storage_root / "webhooks" / "dlq"
 
-        with pytest.raises(WebhookDeliveryError):
-            with patch("meridiand._webhook_sender.asyncio.sleep", new_callable=AsyncMock):
-                await deliver_webhook_event(
-                    webhook, event, "sess-1",
-                    client=client, secret_resolver=NoopSecretResolver(),
-                    audit_log=audit, dlq_dir=dlq_dir,
-                )
+        with (
+            pytest.raises(WebhookDeliveryError),
+            patch("meridiand._webhook_sender.asyncio.sleep", new_callable=AsyncMock),
+        ):
+            await deliver_webhook_event(
+                webhook,
+                event,
+                "sess-1",
+                client=client,
+                secret_resolver=NoopSecretResolver(),
+                audit_log=audit,
+                dlq_dir=dlq_dir,
+            )
 
         assert len(transport.requests) == 1
 
     async def test_retries_on_network_error(self, storage_root: Path) -> None:
         audit = FileAuditLog(storage_root)
-        transport = _MockTransport([])
+        _MockTransport([])
         call_count = 0
 
         async def _handler(request: httpx.Request) -> httpx.Response:
@@ -780,9 +924,13 @@ class TestRetryBehaviour:
 
         with patch("meridiand._webhook_sender.asyncio.sleep", new_callable=AsyncMock):
             await deliver_webhook_event(
-                webhook, event, "sess-1",
-                client=client, secret_resolver=NoopSecretResolver(),
-                audit_log=audit, dlq_dir=dlq_dir,
+                webhook,
+                event,
+                "sess-1",
+                client=client,
+                secret_resolver=NoopSecretResolver(),
+                audit_log=audit,
+                dlq_dir=dlq_dir,
             )
 
         assert call_count == 3
@@ -797,13 +945,19 @@ class TestRetryBehaviour:
         event = _make_event()
         dlq_dir = storage_root / "webhooks" / "dlq"
 
-        with pytest.raises(WebhookDeliveryError):
-            with patch("meridiand._webhook_sender.asyncio.sleep", new_callable=AsyncMock):
-                await deliver_webhook_event(
-                    webhook, event, "sess-1",
-                    client=client, secret_resolver=NoopSecretResolver(),
-                    audit_log=audit, dlq_dir=dlq_dir,
-                )
+        with (
+            pytest.raises(WebhookDeliveryError),
+            patch("meridiand._webhook_sender.asyncio.sleep", new_callable=AsyncMock),
+        ):
+            await deliver_webhook_event(
+                webhook,
+                event,
+                "sess-1",
+                client=client,
+                secret_resolver=NoopSecretResolver(),
+                audit_log=audit,
+                dlq_dir=dlq_dir,
+            )
 
     async def test_success_after_retry_no_dlq(self, storage_root: Path) -> None:
         audit = FileAuditLog(storage_root)
@@ -817,9 +971,13 @@ class TestRetryBehaviour:
 
         with patch("meridiand._webhook_sender.asyncio.sleep", new_callable=AsyncMock):
             await deliver_webhook_event(
-                webhook, event, "sess-1",
-                client=client, secret_resolver=NoopSecretResolver(),
-                audit_log=audit, dlq_dir=dlq_dir,
+                webhook,
+                event,
+                "sess-1",
+                client=client,
+                secret_resolver=NoopSecretResolver(),
+                audit_log=audit,
+                dlq_dir=dlq_dir,
             )
 
         assert _dlq_records(storage_root, "webhook_retry") == []
@@ -839,13 +997,19 @@ class TestRetryBehaviour:
         async def _fake_sleep(secs: float) -> None:
             sleep_calls.append(secs)
 
-        with patch("meridiand._webhook_sender.asyncio.sleep", side_effect=_fake_sleep):
-            with pytest.raises(WebhookDeliveryError):
-                await deliver_webhook_event(
-                    webhook, event, "sess-1",
-                    client=client, secret_resolver=NoopSecretResolver(),
-                    audit_log=audit, dlq_dir=dlq_dir,
-                )
+        with (
+            patch("meridiand._webhook_sender.asyncio.sleep", side_effect=_fake_sleep),
+            pytest.raises(WebhookDeliveryError),
+        ):
+            await deliver_webhook_event(
+                webhook,
+                event,
+                "sess-1",
+                client=client,
+                secret_resolver=NoopSecretResolver(),
+                audit_log=audit,
+                dlq_dir=dlq_dir,
+            )
 
         assert sleep_calls == pytest.approx([1.0, 2.0])
 
@@ -864,13 +1028,19 @@ class TestRetryBehaviour:
         async def _fake_sleep(secs: float) -> None:
             sleep_calls.append(secs)
 
-        with patch("meridiand._webhook_sender.asyncio.sleep", side_effect=_fake_sleep):
-            with pytest.raises(WebhookDeliveryError):
-                await deliver_webhook_event(
-                    webhook, event, "sess-1",
-                    client=client, secret_resolver=NoopSecretResolver(),
-                    audit_log=audit, dlq_dir=dlq_dir,
-                )
+        with (
+            patch("meridiand._webhook_sender.asyncio.sleep", side_effect=_fake_sleep),
+            pytest.raises(WebhookDeliveryError),
+        ):
+            await deliver_webhook_event(
+                webhook,
+                event,
+                "sess-1",
+                client=client,
+                secret_resolver=NoopSecretResolver(),
+                audit_log=audit,
+                dlq_dir=dlq_dir,
+            )
 
         assert sleep_calls == pytest.approx([1.0, 2.0])
 
@@ -890,9 +1060,13 @@ class TestDeadLetterQueue:
 
         with pytest.raises(WebhookDeliveryError):
             await deliver_webhook_event(
-                webhook, event, "sess-1",
-                client=client, secret_resolver=NoopSecretResolver(),
-                audit_log=audit, dlq_dir=dlq_dir,
+                webhook,
+                event,
+                "sess-1",
+                client=client,
+                secret_resolver=NoopSecretResolver(),
+                audit_log=audit,
+                dlq_dir=dlq_dir,
             )
 
         assert len(_dlq_records(storage_root, "webhook_dlq")) == 1
@@ -906,9 +1080,13 @@ class TestDeadLetterQueue:
 
         with pytest.raises(WebhookDeliveryError):
             await deliver_webhook_event(
-                webhook, event, "sess-1",
-                client=client, secret_resolver=NoopSecretResolver(),
-                audit_log=audit, dlq_dir=dlq_dir,
+                webhook,
+                event,
+                "sess-1",
+                client=client,
+                secret_resolver=NoopSecretResolver(),
+                audit_log=audit,
+                dlq_dir=dlq_dir,
             )
 
         assert (storage_root / "webhooks" / "dlq" / "webhook_path").is_dir()
@@ -922,9 +1100,13 @@ class TestDeadLetterQueue:
 
         with pytest.raises(WebhookDeliveryError):
             await deliver_webhook_event(
-                webhook, event, "sess-1",
-                client=client, secret_resolver=NoopSecretResolver(),
-                audit_log=audit, dlq_dir=dlq_dir,
+                webhook,
+                event,
+                "sess-1",
+                client=client,
+                secret_resolver=NoopSecretResolver(),
+                audit_log=audit,
+                dlq_dir=dlq_dir,
             )
 
         record = _dlq_records(storage_root, "webhook_rec")[0]
@@ -939,9 +1121,13 @@ class TestDeadLetterQueue:
 
         with pytest.raises(WebhookDeliveryError):
             await deliver_webhook_event(
-                webhook, event, "sess-1",
-                client=client, secret_resolver=NoopSecretResolver(),
-                audit_log=audit, dlq_dir=dlq_dir,
+                webhook,
+                event,
+                "sess-1",
+                client=client,
+                secret_resolver=NoopSecretResolver(),
+                audit_log=audit,
+                dlq_dir=dlq_dir,
             )
 
         record = _dlq_records(storage_root, "webhook_wid")[0]
@@ -956,9 +1142,13 @@ class TestDeadLetterQueue:
 
         with pytest.raises(WebhookDeliveryError):
             await deliver_webhook_event(
-                webhook, event, "sess-dlq",
-                client=client, secret_resolver=NoopSecretResolver(),
-                audit_log=audit, dlq_dir=dlq_dir,
+                webhook,
+                event,
+                "sess-dlq",
+                client=client,
+                secret_resolver=NoopSecretResolver(),
+                audit_log=audit,
+                dlq_dir=dlq_dir,
             )
 
         record = _dlq_records(storage_root, "webhook_sid")[0]
@@ -973,9 +1163,13 @@ class TestDeadLetterQueue:
 
         with pytest.raises(WebhookDeliveryError):
             await deliver_webhook_event(
-                webhook, event, "sess-1",
-                client=client, secret_resolver=NoopSecretResolver(),
-                audit_log=audit, dlq_dir=dlq_dir,
+                webhook,
+                event,
+                "sess-1",
+                client=client,
+                secret_resolver=NoopSecretResolver(),
+                audit_log=audit,
+                dlq_dir=dlq_dir,
             )
 
         record = _dlq_records(storage_root, "webhook_ev")[0]
@@ -985,19 +1179,27 @@ class TestDeadLetterQueue:
     async def test_dlq_record_has_attempts(self, storage_root: Path) -> None:
         audit = FileAuditLog(storage_root)
         client, _ = _make_client(
-            httpx.Response(500), httpx.Response(500), httpx.Response(500),
+            httpx.Response(500),
+            httpx.Response(500),
+            httpx.Response(500),
         )
         webhook = _make_webhook(webhook_id="webhook_att", max_retries=2)
         event = _make_event()
         dlq_dir = storage_root / "webhooks" / "dlq"
 
-        with patch("meridiand._webhook_sender.asyncio.sleep", new_callable=AsyncMock):
-            with pytest.raises(WebhookDeliveryError):
-                await deliver_webhook_event(
-                    webhook, event, "sess-1",
-                    client=client, secret_resolver=NoopSecretResolver(),
-                    audit_log=audit, dlq_dir=dlq_dir,
-                )
+        with (
+            patch("meridiand._webhook_sender.asyncio.sleep", new_callable=AsyncMock),
+            pytest.raises(WebhookDeliveryError),
+        ):
+            await deliver_webhook_event(
+                webhook,
+                event,
+                "sess-1",
+                client=client,
+                secret_resolver=NoopSecretResolver(),
+                audit_log=audit,
+                dlq_dir=dlq_dir,
+            )
 
         record = _dlq_records(storage_root, "webhook_att")[0]
         assert record["attempts"] == 3
@@ -1011,9 +1213,13 @@ class TestDeadLetterQueue:
 
         with pytest.raises(WebhookDeliveryError):
             await deliver_webhook_event(
-                webhook, event, "sess-1",
-                client=client, secret_resolver=NoopSecretResolver(),
-                audit_log=audit, dlq_dir=dlq_dir,
+                webhook,
+                event,
+                "sess-1",
+                client=client,
+                secret_resolver=NoopSecretResolver(),
+                audit_log=audit,
+                dlq_dir=dlq_dir,
             )
 
         record = _dlq_records(storage_root, "webhook_err")[0]
@@ -1028,9 +1234,13 @@ class TestDeadLetterQueue:
 
         with pytest.raises(WebhookDeliveryError):
             await deliver_webhook_event(
-                webhook, event, "sess-1",
-                client=client, secret_resolver=NoopSecretResolver(),
-                audit_log=audit, dlq_dir=dlq_dir,
+                webhook,
+                event,
+                "sess-1",
+                client=client,
+                secret_resolver=NoopSecretResolver(),
+                audit_log=audit,
+                dlq_dir=dlq_dir,
             )
 
         record = _dlq_records(storage_root, "webhook_fat")[0]
@@ -1047,9 +1257,13 @@ class TestDeadLetterQueue:
             event = _make_event(seq=seq)
             with pytest.raises(WebhookDeliveryError):
                 await deliver_webhook_event(
-                    webhook, event, "sess-1",
-                    client=client, secret_resolver=NoopSecretResolver(),
-                    audit_log=audit, dlq_dir=dlq_dir,
+                    webhook,
+                    event,
+                    "sess-1",
+                    client=client,
+                    secret_resolver=NoopSecretResolver(),
+                    audit_log=audit,
+                    dlq_dir=dlq_dir,
                 )
 
         assert len(_dlq_records(storage_root, "webhook_multi")) == 2
@@ -1070,9 +1284,13 @@ class TestDeliverAuditFailure:
 
         with pytest.raises(WebhookDeliveryError):
             await deliver_webhook_event(
-                webhook, event, "sess-1",
-                client=client, secret_resolver=NoopSecretResolver(),
-                audit_log=audit, dlq_dir=dlq_dir,
+                webhook,
+                event,
+                "sess-1",
+                client=client,
+                secret_resolver=NoopSecretResolver(),
+                audit_log=audit,
+                dlq_dir=dlq_dir,
             )
 
         records = _audit_records(storage_root)
@@ -1087,12 +1305,18 @@ class TestDeliverAuditFailure:
 
         with pytest.raises(WebhookDeliveryError):
             await deliver_webhook_event(
-                webhook, event, "sess-1",
-                client=client, secret_resolver=NoopSecretResolver(),
-                audit_log=audit, dlq_dir=dlq_dir,
+                webhook,
+                event,
+                "sess-1",
+                client=client,
+                secret_resolver=NoopSecretResolver(),
+                audit_log=audit,
+                dlq_dir=dlq_dir,
             )
 
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "webhook.sender.failed")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "webhook.sender.failed"
+        )
         assert record["level"] == "error"
 
     async def test_failure_audit_detail_has_message(self, storage_root: Path) -> None:
@@ -1104,12 +1328,18 @@ class TestDeliverAuditFailure:
 
         with pytest.raises(WebhookDeliveryError):
             await deliver_webhook_event(
-                webhook, event, "sess-1",
-                client=client, secret_resolver=NoopSecretResolver(),
-                audit_log=audit, dlq_dir=dlq_dir,
+                webhook,
+                event,
+                "sess-1",
+                client=client,
+                secret_resolver=NoopSecretResolver(),
+                audit_log=audit,
+                dlq_dir=dlq_dir,
             )
 
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "webhook.sender.failed")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "webhook.sender.failed"
+        )
         assert len(record["detail"]["message"]) > 0
 
 
@@ -1131,9 +1361,13 @@ class TestDeliverOtelFailure:
 
         with pytest.raises(WebhookDeliveryError):
             await deliver_webhook_event(
-                webhook, event, "sess-1",
-                client=client, secret_resolver=NoopSecretResolver(),
-                audit_log=audit, dlq_dir=dlq_dir,
+                webhook,
+                event,
+                "sess-1",
+                client=client,
+                secret_resolver=NoopSecretResolver(),
+                audit_log=audit,
+                dlq_dir=dlq_dir,
             )
 
         span_names = [s.name for s in _otel_exporter.get_finished_spans()]
@@ -1150,12 +1384,18 @@ class TestDeliverOtelFailure:
 
         with pytest.raises(WebhookDeliveryError):
             await deliver_webhook_event(
-                webhook, event, "sess-1",
-                client=client, secret_resolver=NoopSecretResolver(),
-                audit_log=audit, dlq_dir=dlq_dir,
+                webhook,
+                event,
+                "sess-1",
+                client=client,
+                secret_resolver=NoopSecretResolver(),
+                audit_log=audit,
+                dlq_dir=dlq_dir,
             )
 
-        span = next(s for s in _otel_exporter.get_finished_spans() if s.name == "webhook.sender.deliver")
+        span = next(
+            s for s in _otel_exporter.get_finished_spans() if s.name == "webhook.sender.deliver"
+        )
         assert span.status.status_code == StatusCode.ERROR
 
 

@@ -18,8 +18,8 @@ import ast
 import datetime
 import json
 import os
-import sys
 from pathlib import Path
+import sys
 
 # The only directory (relative to repo root) from which claude_agent_sdk may
 # be imported.
@@ -28,9 +28,7 @@ _ALLOWED_DIR = Path("apps/meridiand/src/meridiand/providers/anthropic_oauth")
 _BANNED_IMPORT = "claude_agent_sdk"
 
 # Directory names that are always skipped during traversal.
-_SKIP_DIRS: frozenset[str] = frozenset(
-    {".git", "__pycache__", ".venv", ".eggs", "node_modules"}
-)
+_SKIP_DIRS: frozenset[str] = frozenset({".git", "__pycache__", ".venv", ".eggs", "node_modules"})
 
 
 def _is_test_file(path: Path) -> bool:
@@ -59,9 +57,12 @@ def _imports_agent_sdk(path: Path) -> bool:
             for alias in node.names:
                 if alias.name.split(".")[0] == _BANNED_IMPORT:
                     return True
-        elif isinstance(node, ast.ImportFrom):
-            if node.module and node.module.split(".")[0] == _BANNED_IMPORT:
-                return True
+        elif (
+            isinstance(node, ast.ImportFrom)
+            and node.module
+            and node.module.split(".")[0] == _BANNED_IMPORT
+        ):
+            return True
     return False
 
 

@@ -9,9 +9,9 @@ trigger fires, skips, or fails.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+import json
 from pathlib import Path
 from typing import Any
 
@@ -123,7 +123,7 @@ def _load_memory_date(storage_root: Path, memory_key: str, timestamp: str) -> da
     except (ValueError, TypeError):
         raise MemoryValueNotDateError(
             memory_key=memory_key, value=str(value), timestamp=timestamp
-        )
+        ) from None
 
 
 def _next_anniversary_fire_date(anniversary: date, days_before: int, today: date) -> date:
@@ -274,4 +274,4 @@ def fire_memory_anniversary_trigger(
                     },
                 )
             )
-            raise err2
+            raise err2 from exc

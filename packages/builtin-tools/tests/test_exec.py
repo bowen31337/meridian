@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from meridian_sdk_tool import ToolContext
 
 from meridian_builtin_tools.exec import (
     _INPUT_SCHEMA,
@@ -16,7 +17,6 @@ from meridian_builtin_tools.exec import (
     _run_command,
     exec_tool,
 )
-from meridian_sdk_tool import ToolContext
 
 # ---------------------------------------------------------------------------
 # Shared fixtures / constants
@@ -66,18 +66,14 @@ async def test_run_command_captures_stderr(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_run_command_nonzero_exit_code(tmp_path: Path) -> None:
-    _, _, exit_code, timed_out, _ = await _run_command(
-        "exit 42", str(tmp_path), timeout=10
-    )
+    _, _, exit_code, timed_out, _ = await _run_command("exit 42", str(tmp_path), timeout=10)
     assert exit_code == 42
     assert not timed_out
 
 
 @pytest.mark.anyio
 async def test_run_command_cwd_is_workspace(workspace: Path) -> None:
-    stdout, _, exit_code, _, _ = await _run_command(
-        "pwd", str(workspace), timeout=10
-    )
+    stdout, _, exit_code, _, _ = await _run_command("pwd", str(workspace), timeout=10)
     assert exit_code == 0
     assert str(workspace.resolve()) in stdout.strip()
 
@@ -93,18 +89,14 @@ async def test_run_command_pipe_works(tmp_path: Path) -> None:
 
 @pytest.mark.anyio
 async def test_run_command_timeout_sets_timed_out(tmp_path: Path) -> None:
-    _, _, exit_code, timed_out, _ = await _run_command(
-        "sleep 60", str(tmp_path), timeout=0.1
-    )
+    _, _, exit_code, timed_out, _ = await _run_command("sleep 60", str(tmp_path), timeout=0.1)
     assert timed_out is True
     assert exit_code != 0
 
 
 @pytest.mark.anyio
 async def test_run_command_timeout_stdout_empty_on_timeout(tmp_path: Path) -> None:
-    stdout, stderr, _, timed_out, _ = await _run_command(
-        "sleep 60", str(tmp_path), timeout=0.1
-    )
+    stdout, stderr, _, timed_out, _ = await _run_command("sleep 60", str(tmp_path), timeout=0.1)
     assert timed_out is True
     assert stdout == ""
     assert stderr == ""
@@ -114,9 +106,7 @@ async def test_run_command_timeout_stdout_empty_on_timeout(tmp_path: Path) -> No
 async def test_run_command_truncates_large_stdout(tmp_path: Path) -> None:
     # Generate output larger than _MAX_OUTPUT_BYTES
     big_write = f"python3 -c \"print('x' * {_MAX_OUTPUT_BYTES + 100})\""
-    stdout, _, _, _, truncated = await _run_command(
-        big_write, str(tmp_path), timeout=30
-    )
+    stdout, _, _, _, truncated = await _run_command(big_write, str(tmp_path), timeout=30)
     assert truncated is True
     assert len(stdout.encode("utf-8")) <= _MAX_OUTPUT_BYTES
 
@@ -124,18 +114,14 @@ async def test_run_command_truncates_large_stdout(tmp_path: Path) -> None:
 @pytest.mark.anyio
 async def test_run_command_truncates_large_stderr(tmp_path: Path) -> None:
     big_write = f"python3 -c \"import sys; sys.stderr.write('x' * {_MAX_OUTPUT_BYTES + 100})\""
-    _, stderr, _, _, truncated = await _run_command(
-        big_write, str(tmp_path), timeout=30
-    )
+    _, stderr, _, _, truncated = await _run_command(big_write, str(tmp_path), timeout=30)
     assert truncated is True
     assert len(stderr.encode("utf-8")) <= _MAX_OUTPUT_BYTES
 
 
 @pytest.mark.anyio
 async def test_run_command_not_truncated_for_small_output(tmp_path: Path) -> None:
-    stdout, _, _, _, truncated = await _run_command(
-        "echo small", str(tmp_path), timeout=10
-    )
+    stdout, _, _, _, truncated = await _run_command("echo small", str(tmp_path), timeout=10)
     assert not truncated
     assert "small" in stdout
 
@@ -237,18 +223,14 @@ async def test_relative_paths_resolve_in_workspace(ws_ctx: ToolContext, workspac
 
 @pytest.mark.anyio
 async def test_timed_out_true_on_slow_command(ws_ctx: ToolContext) -> None:
-    result = await exec_tool.execute(
-        {"command": "sleep 60", "timeout": 0.1}, ws_ctx
-    )
+    result = await exec_tool.execute({"command": "sleep 60", "timeout": 0.1}, ws_ctx)
     assert not result.is_error
     assert result.result["timed_out"] is True
 
 
 @pytest.mark.anyio
 async def test_timeout_exit_code_nonzero_on_kill(ws_ctx: ToolContext) -> None:
-    result = await exec_tool.execute(
-        {"command": "sleep 60", "timeout": 0.1}, ws_ctx
-    )
+    result = await exec_tool.execute({"command": "sleep 60", "timeout": 0.1}, ws_ctx)
     assert not result.is_error
     assert result.result["exit_code"] != 0
 
@@ -256,9 +238,7 @@ async def test_timeout_exit_code_nonzero_on_kill(ws_ctx: ToolContext) -> None:
 @pytest.mark.anyio
 async def test_custom_timeout_respected(ws_ctx: ToolContext) -> None:
     # Command finishes before the generous timeout — should not time out.
-    result = await exec_tool.execute(
-        {"command": "echo done", "timeout": 10}, ws_ctx
-    )
+    result = await exec_tool.execute({"command": "echo done", "timeout": 10}, ws_ctx)
     assert not result.is_error
     assert result.result["timed_out"] is False
 
@@ -296,9 +276,7 @@ async def test_timeout_zero_returns_is_error() -> None:
 
 @pytest.mark.anyio
 async def test_extra_field_returns_is_error() -> None:
-    result = await exec_tool.execute(
-        {"command": "echo x", "unknown_field": True}, _CTX
-    )
+    result = await exec_tool.execute({"command": "echo x", "unknown_field": True}, _CTX)
     assert result.is_error
 
 
@@ -327,9 +305,7 @@ async def test_bad_cwd_writes_audit_log(tmp_path: Path) -> None:
         output_schema=_OUTPUT_SCHEMA,
         audit_log_path=audit_path,
     )
-    async def _tool_with_audit(
-        args: dict[str, Any], ctx: ToolContext
-    ) -> dict[str, Any]:
+    async def _tool_with_audit(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         from meridian_builtin_tools.exec import _run_command as _rc
 
         stdout, stderr, exit_code, timed_out, truncated = await _rc(

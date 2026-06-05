@@ -46,7 +46,6 @@ Covers:
 
 from __future__ import annotations
 
-import asyncio
 import json
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -541,15 +540,16 @@ class TestStdioSuccess:
         proc = _make_stdio_proc(
             [{"jsonrpc": "2.0", "id": "init", "result": {}}, _error_rpc("server crash")]
         )
-        with patch(
-            "sdk_environment._mcp_driver.asyncio.create_subprocess_exec",
-            _mock_create_subprocess_exec(proc),
+        with (
+            patch(
+                "sdk_environment._mcp_driver.asyncio.create_subprocess_exec",
+                _mock_create_subprocess_exec(proc),
+            ),
+            pytest.raises(RuntimeError, match="server crash"),
         ):
-            with pytest.raises(RuntimeError, match="server crash"):
-                await driver.execute(_execute_req())
+            await driver.execute(_execute_req())
 
     async def test_env_vars_forwarded_to_subprocess(self) -> None:
-        import os
 
         driver = _stdio_driver()
         proc = _make_stdio_proc([{"jsonrpc": "2.0", "id": "init", "result": {}}, _ok_rpc()])
@@ -586,15 +586,17 @@ class TestStdioSuccess:
 
     async def test_file_not_found_propagates(self) -> None:
         driver = _stdio_driver()
-        with patch(
-            "sdk_environment._mcp_driver.asyncio.create_subprocess_exec",
-            AsyncMock(side_effect=FileNotFoundError("no such file")),
+        with (
+            patch(
+                "sdk_environment._mcp_driver.asyncio.create_subprocess_exec",
+                AsyncMock(side_effect=FileNotFoundError("no such file")),
+            ),
+            pytest.raises(FileNotFoundError),
         ):
-            with pytest.raises(FileNotFoundError):
-                await driver.execute(_execute_req())
+            await driver.execute(_execute_req())
 
     async def test_empty_command_raises_value_error(self) -> None:
-        driver = McpBackendDriver(transport="stdio")
+        McpBackendDriver(transport="stdio")
         req = ExecuteRequest(
             environment_id="e",
             environment_kind=McpBackendDriver.KIND,
@@ -650,28 +652,28 @@ class TestSseSuccess:
 
     async def test_rpc_error_raises(self) -> None:
         driver = _sse_driver()
-        client_ctx = _make_sse_transport(
-            "/message", _DEFAULT_INIT_RESP, _error_rpc("sse crash")
-        )
-        with patch("sdk_environment._mcp_driver._httpx.AsyncClient", return_value=client_ctx):
-            with pytest.raises(RuntimeError, match="sse crash"):
-                await driver.execute(_execute_req())
+        client_ctx = _make_sse_transport("/message", _DEFAULT_INIT_RESP, _error_rpc("sse crash"))
+        with (
+            patch("sdk_environment._mcp_driver._httpx.AsyncClient", return_value=client_ctx),
+            pytest.raises(RuntimeError, match="sse crash"),
+        ):
+            await driver.execute(_execute_req())
 
     async def test_full_url_endpoint_used_directly(self) -> None:
         driver = _sse_driver()
         full_endpoint_url = "https://mcp.example.com/message?sessionId=abc"
-        client_ctx = _make_sse_transport(
-            full_endpoint_url, _DEFAULT_INIT_RESP, _ok_rpc()
-        )
+        client_ctx = _make_sse_transport(full_endpoint_url, _DEFAULT_INIT_RESP, _ok_rpc())
         with patch("sdk_environment._mcp_driver._httpx.AsyncClient", return_value=client_ctx):
             result = await driver.execute(_execute_req())
         assert result.exit_code == 0
 
     async def test_httpx_unavailable_raises(self) -> None:
         driver = _sse_driver()
-        with patch("sdk_environment._mcp_driver._HTTPX_AVAILABLE", False):
-            with pytest.raises(RuntimeError, match="httpx"):
-                await driver.execute(_execute_req())
+        with (
+            patch("sdk_environment._mcp_driver._HTTPX_AVAILABLE", False),
+            pytest.raises(RuntimeError, match="httpx"),
+        ):
+            await driver.execute(_execute_req())
 
     async def test_empty_server_url_raises(self) -> None:
         driver = McpBackendDriver(transport="sse")
@@ -713,9 +715,7 @@ class TestSseSuccess:
 
 class TestSseUrlNormalisation:
     async def test_trailing_slash_stripped(self) -> None:
-        driver = McpBackendDriver(
-            transport="sse", server_url="https://mcp.example.com/"
-        )
+        driver = McpBackendDriver(transport="sse", server_url="https://mcp.example.com/")
         assert driver._server_url == "https://mcp.example.com"
 
 
@@ -757,12 +757,14 @@ class TestRuntimeIntegration:
         proc = _make_stdio_proc(
             [{"jsonrpc": "2.0", "id": "init", "result": {}}, _error_rpc("crash")]
         )
-        with patch(
-            "sdk_environment._mcp_driver.asyncio.create_subprocess_exec",
-            _mock_create_subprocess_exec(proc),
+        with (
+            patch(
+                "sdk_environment._mcp_driver.asyncio.create_subprocess_exec",
+                _mock_create_subprocess_exec(proc),
+            ),
+            pytest.raises(EnvironmentFailure),
         ):
-            with pytest.raises(EnvironmentFailure):
-                await rt.execute(_execute_req(), _make_options(audit_log))
+            await rt.execute(_execute_req(), _make_options(audit_log))
         assert len(audit_log.entries) == 1
         entry: AuditLogEntry = audit_log.entries[0]
         assert entry.level == "error"
@@ -777,12 +779,14 @@ class TestRuntimeIntegration:
         proc = _make_stdio_proc(
             [{"jsonrpc": "2.0", "id": "init", "result": {}}, _error_rpc("crash")]
         )
-        with patch(
-            "sdk_environment._mcp_driver.asyncio.create_subprocess_exec",
-            _mock_create_subprocess_exec(proc),
+        with (
+            patch(
+                "sdk_environment._mcp_driver.asyncio.create_subprocess_exec",
+                _mock_create_subprocess_exec(proc),
+            ),
+            pytest.raises(EnvironmentFailure) as exc_info,
         ):
-            with pytest.raises(EnvironmentFailure) as exc_info:
-                await rt.execute(_execute_req(), _make_options(audit_log))
+            await rt.execute(_execute_req(), _make_options(audit_log))
         assert exc_info.value.code == "ENV_EXECUTE_FAILED"
 
     async def test_provision_failure_writes_audit(

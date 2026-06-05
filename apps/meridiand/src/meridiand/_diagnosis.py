@@ -10,8 +10,8 @@ audit log.
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any
 
@@ -33,13 +33,15 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-_FAILURE_EVENT_TYPES: frozenset[str] = frozenset({
-    "error",
-    "session.phase_change",
-    "tool_call.vetoed",
-    "budget.warning",
-    "message.truncated",
-})
+_FAILURE_EVENT_TYPES: frozenset[str] = frozenset(
+    {
+        "error",
+        "session.phase_change",
+        "tool_call.vetoed",
+        "budget.warning",
+        "message.truncated",
+    }
+)
 
 
 class SessionDiagnosisError(MeridianError):
@@ -139,9 +141,7 @@ def make_diagnosis_router(*, audit_log: AuditLog, storage_root: Path) -> APIRout
 
                 terminal_phase, stop_reason, failure_events = _extract_failure_summary(events)
 
-                audit_entries = _read_audit_for_session(
-                    storage_root / "audit.ndjson", session_id
-                )
+                audit_entries = _read_audit_for_session(storage_root / "audit.ndjson", session_id)
 
                 replay_fixture_available = (
                     storage_root / "fixtures" / session_id / "model_responses.ndjson"
@@ -168,7 +168,7 @@ def make_diagnosis_router(*, audit_log: AuditLog, storage_root: Path) -> APIRout
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(
             content={

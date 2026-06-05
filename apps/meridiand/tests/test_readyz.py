@@ -3,7 +3,8 @@ Readyz readiness probe conformance suite.
 
 Tests cover:
   - GET /readyz returns 200 when storage, providers, and plugins are all ready.
-  - GET /readyz returns 503 with {"status": "not_ready", "components": [...]} when any component is not ready.
+  - GET /readyz returns 503 with {"status": "not_ready", "components": [...]} when any
+    component is not ready.
   - Response content-type is application/json.
   - OTel span "health.readiness" is emitted on every call.
   - Span carries invocation event "health.readiness.invocation".
@@ -15,7 +16,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from core_errors import HandlerOptions, NoopAuditLog, install_error_handler
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -23,7 +23,6 @@ from meridiand._app import create_app
 from meridiand._readyz import ReadyzState, make_readyz_router
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers

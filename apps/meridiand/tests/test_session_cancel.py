@@ -11,7 +11,8 @@ Tests cover:
   - Audit log detail includes session_id on not-found failure.
   - phase_change event written to event log with after="terminated" and reason="cancelled".
   - phase_change event before field matches the pre-cancel phase.
-  - Tool call cancellation: tool_call.cancelled events emitted for each pending call when in waiting_for_tool.
+  - Tool call cancellation: tool_call.cancelled events emitted for each pending call
+    when in waiting_for_tool.
   - cancelled_tool_call_ids in response matches tool call ids from checkpoint.
   - No tool_call.cancelled events when not in waiting_for_tool phase.
   - Child sessions appear in cancelled_sessions after cancel.
@@ -39,7 +40,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
@@ -47,7 +47,6 @@ from storage_event_log import LocalEventLogWriter
 from storage_reposit import LocalEventLogReader
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -246,9 +245,7 @@ class TestSessionCancelToolCalls:
     ) -> None:
         _write_session(storage_root, "tc-sess1")
         _seed_phase(storage_root, "tc-sess1", "waiting_for_tool")
-        _write_checkpoint(
-            storage_root, "tc-sess1", [{"id": "call_abc"}, {"id": "call_def"}]
-        )
+        _write_checkpoint(storage_root, "tc-sess1", [{"id": "call_abc"}, {"id": "call_def"}])
         _make_client(storage_root).post("/v1/sessions/tc-sess1/cancel")
         events = _read_events(storage_root, "tc-sess1")
         cancelled = [e for e in events if e.type == "tool_call.cancelled"]
@@ -261,9 +258,7 @@ class TestSessionCancelToolCalls:
         body = _make_client(storage_root).post("/v1/sessions/tc-sess2/cancel").json()
         assert "call_xyz" in body["cancelled_tool_call_ids"]
 
-    def test_no_tool_call_events_when_not_waiting_for_tool(
-        self, storage_root: Path
-    ) -> None:
+    def test_no_tool_call_events_when_not_waiting_for_tool(self, storage_root: Path) -> None:
         _write_session(storage_root, "tc-sess3")
         _seed_phase(storage_root, "tc-sess3", "idle")
         _write_checkpoint(storage_root, "tc-sess3", [{"id": "call_idle"}])
@@ -271,9 +266,7 @@ class TestSessionCancelToolCalls:
         events = _read_events(storage_root, "tc-sess3")
         assert not any(e.type == "tool_call.cancelled" for e in events)
 
-    def test_empty_cancelled_tool_call_ids_when_no_checkpoint(
-        self, storage_root: Path
-    ) -> None:
+    def test_empty_cancelled_tool_call_ids_when_no_checkpoint(self, storage_root: Path) -> None:
         _write_session(storage_root, "tc-sess4")
         _seed_phase(storage_root, "tc-sess4", "waiting_for_tool")
         body = _make_client(storage_root).post("/v1/sessions/tc-sess4/cancel").json()

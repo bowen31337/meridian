@@ -21,7 +21,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-import httpx
 from core_errors import (
     AuditLog,
     AuditLogEntry,
@@ -33,6 +32,7 @@ from core_errors import (
 )
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
+import httpx
 
 from ._webhook_channel_driver import SecretResolver
 
@@ -111,29 +111,33 @@ class CredentialProxyForwardError(MeridianError):
 _HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
 
 # Headers stripped from the inbound client request before forwarding upstream.
-_REQUEST_STRIP_HEADERS = frozenset({
-    "host",
-    "connection",
-    "transfer-encoding",
-    "te",
-    "trailer",
-    "upgrade",
-    "proxy-authorization",
-    "proxy-authenticate",
-    "content-length",
-    "authorization",  # replaced by vault-resolved token
-})
+_REQUEST_STRIP_HEADERS = frozenset(
+    {
+        "host",
+        "connection",
+        "transfer-encoding",
+        "te",
+        "trailer",
+        "upgrade",
+        "proxy-authorization",
+        "proxy-authenticate",
+        "content-length",
+        "authorization",  # replaced by vault-resolved token
+    }
+)
 
 # Headers stripped from the upstream response before returning to the client.
-_RESPONSE_STRIP_HEADERS = frozenset({
-    "connection",
-    "transfer-encoding",
-    "te",
-    "trailer",
-    "upgrade",
-    "content-encoding",  # httpx decodes response bodies; header would be stale
-    "content-length",    # recalculated by Starlette from response bytes
-})
+_RESPONSE_STRIP_HEADERS = frozenset(
+    {
+        "connection",
+        "transfer-encoding",
+        "te",
+        "trailer",
+        "upgrade",
+        "content-encoding",  # httpx decodes response bodies; header would be stale
+        "content-length",  # recalculated by Starlette from response bytes
+    }
+)
 
 
 def make_credential_proxy_router(
@@ -152,9 +156,7 @@ def make_credential_proxy_router(
     never returned to the caller.
     """
     router = APIRouter()
-    _providers: dict[str, CredentialProxyProviderConfig] = {
-        p.name: p for p in providers
-    }
+    _providers: dict[str, CredentialProxyProviderConfig] = {p.name: p for p in providers}
 
     @router.api_route(
         "/v1/credential-proxy/{provider_name}/{path:path}",
@@ -240,7 +242,7 @@ def make_credential_proxy_router(
                         message=f"Failed to forward request to '{target_url}': {exc}",
                         timestamp=_now(),
                         cause=exc,
-                    )
+                    ) from exc
 
                 # 6. Return upstream response (hop-by-hop headers stripped)
                 response_headers = {

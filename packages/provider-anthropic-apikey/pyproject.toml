@@ -21,6 +21,9 @@ dev = [
     "opentelemetry-sdk>=1.24.0",
 ]
 
+[tool.uv.sources]
+meridian-sdk-provider = { workspace = true }
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/meridian_provider_anthropic_apikey"]
 

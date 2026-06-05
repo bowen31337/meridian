@@ -18,10 +18,8 @@ Covers:
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 
-import pytest
 from storage_event_log import (
     SUBSCRIBER_CHANNEL_SIZE,
     LocalEventLogWriter,

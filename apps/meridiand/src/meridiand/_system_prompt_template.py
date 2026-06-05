@@ -10,10 +10,10 @@ caller can surface the error.
 
 from __future__ import annotations
 
-import json
-import re
 from datetime import UTC, datetime
+import json
 from pathlib import Path
+import re
 
 from core_errors import (
     AuditLog,
@@ -152,4 +152,4 @@ def expand_system_prompt(
                     detail={"message": err2.message},
                 )
             )
-            raise err2
+            raise err2 from exc

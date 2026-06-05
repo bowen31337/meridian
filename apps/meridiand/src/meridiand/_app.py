@@ -1,95 +1,101 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import logging
 from collections.abc import AsyncGenerator
+import contextlib
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+import logging
 from pathlib import Path
 
+from api_models import make_router as make_models_router
 from core_errors import AuditLog, AuditLogEntry, HandlerOptions, install_error_handler
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from meridian_plugin_loader import PluginLoader
-from storage_event_log import EventLogWriter, SubscriberBus
-
 from meridian_sdk_provider import ModelRouter
 from sdk_channel import ChannelRuntime
+from storage_event_log import EventLogWriter, SubscriberBus
 
 from ._acp import AcpInboundHandler, AcpPeerClient, make_acp_router
 from ._acp_compliance import make_acp_compliance_router
-from ._cancel import make_cancel_router
-from ._session_cancel import make_session_cancel_router
-from ._checkpoint import make_checkpoint_router
-from ._ci_regression import make_ci_regression_router
-from ._crash_recovery_soak import make_crash_recovery_soak_router
-from ._e8_hardening_soak import make_e8_hardening_soak_router
-from ._skill_forge_soak import make_skill_forge_soak_router
-from ._vault_leak_soak import make_vault_leak_soak_router
-from ._compaction import make_compaction_router, run_compaction_loop
-from ._config import AuthConfig, CompactionConfig, CronSchedulerConfig, CorsConfig, SkillForgeConfig, WebhookSenderConfig
-from ._secret_ref import SecretRefResolver
-from ._sighup import install_sighup_handler, remove_sighup_handler
-from ._system_config import make_system_config_router
-from ._cron import make_cron_router
-from ._cron_scheduler import run_cron_scheduler_loop
-from ._environments import make_environments_router
-from ._imports import make_imports_router
-from ._memory_stores import make_memory_stores_router
-from ._vault_backend_encrypted_file import EncryptedFileVaultBackend
-from ._vault_backend_os_keychain import OsKeychainVaultBackend
-from ._credential_proxy import CredentialProxyProviderConfig, make_credential_proxy_router
-from ._vaults import make_vaults_router
-from ._webhook_sender import run_webhook_sender_loop
-from ._skill_forge import run_skill_forge_loop
 from ._agents import make_agents_router
+from ._auth_middleware import AuthMiddleware
 from ._budget_exceeded import make_budget_exceeded_router
 from ._budget_overrun_discipline import make_budget_overrun_discipline_router
-from ._soft_budget_exceeded import make_soft_budget_exceeded_router
-from ._user_can_continue import make_user_can_continue_router
 from ._budgets_reports import make_router as make_budgets_reports_router
-from ._channels import make_channels_router
-from ._system_channel import make_system_channel_router
-from ._webhook_channel_driver import SecretResolver
-from ._skill_activations import make_skill_activations_router
-from ._skill_forge_proposals import make_skill_forge_proposals_router
-from ._skill_suggestions import make_skill_suggestions_router
-from ._skills import make_skills_router
-from ._user_profiles import make_user_profiles_router
-from ._hooks import make_hooks_router
-from ._webhooks import make_webhooks_router
-from ._diagnosis import make_diagnosis_router
+from ._cancel import make_cancel_router
 from ._canvas_interactions import make_canvas_interactions_router
+from ._channels import make_channels_router
+from ._checkpoint import make_checkpoint_router
+from ._ci_regression import make_ci_regression_router
+from ._compaction import make_compaction_router, run_compaction_loop
+from ._config import (
+    AuthConfig,
+    CompactionConfig,
+    CorsConfig,
+    CronSchedulerConfig,
+    SkillForgeConfig,
+    WebhookSenderConfig,
+)
+from ._crash_recovery_soak import make_crash_recovery_soak_router
+from ._credential_proxy import CredentialProxyProviderConfig, make_credential_proxy_router
+from ._cron import make_cron_router
+from ._cron_scheduler import run_cron_scheduler_loop
+from ._cursor_middleware import CursorPaginationMiddleware
+from ._diagnosis import make_diagnosis_router
+from ._e8_hardening_soak import make_e8_hardening_soak_router
+from ._environments import make_environments_router
+from ._error_envelope_middleware import ErrorEnvelopeMiddleware
 from ._events import make_events_router
 from ._files import make_files_router
 from ._handoff import make_handoff_router
+from ._harness_pool import HarnessPool
+from ._healthz import make_healthz_router
+from ._hooks import make_hooks_router
+from ._idempotency_middleware import IdempotencyKeyMiddleware
+from ._imports import make_imports_router
 from ._kb import make_kb_router
+from ._memory_stores import make_memory_stores_router
 from ._messages import make_messages_router
+from ._metrics import make_metrics_router
 from ._model_call_event_log import EventLogModelCallAdapter
-from api_models import make_router as make_models_router
+from ._openapi_export import make_openapi_export_router
 from ._parallel_runs import make_parallel_runs_router
 from ._phase import make_phase_router
+from ._readyz import ReadyzState, make_readyz_router
 from ._replay import make_replay_router
 from ._resume import make_resume_router
-from ._sessions import make_sessions_router
+from ._secret_ref import SecretRefResolver
+from ._session_cancel import make_session_cancel_router
 from ._session_wake import make_session_wake_router
-from ._submit_tool_results import make_submit_tool_results_router
-from ._harness_pool import HarnessPool
-from ._wake import make_wake_router
-from ._auth_middleware import AuthMiddleware
-from ._cursor_middleware import CursorPaginationMiddleware
-from ._error_envelope_middleware import ErrorEnvelopeMiddleware
-from ._idempotency_middleware import IdempotencyKeyMiddleware
-from ._system_audit_middleware import SystemAuditMiddleware
-from ._healthz import make_healthz_router
-from ._metrics import make_metrics_router
-from ._readyz import ReadyzState, make_readyz_router
-from ._openapi_export import make_openapi_export_router
-from ._ui import make_ui_router
+from ._sessions import make_sessions_router
+from ._sighup import install_sighup_handler, remove_sighup_handler
+from ._skill_activations import make_skill_activations_router
+from ._skill_forge import run_skill_forge_loop
+from ._skill_forge_proposals import make_skill_forge_proposals_router
+from ._skill_forge_soak import make_skill_forge_soak_router
+from ._skill_suggestions import make_skill_suggestions_router
+from ._skills import make_skills_router
+from ._soft_budget_exceeded import make_soft_budget_exceeded_router
 from ._spawn import make_spawn_router
+from ._submit_tool_results import make_submit_tool_results_router
+from ._system_audit_middleware import SystemAuditMiddleware
+from ._system_channel import make_system_channel_router
+from ._system_config import make_system_config_router
 from ._telemetry import get_tracer, record_create_event, record_factory_failure
+from ._ui import make_ui_router
+from ._user_can_continue import make_user_can_continue_router
+from ._user_profiles import make_user_profiles_router
+from ._vault_backend_encrypted_file import EncryptedFileVaultBackend
+from ._vault_backend_os_keychain import OsKeychainVaultBackend
+from ._vault_leak_soak import make_vault_leak_soak_router
+from ._vaults import make_vaults_router
+from ._wake import make_wake_router
+from ._webhook_channel_driver import SecretResolver
+from ._webhook_sender import run_webhook_sender_loop
+from ._webhooks import make_webhooks_router
 
 _LOG = logging.getLogger("meridiand")
 
@@ -172,11 +178,7 @@ def create_app(
                 readyz_state.plugins = True
 
                 compaction_task: asyncio.Task[None] | None = None
-                if (
-                    storage_root is not None
-                    and compaction is not None
-                    and compaction.enabled
-                ):
+                if storage_root is not None and compaction is not None and compaction.enabled:
                     compaction_task = asyncio.create_task(
                         run_compaction_loop(storage_root, compaction, audit_log)
                     )
@@ -279,9 +281,7 @@ def create_app(
             app.include_router(make_openapi_export_router(audit_log=audit_log))
             if serve_ui_enabled:
                 assert ui_dist_path is not None
-                app.include_router(
-                    make_ui_router(audit_log=audit_log, ui_dist_path=ui_dist_path)
-                )
+                app.include_router(make_ui_router(audit_log=audit_log, ui_dist_path=ui_dist_path))
 
             if storage_root is not None:
                 app.include_router(
@@ -306,9 +306,7 @@ def create_app(
                 app.include_router(
                     make_resume_router(audit_log=audit_log, storage_root=storage_root)
                 )
-                app.include_router(
-                    make_wake_router(audit_log=audit_log, storage_root=storage_root)
-                )
+                app.include_router(make_wake_router(audit_log=audit_log, storage_root=storage_root))
                 if harness_pool is not None:
                     app.include_router(
                         make_session_wake_router(
@@ -317,9 +315,7 @@ def create_app(
                             harness_pool=harness_pool,
                         )
                     )
-                app.include_router(
-                    make_kb_router(audit_log=audit_log, storage_root=storage_root)
-                )
+                app.include_router(make_kb_router(audit_log=audit_log, storage_root=storage_root))
                 app.include_router(
                     make_spawn_router(audit_log=audit_log, storage_root=storage_root)
                 )
@@ -336,9 +332,7 @@ def create_app(
                     make_ci_regression_router(audit_log=audit_log, storage_root=storage_root)
                 )
                 app.include_router(
-                    make_crash_recovery_soak_router(
-                        audit_log=audit_log, storage_root=storage_root
-                    )
+                    make_crash_recovery_soak_router(audit_log=audit_log, storage_root=storage_root)
                 )
                 app.include_router(
                     make_skill_forge_soak_router(audit_log=audit_log, storage_root=storage_root)
@@ -347,13 +341,9 @@ def create_app(
                     make_vault_leak_soak_router(audit_log=audit_log, storage_root=storage_root)
                 )
                 app.include_router(
-                    make_e8_hardening_soak_router(
-                        audit_log=audit_log, storage_root=storage_root
-                    )
+                    make_e8_hardening_soak_router(audit_log=audit_log, storage_root=storage_root)
                 )
-                app.include_router(
-                    make_cron_router(audit_log=audit_log, storage_root=storage_root)
-                )
+                app.include_router(make_cron_router(audit_log=audit_log, storage_root=storage_root))
                 app.include_router(
                     make_hooks_router(audit_log=audit_log, storage_root=storage_root)
                 )
@@ -367,7 +357,9 @@ def create_app(
                     make_skill_activations_router(audit_log=audit_log, storage_root=storage_root)
                 )
                 app.include_router(
-                    make_skill_forge_proposals_router(audit_log=audit_log, storage_root=storage_root)
+                    make_skill_forge_proposals_router(
+                        audit_log=audit_log, storage_root=storage_root
+                    )
                 )
                 app.include_router(
                     make_skill_suggestions_router(audit_log=audit_log, storage_root=storage_root)
@@ -503,15 +495,12 @@ def create_app(
                         inbound_handler=acp_inbound_handler,
                     )
                 )
-                app.include_router(
-                    make_acp_compliance_router(audit_log=audit_log)
-                )
+                app.include_router(make_acp_compliance_router(audit_log=audit_log))
             if model_router is not None:
                 if event_log is not None:
                     from storage_event_log import EventLogRuntime
-                    model_router.set_event_log(
-                        EventLogModelCallAdapter(EventLogRuntime(event_log))
-                    )
+
+                    model_router.set_event_log(EventLogModelCallAdapter(EventLogRuntime(event_log)))
                 app.include_router(
                     make_messages_router(
                         audit_log=audit_log,

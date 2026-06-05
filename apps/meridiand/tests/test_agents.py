@@ -128,21 +128,15 @@ Tests cover:
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
-from typing import Any
 
-import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from meridiand._agents import _content_version_id
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
-from meridiand._agents import _content_version_id, make_agents_router
-from core_errors import HandlerOptions, install_error_handler
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -258,7 +252,9 @@ class TestAgentCreateResponse:
 
     def test_version_id_is_content_addressed(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.post("/v1/agents", json=_body(config={"k": "v"}, capabilities=["core.read"])).json()
+        body = client.post(
+            "/v1/agents", json=_body(config={"k": "v"}, capabilities=["core.read"])
+        ).json()
         agent_id = body["id"]
         expected = _content_version_id(
             agent_id=agent_id,
@@ -328,7 +324,9 @@ class TestAgentCreateResponse:
 
     def test_version_capabilities_stored_when_provided(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        body = client.post("/v1/agents", json=_body(capabilities=["core.read", "core.write"])).json()
+        body = client.post(
+            "/v1/agents", json=_body(capabilities=["core.read", "core.write"])
+        ).json()
         assert body["version"]["capabilities"] == ["core.read", "core.write"]
 
 
@@ -451,8 +449,7 @@ class TestAgentAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/agents", json=_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "agent.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.create.failed"
         )
         assert record["level"] == "error"
 
@@ -460,8 +457,7 @@ class TestAgentAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/agents", json=_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "agent.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.create.failed"
         )
         assert record["code"] == "agent_invalid_request"
 
@@ -469,8 +465,7 @@ class TestAgentAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/agents", json=_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "agent.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.create.failed"
         )
         assert record["detail"]["agent_id"].startswith("agent_")
 
@@ -478,8 +473,7 @@ class TestAgentAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/agents", json=_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "agent.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.create.failed"
         )
         assert "name" in record["detail"]
 
@@ -487,8 +481,7 @@ class TestAgentAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/agents", json=_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "agent.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.create.failed"
         )
         assert "message" in record["detail"]
         assert len(record["detail"]["message"]) > 0
@@ -521,6 +514,7 @@ class TestAgentOtel:
 
     def test_failure_span_has_error_status(self, storage_root: Path) -> None:
         from opentelemetry.trace import StatusCode
+
         client = self._client(storage_root)
         client.post("/v1/agents", json=_body(name=""))
         spans = [s for s in _otel_exporter.get_finished_spans() if s.name == "agent.create"]
@@ -551,8 +545,10 @@ class TestAgentAppWiring:
         assert "/v1/agents" in routes
 
     def test_create_app_omits_agents_route_without_storage_root(self) -> None:
-        from meridiand._audit import FileAuditLog
         import tempfile
+
+        from meridiand._audit import FileAuditLog
+
         with tempfile.TemporaryDirectory() as tmp:
             audit_log = FileAuditLog(Path(tmp))
             app = create_app(audit_log, storage_root=None)
@@ -694,6 +690,7 @@ class TestAgentDeleteOtel:
 
     def test_failure_span_has_error_status(self, storage_root: Path) -> None:
         from opentelemetry.trace import StatusCode
+
         client = self._client(storage_root)
         client.delete("/v1/agents/agent_unknown")
         spans = [s for s in _otel_exporter.get_finished_spans() if s.name == "agent.delete"]
@@ -894,6 +891,7 @@ class TestAgentGetOtel:
 
     def test_failure_span_has_error_status(self, storage_root: Path) -> None:
         from opentelemetry.trace import StatusCode
+
         client = self._client(storage_root)
         client.get("/v1/agents/agent_unknown")
         spans = [s for s in _otel_exporter.get_finished_spans() if s.name == "agent.get"]
@@ -1143,7 +1141,8 @@ class TestAgentVersionCreateNotFound:
         client = _make_client(storage_root)
         client.post("/v1/agents/agent_unknown/versions", json=_ver_body())
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "agent.version.create.failed"
         )
         assert record["level"] == "error"
@@ -1152,7 +1151,8 @@ class TestAgentVersionCreateNotFound:
         client = _make_client(storage_root)
         client.post("/v1/agents/agent_unknown/versions", json=_ver_body())
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "agent.version.create.failed"
         )
         assert record["code"] == "agent_not_found"
@@ -1161,7 +1161,8 @@ class TestAgentVersionCreateNotFound:
         client = _make_client(storage_root)
         client.post("/v1/agents/agent_unknown/versions", json=_ver_body())
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "agent.version.create.failed"
         )
         assert record["detail"]["agent_id"] == "agent_unknown"
@@ -1209,7 +1210,8 @@ class TestAgentVersionCreateValidation:
         agent_id = _create_agent(client)
         client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "agent.version.create.failed"
         )
         assert record["level"] == "error"
@@ -1219,7 +1221,8 @@ class TestAgentVersionCreateValidation:
         agent_id = _create_agent(client)
         client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "agent.version.create.failed"
         )
         assert record["code"] == "agent_invalid_request"
@@ -1229,7 +1232,8 @@ class TestAgentVersionCreateValidation:
         agent_id = _create_agent(client)
         client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "agent.version.create.failed"
         )
         assert record["detail"]["agent_id"] == agent_id
@@ -1239,7 +1243,8 @@ class TestAgentVersionCreateValidation:
         agent_id = _create_agent(client)
         client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name=""))
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "agent.version.create.failed"
         )
         assert len(record["detail"]["message"]) > 0
@@ -1274,12 +1279,10 @@ class TestAgentVersionCreateOtel:
 
     def test_failure_span_has_error_status(self, storage_root: Path) -> None:
         from opentelemetry.trace import StatusCode
+
         client = self._client(storage_root)
         client.post("/v1/agents/agent_unknown/versions", json=_ver_body())
-        spans = [
-            s for s in _otel_exporter.get_finished_spans()
-            if s.name == "agent.version.create"
-        ]
+        spans = [s for s in _otel_exporter.get_finished_spans() if s.name == "agent.version.create"]
         assert any(s.status.status_code == StatusCode.ERROR for s in spans)
 
     def test_span_has_agent_id_attribute(self, storage_root: Path) -> None:
@@ -1287,10 +1290,7 @@ class TestAgentVersionCreateOtel:
         agent_id = client.post("/v1/agents", json=_body()).json()["id"]
         _otel_exporter.clear()
         client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name="v2"))
-        spans = [
-            s for s in _otel_exporter.get_finished_spans()
-            if s.name == "agent.version.create"
-        ]
+        spans = [s for s in _otel_exporter.get_finished_spans() if s.name == "agent.version.create"]
         assert any(s.attributes.get("agent.id") == agent_id for s in spans)
 
 
@@ -1467,8 +1467,7 @@ class TestAgentVersionGetAuditLog:
         client = _make_client(storage_root)
         client.get("/v1/agents/agent_unknown/versions/agentver_abc123")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "agent.version.get.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.version.get.failed"
         )
         assert record["level"] == "error"
 
@@ -1476,8 +1475,7 @@ class TestAgentVersionGetAuditLog:
         client = _make_client(storage_root)
         client.get("/v1/agents/agent_unknown/versions/agentver_abc123")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "agent.version.get.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.version.get.failed"
         )
         assert record["code"] == "agent_not_found"
 
@@ -1486,8 +1484,7 @@ class TestAgentVersionGetAuditLog:
         agent_id = _create_agent(client)
         client.get(f"/v1/agents/{agent_id}/versions/agentver_doesnotexist")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "agent.version.get.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.version.get.failed"
         )
         assert record["code"] == "agent_version_not_found"
 
@@ -1495,8 +1492,7 @@ class TestAgentVersionGetAuditLog:
         client = _make_client(storage_root)
         client.get("/v1/agents/agent_unknown/versions/agentver_abc123")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "agent.version.get.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.version.get.failed"
         )
         assert record["detail"]["agent_id"] == "agent_unknown"
 
@@ -1504,8 +1500,7 @@ class TestAgentVersionGetAuditLog:
         client = _make_client(storage_root)
         client.get("/v1/agents/agent_unknown/versions/agentver_abc123")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "agent.version.get.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.version.get.failed"
         )
         assert record["detail"]["version_id"] == "agentver_abc123"
 
@@ -1513,8 +1508,7 @@ class TestAgentVersionGetAuditLog:
         client = _make_client(storage_root)
         client.get("/v1/agents/agent_unknown/versions/agentver_abc123")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "agent.version.get.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.version.get.failed"
         )
         assert len(record["detail"]["message"]) > 0
 
@@ -1555,12 +1549,10 @@ class TestAgentVersionGetOtel:
 
     def test_failure_span_has_error_status(self, storage_root: Path) -> None:
         from opentelemetry.trace import StatusCode
+
         client = self._client(storage_root)
         client.get("/v1/agents/agent_unknown/versions/agentver_abc123")
-        spans = [
-            s for s in _otel_exporter.get_finished_spans()
-            if s.name == "agent.version.get"
-        ]
+        spans = [s for s in _otel_exporter.get_finished_spans() if s.name == "agent.version.get"]
         assert any(s.status.status_code == StatusCode.ERROR for s in spans)
 
     def test_span_has_agent_id_attribute(self, storage_root: Path) -> None:
@@ -1568,10 +1560,7 @@ class TestAgentVersionGetOtel:
         agent_id, version_id = _create_agent_with_version(client)
         _otel_exporter.clear()
         client.get(f"/v1/agents/{agent_id}/versions/{version_id}")
-        spans = [
-            s for s in _otel_exporter.get_finished_spans()
-            if s.name == "agent.version.get"
-        ]
+        spans = [s for s in _otel_exporter.get_finished_spans() if s.name == "agent.version.get"]
         assert any(s.attributes.get("agent.id") == agent_id for s in spans)
 
     def test_span_has_version_id_attribute(self, storage_root: Path) -> None:
@@ -1579,10 +1568,7 @@ class TestAgentVersionGetOtel:
         agent_id, version_id = _create_agent_with_version(client)
         _otel_exporter.clear()
         client.get(f"/v1/agents/{agent_id}/versions/{version_id}")
-        spans = [
-            s for s in _otel_exporter.get_finished_spans()
-            if s.name == "agent.version.get"
-        ]
+        spans = [s for s in _otel_exporter.get_finished_spans() if s.name == "agent.version.get"]
         assert any(s.attributes.get("agent.version.id") == version_id for s in spans)
 
 
@@ -1658,9 +1644,7 @@ class TestAgentListSuccess:
         ids = [item["id"] for item in body["items"]]
         assert agent_id not in ids
 
-    def test_non_deleted_agents_still_appear_after_other_deletion(
-        self, storage_root: Path
-    ) -> None:
+    def test_non_deleted_agents_still_appear_after_other_deletion(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         keep_id = client.post("/v1/agents", json=_body(name="keeper")).json()["id"]
         del_id = client.post("/v1/agents", json=_body(name="gone")).json()["id"]
@@ -1744,9 +1728,7 @@ class TestAgentListFilters:
         body = client.get("/v1/agents?created_before=1970-01-01T00:00:00%2B00:00").json()
         assert body["items"] == []
 
-    def test_created_after_and_before_both_pass_returns_agents(
-        self, storage_root: Path
-    ) -> None:
+    def test_created_after_and_before_both_pass_returns_agents(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         client.post("/v1/agents", json=_body())
         url = (
@@ -1855,8 +1837,7 @@ class TestAgentListAuditLog:
         client = _make_client(storage_root)
         client.get("/v1/agents?cursor=bad!!!")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "agent.list.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.list.failed"
         )
         assert record["level"] == "error"
 
@@ -1864,8 +1845,7 @@ class TestAgentListAuditLog:
         client = _make_client(storage_root)
         client.get("/v1/agents?cursor=bad!!!")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "agent.list.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.list.failed"
         )
         assert record["code"] == "cursor_invalid"
 
@@ -1873,8 +1853,7 @@ class TestAgentListAuditLog:
         client = _make_client(storage_root)
         client.get("/v1/agents?cursor=bad!!!")
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "agent.list.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.list.failed"
         )
         assert len(record["detail"]["message"]) > 0
 
@@ -1912,6 +1891,7 @@ class TestAgentListOtel:
 
     def test_failure_span_has_error_status(self, storage_root: Path) -> None:
         from opentelemetry.trace import StatusCode
+
         client = self._client(storage_root)
         client.get("/v1/agents?cursor=bad!!!")
         spans = [s for s in _otel_exporter.get_finished_spans() if s.name == "agent.list"]
@@ -1976,8 +1956,12 @@ class TestAgentVersionListSuccess:
     def test_items_contain_all_versions_for_agent(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         agent_id = _create_agent(client)
-        v1_id = client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name="v2")).json()["id"]
-        v2_id = client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name="v3")).json()["id"]
+        v1_id = client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name="v2")).json()[
+            "id"
+        ]
+        v2_id = client.post(f"/v1/agents/{agent_id}/versions", json=_ver_body(name="v3")).json()[
+            "id"
+        ]
         body = client.get(f"/v1/agents/{agent_id}/versions").json()
         ids = {item["id"] for item in body["items"]}
         assert v1_id in ids
@@ -2089,7 +2073,8 @@ class TestAgentVersionListAuditLog:
         agent_id = _create_agent(client)
         client.get(f"/v1/agents/{agent_id}/versions?cursor=bad!!!")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "agent.versions.list.failed"
         )
         assert record["level"] == "error"
@@ -2099,7 +2084,8 @@ class TestAgentVersionListAuditLog:
         agent_id = _create_agent(client)
         client.get(f"/v1/agents/{agent_id}/versions?cursor=bad!!!")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "agent.versions.list.failed"
         )
         assert record["code"] == "cursor_invalid"
@@ -2109,7 +2095,8 @@ class TestAgentVersionListAuditLog:
         agent_id = _create_agent(client)
         client.get(f"/v1/agents/{agent_id}/versions?cursor=bad!!!")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "agent.versions.list.failed"
         )
         assert record["detail"]["agent_id"] == agent_id
@@ -2119,7 +2106,8 @@ class TestAgentVersionListAuditLog:
         agent_id = _create_agent(client)
         client.get(f"/v1/agents/{agent_id}/versions?cursor=bad!!!")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "agent.versions.list.failed"
         )
         assert len(record["detail"]["message"]) > 0
@@ -2162,13 +2150,11 @@ class TestAgentVersionListOtel:
 
     def test_failure_span_has_error_status(self, storage_root: Path) -> None:
         from opentelemetry.trace import StatusCode
+
         client = self._client(storage_root)
         agent_id = client.post("/v1/agents", json=_body()).json()["id"]
         client.get(f"/v1/agents/{agent_id}/versions?cursor=bad!!!")
-        spans = [
-            s for s in _otel_exporter.get_finished_spans()
-            if s.name == "agent.versions.list"
-        ]
+        spans = [s for s in _otel_exporter.get_finished_spans() if s.name == "agent.versions.list"]
         assert any(s.status.status_code == StatusCode.ERROR for s in spans)
 
     def test_span_has_agent_id_attribute(self, storage_root: Path) -> None:
@@ -2176,10 +2162,7 @@ class TestAgentVersionListOtel:
         agent_id = client.post("/v1/agents", json=_body()).json()["id"]
         _otel_exporter.clear()
         client.get(f"/v1/agents/{agent_id}/versions")
-        spans = [
-            s for s in _otel_exporter.get_finished_spans()
-            if s.name == "agent.versions.list"
-        ]
+        spans = [s for s in _otel_exporter.get_finished_spans() if s.name == "agent.versions.list"]
         assert any(s.attributes.get("agent.id") == agent_id for s in spans)
 
 
@@ -2189,7 +2172,8 @@ class TestAgentVersionListOtel:
 
 
 class TestAgentBodySchemaValidation:
-    """POST /v1/agents: instructions cap, model_routing.rules, capabilities §6 grammar, tools names."""
+    """POST /v1/agents: instructions cap, model_routing.rules, capabilities §6 grammar,
+    tools names."""
 
     # -- instructions length cap --
 
@@ -2259,7 +2243,9 @@ class TestAgentBodySchemaValidation:
 
     def test_tool_with_name_returns_201(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
-        resp = client.post("/v1/agents", json=_body(tools=[{"name": "my_tool", "description": "d"}]))
+        resp = client.post(
+            "/v1/agents", json=_body(tools=[{"name": "my_tool", "description": "d"}])
+        )
         assert resp.status_code == 201
 
     def test_tool_missing_name_returns_422(self, storage_root: Path) -> None:
@@ -2289,8 +2275,7 @@ class TestAgentBodySchemaValidation:
         client = _make_client(storage_root)
         client.post("/v1/agents", json=_body(instructions="x" * 32_769))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "agent.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.create.failed"
         )
         assert record["level"] == "error"
 
@@ -2298,8 +2283,7 @@ class TestAgentBodySchemaValidation:
         client = _make_client(storage_root)
         client.post("/v1/agents", json=_body(instructions="x" * 32_769))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "agent.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.create.failed"
         )
         assert record["code"] == "agent_invalid_request"
 
@@ -2307,8 +2291,7 @@ class TestAgentBodySchemaValidation:
         client = _make_client(storage_root)
         client.post("/v1/agents", json=_body(instructions="x" * 32_769))
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "agent.create.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "agent.create.failed"
         )
         assert len(record["detail"]["message"]) > 0
 
@@ -2460,7 +2443,8 @@ class TestAgentVersionBodySchemaValidation:
             json=_ver_body(instructions="x" * 32_769),
         )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "agent.version.create.failed"
         )
         assert record["level"] == "error"
@@ -2473,7 +2457,8 @@ class TestAgentVersionBodySchemaValidation:
             json=_ver_body(instructions="x" * 32_769),
         )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "agent.version.create.failed"
         )
         assert record["code"] == "agent_invalid_request"
@@ -2486,7 +2471,8 @@ class TestAgentVersionBodySchemaValidation:
             json=_ver_body(instructions="x" * 32_769),
         )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "agent.version.create.failed"
         )
         assert len(record["detail"]["message"]) > 0

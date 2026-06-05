@@ -24,21 +24,18 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
+from core_errors import HandlerOptions, install_error_handler
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
+from meridiand._auth_middleware import AuthMiddleware
+from meridiand._error_envelope_middleware import ErrorEnvelopeMiddleware
 from meridiand._harness_pool import HarnessPool
 from meridiand._session_wake import make_session_wake_router
 from storage_reposit import LocalEventLogReader, PhaseProjection
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
-from core_errors import HandlerOptions, install_error_handler
-from meridiand._auth_middleware import AuthMiddleware
-from meridiand._error_envelope_middleware import ErrorEnvelopeMiddleware
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -110,9 +107,7 @@ class _ErrorPool:
         raise RuntimeError("injected pool failure")
 
 
-def _make_client_with_pool(
-    storage_root: Path, audit_log: FileAuditLog, pool: Any
-) -> TestClient:
+def _make_client_with_pool(storage_root: Path, audit_log: FileAuditLog, pool: Any) -> TestClient:
     app = FastAPI()
     app.add_middleware(AuthMiddleware, audit_log=audit_log, bearer_token=None)
     app.add_middleware(ErrorEnvelopeMiddleware, audit_log=audit_log, hooks_dir=None)

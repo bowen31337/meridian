@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import ipaddress
 import json
-from datetime import UTC, datetime
 
 from core_errors import AuditLog, AuditLogEntry, StructuredEvent, record_invocation_event
 from starlette.types import ASGIApp, Receive, Scope, Send

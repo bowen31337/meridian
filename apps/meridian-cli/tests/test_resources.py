@@ -17,11 +17,10 @@ import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 from click.testing import CliRunner
-
 from meridian_cli.__main__ import cli
 from meridian_cli._client import DaemonError
+import pytest
 
 _RESOURCES = [
     "agents",
@@ -93,7 +92,9 @@ def test_delete_calls_delete_with_id(resource: str, mock_client: MagicMock) -> N
     mock_client.request.return_value = None
     result = _invoke([resource, "delete", "abc123"], mock_client)
     assert result.exit_code == 0
-    mock_client.request.assert_called_once_with("DELETE", f"/v1/x/{resource}/abc123", json_body=None)
+    mock_client.request.assert_called_once_with(
+        "DELETE", f"/v1/x/{resource}/abc123", json_body=None
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -102,9 +103,11 @@ def test_delete_calls_delete_with_id(resource: str, mock_client: MagicMock) -> N
 
 
 @pytest.mark.parametrize("resource", _RESOURCES)
-def test_list_daemon_error_exits_nonzero(resource: str, mock_client: MagicMock, tmp_path: Path) -> None:
+def test_list_daemon_error_exits_nonzero(
+    resource: str, mock_client: MagicMock, tmp_path: Path
+) -> None:
     mock_client.request.side_effect = DaemonError(code="daemon_unreachable", message="no daemon")
-    audit_log = tmp_path / "audit.ndjson"
+    tmp_path / "audit.ndjson"
 
     with patch("meridian_cli._resource.write_audit") as mock_audit:
         result = _invoke([resource, "list"], mock_client)

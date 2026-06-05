@@ -27,13 +27,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -282,11 +280,7 @@ class TestResumeEndpointFailure:
         client.post("/v1/x/sessions/no-audit-sess/resume")
         audit_path = storage_root / "audit.ndjson"
         assert audit_path.exists()
-        records = [
-            json.loads(line)
-            for line in audit_path.read_text().splitlines()
-            if line.strip()
-        ]
+        records = [json.loads(line) for line in audit_path.read_text().splitlines() if line.strip()]
         assert any(r.get("event") == "session.resume.failed" for r in records)
 
     def test_missing_both_audit_detail_has_session_id(self, storage_root: Path) -> None:
@@ -294,11 +288,7 @@ class TestResumeEndpointFailure:
         client = _make_client(storage_root, audit)
         client.post("/v1/x/sessions/no-detail-sess/resume")
         audit_path = storage_root / "audit.ndjson"
-        records = [
-            json.loads(line)
-            for line in audit_path.read_text().splitlines()
-            if line.strip()
-        ]
+        records = [json.loads(line) for line in audit_path.read_text().splitlines() if line.strip()]
         record = next(r for r in records if r.get("event") == "session.resume.failed")
         assert record["detail"]["session_id"] == "no-detail-sess"
 

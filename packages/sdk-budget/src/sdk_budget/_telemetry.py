@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+from core_errors import BudgetExceededError, MeridianError
 from opentelemetry import trace
 from opentelemetry.trace import Span, Status, StatusCode
-
-from core_errors import BudgetExceededError, MeridianError
 
 from ._version import SDK_BUDGET_VERSION
 

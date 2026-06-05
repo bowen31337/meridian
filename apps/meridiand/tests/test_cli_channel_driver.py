@@ -17,11 +17,11 @@ Covers:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from meridiand._cli_channel_driver import (
     CLI_TOKEN_STREAM_CONTENT_TYPE,
     CLI_TOOL_CALL_CONTENT_TYPE,
@@ -29,6 +29,7 @@ from meridiand._cli_channel_driver import (
     NoopStdinReaderClient,
 )
 from opentelemetry.trace import StatusCode
+import pytest
 from sdk_channel import (
     ChannelCapabilities,
     ChannelFailure,
@@ -38,7 +39,6 @@ from sdk_channel import (
 )
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -213,25 +213,19 @@ class TestDriverSendSuccess:
     async def test_result_delivered_true(self, storage_root: Path) -> None:
         writer = CapturingStdoutWriter()
         _make_channel_file(storage_root)
-        result = await _make_driver(storage_root, stdout_writer=writer).send(
-            _make_send_request()
-        )
+        result = await _make_driver(storage_root, stdout_writer=writer).send(_make_send_request())
         assert result.delivered is True
 
     async def test_result_message_id_starts_with_cli(self, storage_root: Path) -> None:
         writer = CapturingStdoutWriter()
         _make_channel_file(storage_root)
-        result = await _make_driver(storage_root, stdout_writer=writer).send(
-            _make_send_request()
-        )
+        result = await _make_driver(storage_root, stdout_writer=writer).send(_make_send_request())
         assert result.message_id.startswith("cli_")
 
     async def test_result_has_timestamp(self, storage_root: Path) -> None:
         writer = CapturingStdoutWriter()
         _make_channel_file(storage_root)
-        result = await _make_driver(storage_root, stdout_writer=writer).send(
-            _make_send_request()
-        )
+        result = await _make_driver(storage_root, stdout_writer=writer).send(_make_send_request())
         assert isinstance(result.timestamp, str) and len(result.timestamp) > 0
 
     async def test_token_stream_tokens_written_in_order(self, storage_root: Path) -> None:
@@ -359,9 +353,7 @@ class TestDriverSendFailures:
     def _otel_clear(self) -> None:
         _otel_exporter.clear()
 
-    async def test_missing_config_raises_chan_config_not_found(
-        self, storage_root: Path
-    ) -> None:
+    async def test_missing_config_raises_chan_config_not_found(self, storage_root: Path) -> None:
         driver = _make_driver(storage_root)
         with pytest.raises(ChannelFailure) as exc_info:
             await driver.send(
@@ -389,9 +381,7 @@ class TestDriverSendFailures:
             )
         assert exc_info.value.code == "CHAN_SEND_FAILED"
 
-    async def test_token_stream_non_array_raises_chan_send_failed(
-        self, storage_root: Path
-    ) -> None:
+    async def test_token_stream_non_array_raises_chan_send_failed(self, storage_root: Path) -> None:
         writer = CapturingStdoutWriter()
         _make_channel_file(storage_root)
         with pytest.raises(ChannelFailure) as exc_info:
@@ -403,9 +393,7 @@ class TestDriverSendFailures:
             )
         assert exc_info.value.code == "CHAN_SEND_FAILED"
 
-    async def test_invalid_tool_call_json_raises_chan_send_failed(
-        self, storage_root: Path
-    ) -> None:
+    async def test_invalid_tool_call_json_raises_chan_send_failed(self, storage_root: Path) -> None:
         writer = CapturingStdoutWriter()
         _make_channel_file(storage_root)
         with pytest.raises(ChannelFailure) as exc_info:
@@ -417,9 +405,7 @@ class TestDriverSendFailures:
             )
         assert exc_info.value.code == "CHAN_SEND_FAILED"
 
-    async def test_stdout_write_exception_raises_chan_send_failed(
-        self, storage_root: Path
-    ) -> None:
+    async def test_stdout_write_exception_raises_chan_send_failed(self, storage_root: Path) -> None:
         _make_channel_file(storage_root)
         driver = _make_driver(storage_root, stdout_writer=FailingStdoutWriter())
         with pytest.raises(ChannelFailure) as exc_info:
@@ -500,9 +486,7 @@ class TestDriverStart:
         await asyncio.sleep(0)
         assert run_called.is_set()
 
-    async def test_start_idempotent_does_not_duplicate_task(
-        self, storage_root: Path
-    ) -> None:
+    async def test_start_idempotent_does_not_duplicate_task(self, storage_root: Path) -> None:
         run_count = 0
 
         class CountingStdinReaderClient:
@@ -515,9 +499,7 @@ class TestDriverStart:
                 pass
 
         _make_channel_file(storage_root)
-        driver = _make_driver(
-            storage_root, stdin_reader_client=CountingStdinReaderClient()
-        )
+        driver = _make_driver(storage_root, stdin_reader_client=CountingStdinReaderClient())
         req = StartRequest(channel_id="ch_cli_1", channel_kind=_CLI_KIND, session_id="s1")
         await driver.start(req)
         await asyncio.sleep(0)
@@ -528,10 +510,8 @@ class TestDriverStart:
         assert run_count == 1
         for task in driver._read_tasks.values():
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
-            except (asyncio.CancelledError, Exception):
-                pass
 
     async def test_start_missing_config_raises_chan_config_not_found(
         self, storage_root: Path
@@ -571,9 +551,7 @@ class TestDriverStop:
                 pass
 
         _make_channel_file(storage_root)
-        driver = _make_driver(
-            storage_root, stdin_reader_client=LongRunningStdinReaderClient()
-        )
+        driver = _make_driver(storage_root, stdin_reader_client=LongRunningStdinReaderClient())
         await driver.start(
             StartRequest(channel_id="ch_cli_1", channel_kind=_CLI_KIND, session_id="s")
         )
@@ -601,9 +579,7 @@ class TestDriverStop:
                 stop_called.set()
 
         _make_channel_file(storage_root)
-        driver = _make_driver(
-            storage_root, stdin_reader_client=TrackingStdinReaderClient()
-        )
+        driver = _make_driver(storage_root, stdin_reader_client=TrackingStdinReaderClient())
         await driver.stop(
             StopRequest(channel_id="ch_cli_1", channel_kind=_CLI_KIND, session_id="s")
         )

@@ -32,21 +32,18 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
+from core_errors import HandlerOptions, install_error_handler
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
+from meridiand._auth_middleware import AuthMiddleware
+from meridiand._error_envelope_middleware import ErrorEnvelopeMiddleware
 from meridiand._submit_tool_results import make_submit_tool_results_router
 from storage_event_log import LocalEventLogWriter
 from storage_reposit import LocalEventLogReader
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
-from core_errors import HandlerOptions, install_error_handler
-from meridiand._auth_middleware import AuthMiddleware
-from meridiand._error_envelope_middleware import ErrorEnvelopeMiddleware
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -161,22 +158,30 @@ class TestSubmitToolResultsSuccess:
 
     def test_returns_202(self, storage_root: Path) -> None:
         client = self._setup(storage_root, "str-s1")
-        resp = client.post("/v1/sessions/str-s1/submit_tool_results", json={"tool_results": _SINGLE_RESULT})
+        resp = client.post(
+            "/v1/sessions/str-s1/submit_tool_results", json={"tool_results": _SINGLE_RESULT}
+        )
         assert resp.status_code == 202
 
     def test_response_has_session_id(self, storage_root: Path) -> None:
         client = self._setup(storage_root, "str-s2")
-        body = client.post("/v1/sessions/str-s2/submit_tool_results", json={"tool_results": _SINGLE_RESULT}).json()
+        body = client.post(
+            "/v1/sessions/str-s2/submit_tool_results", json={"tool_results": _SINGLE_RESULT}
+        ).json()
         assert body["session_id"] == "str-s2"
 
     def test_response_has_submitted_count(self, storage_root: Path) -> None:
         client = self._setup(storage_root, "str-s3")
-        body = client.post("/v1/sessions/str-s3/submit_tool_results", json={"tool_results": _SINGLE_RESULT}).json()
+        body = client.post(
+            "/v1/sessions/str-s3/submit_tool_results", json={"tool_results": _SINGLE_RESULT}
+        ).json()
         assert body["submitted"] == 1
 
     def test_submitted_count_matches_multiple_results(self, storage_root: Path) -> None:
         client = self._setup(storage_root, "str-s4")
-        body = client.post("/v1/sessions/str-s4/submit_tool_results", json={"tool_results": _MULTI_RESULTS}).json()
+        body = client.post(
+            "/v1/sessions/str-s4/submit_tool_results", json={"tool_results": _MULTI_RESULTS}
+        ).json()
         assert body["submitted"] == 2
 
 
@@ -193,9 +198,13 @@ class TestSubmitToolResultsNotFound:
         assert resp.status_code == 404
 
     def test_missing_session_error_code(self, storage_root: Path) -> None:
-        body = _make_client(storage_root).post(
-            "/v1/sessions/no-sess2/submit_tool_results", json={"tool_results": _SINGLE_RESULT}
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post(
+                "/v1/sessions/no-sess2/submit_tool_results", json={"tool_results": _SINGLE_RESULT}
+            )
+            .json()
+        )
         assert body["error"]["code"] == "submit_tool_results_session_not_found"
 
     def test_missing_session_writes_audit_failed(self, storage_root: Path) -> None:
@@ -227,23 +236,31 @@ class TestSubmitToolResultsWrongPhase:
 
     def test_wrong_phase_returns_422(self, storage_root: Path) -> None:
         client = self._setup(storage_root, "wp-s1", "idle")
-        resp = client.post("/v1/sessions/wp-s1/submit_tool_results", json={"tool_results": _SINGLE_RESULT})
+        resp = client.post(
+            "/v1/sessions/wp-s1/submit_tool_results", json={"tool_results": _SINGLE_RESULT}
+        )
         assert resp.status_code == 422
 
     def test_wrong_phase_error_code(self, storage_root: Path) -> None:
         client = self._setup(storage_root, "wp-s2", "idle")
-        body = client.post("/v1/sessions/wp-s2/submit_tool_results", json={"tool_results": _SINGLE_RESULT}).json()
+        body = client.post(
+            "/v1/sessions/wp-s2/submit_tool_results", json={"tool_results": _SINGLE_RESULT}
+        ).json()
         assert body["error"]["code"] == "submit_tool_results_wrong_phase"
 
     def test_wrong_phase_writes_audit_failed(self, storage_root: Path) -> None:
         client = self._setup(storage_root, "wp-aud", "waiting_for_user")
-        client.post("/v1/sessions/wp-aud/submit_tool_results", json={"tool_results": _SINGLE_RESULT})
+        client.post(
+            "/v1/sessions/wp-aud/submit_tool_results", json={"tool_results": _SINGLE_RESULT}
+        )
         records = _read_audit(storage_root)
         assert any(r.get("event") == "session.submit_tool_results.failed" for r in records)
 
     def test_wrong_phase_audit_detail_has_session_id(self, storage_root: Path) -> None:
         client = self._setup(storage_root, "wp-det", "idle")
-        client.post("/v1/sessions/wp-det/submit_tool_results", json={"tool_results": _SINGLE_RESULT})
+        client.post(
+            "/v1/sessions/wp-det/submit_tool_results", json={"tool_results": _SINGLE_RESULT}
+        )
         records = _read_audit(storage_root)
         rec = next(r for r in records if r.get("event") == "session.submit_tool_results.failed")
         assert rec["detail"]["session_id"] == "wp-det"
@@ -269,20 +286,26 @@ class TestSubmitToolResultsAuditSuccess:
 
     def test_success_writes_accepted_audit_event(self, storage_root: Path) -> None:
         client = self._setup(storage_root, "aud-ok1")
-        client.post("/v1/sessions/aud-ok1/submit_tool_results", json={"tool_results": _SINGLE_RESULT})
+        client.post(
+            "/v1/sessions/aud-ok1/submit_tool_results", json={"tool_results": _SINGLE_RESULT}
+        )
         records = _read_audit(storage_root)
         assert any(r.get("event") == "session.submit_tool_results.accepted" for r in records)
 
     def test_success_audit_detail_has_session_id(self, storage_root: Path) -> None:
         client = self._setup(storage_root, "aud-ok2")
-        client.post("/v1/sessions/aud-ok2/submit_tool_results", json={"tool_results": _SINGLE_RESULT})
+        client.post(
+            "/v1/sessions/aud-ok2/submit_tool_results", json={"tool_results": _SINGLE_RESULT}
+        )
         records = _read_audit(storage_root)
         rec = next(r for r in records if r.get("event") == "session.submit_tool_results.accepted")
         assert rec["detail"]["session_id"] == "aud-ok2"
 
     def test_success_audit_detail_has_count(self, storage_root: Path) -> None:
         client = self._setup(storage_root, "aud-ok3")
-        client.post("/v1/sessions/aud-ok3/submit_tool_results", json={"tool_results": _MULTI_RESULTS})
+        client.post(
+            "/v1/sessions/aud-ok3/submit_tool_results", json={"tool_results": _MULTI_RESULTS}
+        )
         records = _read_audit(storage_root)
         rec = next(r for r in records if r.get("event") == "session.submit_tool_results.accepted")
         assert rec["detail"]["count"] == 2
@@ -329,22 +352,36 @@ class TestSubmitToolResultsEventLog:
 
     def test_phase_change_event_written(self, storage_root: Path) -> None:
         client = self._setup(storage_root, "ev-pc1")
-        client.post("/v1/sessions/ev-pc1/submit_tool_results", json={"tool_results": _SINGLE_RESULT})
+        client.post(
+            "/v1/sessions/ev-pc1/submit_tool_results", json={"tool_results": _SINGLE_RESULT}
+        )
         events = _read_events(storage_root, "ev-pc1")
         assert any(e.type == "session.phase_change" for e in events)
 
     def test_phase_change_before_is_waiting_for_tool(self, storage_root: Path) -> None:
         client = self._setup(storage_root, "ev-pc2")
-        client.post("/v1/sessions/ev-pc2/submit_tool_results", json={"tool_results": _SINGLE_RESULT})
+        client.post(
+            "/v1/sessions/ev-pc2/submit_tool_results", json={"tool_results": _SINGLE_RESULT}
+        )
         events = _read_events(storage_root, "ev-pc2")
-        change = next(e for e in events if e.type == "session.phase_change" and e.data.get("reason") == "tool_result")
+        change = next(
+            e
+            for e in events
+            if e.type == "session.phase_change" and e.data.get("reason") == "tool_result"
+        )
         assert change.data["before"] == "waiting_for_tool"
 
     def test_phase_change_after_is_waiting_for_model(self, storage_root: Path) -> None:
         client = self._setup(storage_root, "ev-pc3")
-        client.post("/v1/sessions/ev-pc3/submit_tool_results", json={"tool_results": _SINGLE_RESULT})
+        client.post(
+            "/v1/sessions/ev-pc3/submit_tool_results", json={"tool_results": _SINGLE_RESULT}
+        )
         events = _read_events(storage_root, "ev-pc3")
-        change = next(e for e in events if e.type == "session.phase_change" and e.data.get("reason") == "tool_result")
+        change = next(
+            e
+            for e in events
+            if e.type == "session.phase_change" and e.data.get("reason") == "tool_result"
+        )
         assert change.data["after"] == "waiting_for_model"
 
 
@@ -368,13 +405,17 @@ class TestSubmitToolResultsPoolInteraction:
     def test_pool_wake_failure_returns_422(self, storage_root: Path) -> None:
         pool = _ErrorPool()
         client = self._setup(storage_root, "pi-err1", pool)
-        resp = client.post("/v1/sessions/pi-err1/submit_tool_results", json={"tool_results": _SINGLE_RESULT})
+        resp = client.post(
+            "/v1/sessions/pi-err1/submit_tool_results", json={"tool_results": _SINGLE_RESULT}
+        )
         assert resp.status_code == 422
 
     def test_pool_wake_failure_writes_audit_failed(self, storage_root: Path) -> None:
         pool = _ErrorPool()
         client = self._setup(storage_root, "pi-err2", pool)
-        client.post("/v1/sessions/pi-err2/submit_tool_results", json={"tool_results": _SINGLE_RESULT})
+        client.post(
+            "/v1/sessions/pi-err2/submit_tool_results", json={"tool_results": _SINGLE_RESULT}
+        )
         records = _read_audit(storage_root)
         assert any(r.get("event") == "session.submit_tool_results.failed" for r in records)
 
@@ -396,7 +437,9 @@ class TestSubmitToolResultsRouterWiring:
         _write_session(storage_root, "wire-s1")
         _seed_phase(storage_root, "wire-s1", "waiting_for_tool")
         client = self._make_full_client(storage_root)
-        resp = client.post("/v1/sessions/wire-s1/submit_tool_results", json={"tool_results": _SINGLE_RESULT})
+        resp = client.post(
+            "/v1/sessions/wire-s1/submit_tool_results", json={"tool_results": _SINGLE_RESULT}
+        )
         assert resp.status_code == 202
 
     def test_no_harness_pool_route_absent(self, storage_root: Path) -> None:
@@ -404,7 +447,9 @@ class TestSubmitToolResultsRouterWiring:
         writer = _make_writer(storage_root)
         app = create_app(audit, storage_root=storage_root, event_log=writer)
         client = TestClient(app, raise_server_exceptions=False)
-        resp = client.post("/v1/sessions/any/submit_tool_results", json={"tool_results": _SINGLE_RESULT})
+        resp = client.post(
+            "/v1/sessions/any/submit_tool_results", json={"tool_results": _SINGLE_RESULT}
+        )
         assert resp.status_code == 404
 
     def test_no_storage_root_route_absent(self, storage_root: Path) -> None:
@@ -412,7 +457,9 @@ class TestSubmitToolResultsRouterWiring:
         pool = _TrackingPool()
         app = create_app(audit, harness_pool=pool)  # type: ignore[arg-type]
         client = TestClient(app, raise_server_exceptions=False)
-        resp = client.post("/v1/sessions/any/submit_tool_results", json={"tool_results": _SINGLE_RESULT})
+        resp = client.post(
+            "/v1/sessions/any/submit_tool_results", json={"tool_results": _SINGLE_RESULT}
+        )
         assert resp.status_code == 404
 
 
@@ -432,13 +479,17 @@ class TestSubmitToolResultsOtel:
 
     def test_success_emits_span(self, storage_root: Path) -> None:
         client = self._setup(storage_root, "otel-s1")
-        client.post("/v1/sessions/otel-s1/submit_tool_results", json={"tool_results": _SINGLE_RESULT})
+        client.post(
+            "/v1/sessions/otel-s1/submit_tool_results", json={"tool_results": _SINGLE_RESULT}
+        )
         span_names = [s.name for s in _otel_exporter.get_finished_spans()]
         assert "session.submit_tool_results" in span_names
 
     def test_success_span_has_session_id_attribute(self, storage_root: Path) -> None:
         client = self._setup(storage_root, "otel-s2")
-        client.post("/v1/sessions/otel-s2/submit_tool_results", json={"tool_results": _SINGLE_RESULT})
+        client.post(
+            "/v1/sessions/otel-s2/submit_tool_results", json={"tool_results": _SINGLE_RESULT}
+        )
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
         span = spans.get("session.submit_tool_results")
         assert span is not None

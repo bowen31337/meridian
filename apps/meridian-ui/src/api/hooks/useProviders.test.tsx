@@ -42,7 +42,10 @@ function createWrapper(opts: { auditLog?: ReturnType<typeof makeAuditLog> } = {}
   return function Wrapper({ children }: { children: ReactNode }) {
     return (
       <QueryClientProvider client={queryClient}>
-        <MeridianApiProvider baseUrl="http://api.test" auditLog={opts.auditLog ?? new NoopAuditLog()}>
+        <MeridianApiProvider
+          baseUrl="http://api.test"
+          auditLog={opts.auditLog ?? new NoopAuditLog()}
+        >
           {children}
         </MeridianApiProvider>
       </QueryClientProvider>
@@ -64,7 +67,10 @@ describe("useListProviders", () => {
       providers: [{ kind: "anthropic", display_name: "Anthropic", models: ["claude-3"] }],
     };
     vi.mocked(fetch).mockResolvedValueOnce(
-      new Response(JSON.stringify(data), { status: 200, headers: { "Content-Type": "application/json" } }),
+      new Response(JSON.stringify(data), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
     );
 
     const { result } = renderHook(() => useListProviders(), { wrapper: createWrapper() });
@@ -89,7 +95,9 @@ describe("useListProviders", () => {
       new Response(JSON.stringify({ code: "SERVER_ERROR", message: "fail" }), { status: 500 }),
     );
     const auditLog = makeAuditLog();
-    const { result } = renderHook(() => useListProviders(), { wrapper: createWrapper({ auditLog }) });
+    const { result } = renderHook(() => useListProviders(), {
+      wrapper: createWrapper({ auditLog }),
+    });
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(auditLog.entries[0]?.event).toBe("api.providers.list.failed");
   });

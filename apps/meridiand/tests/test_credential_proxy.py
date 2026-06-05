@@ -27,11 +27,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-import httpx
-import pytest
-from core_errors import AuditLog, HandlerOptions, install_error_handler
+from core_errors import HandlerOptions, install_error_handler
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import httpx
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from meridiand._credential_proxy import (
@@ -40,7 +39,6 @@ from meridiand._credential_proxy import (
 )
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -88,9 +86,7 @@ _DEFAULT_PROVIDER = CredentialProxyProviderConfig(
 )
 
 _DEFAULT_TOKEN = "sk-test-token-abc123"
-_DEFAULT_RESOLVER = _FakeResolver(
-    {_DEFAULT_PROVIDER.token_secret_ref: _DEFAULT_TOKEN}
-)
+_DEFAULT_RESOLVER = _FakeResolver({_DEFAULT_PROVIDER.token_secret_ref: _DEFAULT_TOKEN})
 
 
 def _make_router_client(
@@ -255,7 +251,8 @@ class TestCredentialProxyProviderNotFound:
         client = _make_router_client(storage_root)
         client.post("/v1/credential-proxy/ghost/v1/op", json={})
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "credential.proxy.request.failed"
         )
         assert record["level"] == "error"
@@ -264,7 +261,8 @@ class TestCredentialProxyProviderNotFound:
         client = _make_router_client(storage_root)
         client.post("/v1/credential-proxy/ghost/v1/op", json={})
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "credential.proxy.request.failed"
         )
         assert record["code"] == "credential_proxy_provider_not_found"
@@ -273,7 +271,8 @@ class TestCredentialProxyProviderNotFound:
         client = _make_router_client(storage_root)
         client.post("/v1/credential-proxy/ghost/v1/op", json={})
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "credential.proxy.request.failed"
         )
         assert record["detail"]["provider_name"] == "ghost"
@@ -282,7 +281,8 @@ class TestCredentialProxyProviderNotFound:
         client = _make_router_client(storage_root)
         client.post("/v1/credential-proxy/ghost/v1/some/path", json={})
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "credential.proxy.request.failed"
         )
         assert record["detail"]["path"] == "v1/some/path"
@@ -291,7 +291,8 @@ class TestCredentialProxyProviderNotFound:
         client = _make_router_client(storage_root)
         client.post("/v1/credential-proxy/ghost/v1/op", json={})
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "credential.proxy.request.failed"
         )
         assert len(record["detail"]["message"]) > 0
@@ -331,7 +332,8 @@ class TestCredentialProxyTokenUnavailable:
         client = _make_router_client(storage_root, resolver=self._noop_resolver())
         client.post("/v1/credential-proxy/testprovider/v1/op", json={})
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "credential.proxy.request.failed"
         )
         assert record["code"] == "credential_proxy_token_unavailable"
@@ -381,7 +383,8 @@ class TestCredentialProxyForwardFailure:
         client = _make_router_client(storage_root, transport=self._failing_transport())
         client.post("/v1/credential-proxy/testprovider/v1/op", json={})
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "credential.proxy.request.failed"
         )
         assert record["level"] == "error"
@@ -390,7 +393,8 @@ class TestCredentialProxyForwardFailure:
         client = _make_router_client(storage_root, transport=self._failing_transport())
         client.post("/v1/credential-proxy/testprovider/v1/op", json={})
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "credential.proxy.request.failed"
         )
         assert record["code"] == "credential_proxy_forward_failed"
@@ -399,7 +403,8 @@ class TestCredentialProxyForwardFailure:
         client = _make_router_client(storage_root, transport=self._failing_transport())
         client.post("/v1/credential-proxy/testprovider/v1/op", json={})
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "credential.proxy.request.failed"
         )
         assert record["detail"]["provider_name"] == "testprovider"
@@ -408,7 +413,8 @@ class TestCredentialProxyForwardFailure:
         client = _make_router_client(storage_root, transport=self._failing_transport())
         client.post("/v1/credential-proxy/testprovider/v1/op", json={})
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "credential.proxy.request.failed"
         )
         assert len(record["detail"]["message"]) > 0
@@ -494,10 +500,7 @@ class TestCredentialProxyOtel:
 
 
 def _has_proxy_route(app: Any) -> bool:
-    return any(
-        hasattr(r, "path") and "credential-proxy" in r.path
-        for r in app.routes
-    )
+    return any(hasattr(r, "path") and "credential-proxy" in r.path for r in app.routes)
 
 
 class TestCredentialProxyRouteWiring:

@@ -51,9 +51,7 @@ class UserProfileCreateError(MeridianError):
 
 class UserProfileInvalidRequestError(MeridianError):
     def __init__(self, *, message: str, timestamp: str) -> None:
-        super().__init__(
-            code="user_profile_invalid_request", message=message, timestamp=timestamp
-        )
+        super().__init__(code="user_profile_invalid_request", message=message, timestamp=timestamp)
 
     def http_status(self) -> int:
         return 422
@@ -296,16 +294,12 @@ def make_user_profiles_router(*, audit_log: AuditLog, storage_root: Path) -> API
             try:
                 profile_file = profiles_dir / f"{user_profile_id}.json"
                 if not profile_file.exists():
-                    raise UserProfileNotFoundError(
-                        user_profile_id=user_profile_id, timestamp=now
-                    )
+                    raise UserProfileNotFoundError(user_profile_id=user_profile_id, timestamp=now)
 
                 profile = json.loads(profile_file.read_text())
 
                 if profile.get("is_primary"):
-                    raise UserProfileIsPrimaryError(
-                        user_profile_id=user_profile_id, timestamp=now
-                    )
+                    raise UserProfileIsPrimaryError(user_profile_id=user_profile_id, timestamp=now)
 
                 sessions_dir = storage_root / "sessions"
                 if sessions_dir.exists():
@@ -390,9 +384,7 @@ def make_user_profiles_router(*, audit_log: AuditLog, storage_root: Path) -> API
             try:
                 profile_file = profiles_dir / f"{user_profile_id}.json"
                 if not profile_file.exists():
-                    raise UserProfileNotFoundError(
-                        user_profile_id=user_profile_id, timestamp=now
-                    )
+                    raise UserProfileNotFoundError(user_profile_id=user_profile_id, timestamp=now)
 
                 profile = json.loads(profile_file.read_text())
                 fields_set = body.model_fields_set
@@ -478,9 +470,7 @@ def make_user_profiles_router(*, audit_log: AuditLog, storage_root: Path) -> API
             try:
                 profile_file = profiles_dir / f"{user_profile_id}.json"
                 if not profile_file.exists():
-                    raise UserProfileNotFoundError(
-                        user_profile_id=user_profile_id, timestamp=now
-                    )
+                    raise UserProfileNotFoundError(user_profile_id=user_profile_id, timestamp=now)
 
                 profile = json.loads(profile_file.read_text())
                 profile.setdefault("channel_pairings", [])

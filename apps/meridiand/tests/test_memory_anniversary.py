@@ -29,20 +29,19 @@ Tests cover:
 
 from __future__ import annotations
 
-import json
 from datetime import date
+import json
 from pathlib import Path
 
-import pytest
 from meridiand._audit import FileAuditLog
 from meridiand._memory_anniversary import (
     MemoryNotFoundError,
     MemoryValueNotDateError,
     fire_memory_anniversary_trigger,
 )
+import pytest
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -168,9 +167,7 @@ class TestAnnualRecurrence:
         assert result_this_year.fired is True
         assert result_next_year.fired is True
 
-    def test_next_fire_date_is_next_year_after_anniversary_passed(
-        self, storage_root: Path
-    ) -> None:
+    def test_next_fire_date_is_next_year_after_anniversary_passed(self, storage_root: Path) -> None:
         _write_memory(storage_root, "user.birthday", "1990-03-15")
         resource = _make_resource(days_before=3)
         # Today is Mar 13 — fire date for this year was Mar 12, already passed
@@ -202,9 +199,7 @@ class TestAnnualRecurrence:
 
 
 class TestLeapYearEdgeCases:
-    def test_feb29_birthday_fires_on_feb28_in_non_leap_year(
-        self, storage_root: Path
-    ) -> None:
+    def test_feb29_birthday_fires_on_feb28_in_non_leap_year(self, storage_root: Path) -> None:
         _write_memory(storage_root, "user.birthday", "1992-02-29")
         resource = _make_resource(memory_key="user.birthday", days_before=0)
         # 2027 is not a leap year; anniversary is mapped to Feb 28
@@ -216,9 +211,7 @@ class TestLeapYearEdgeCases:
         )
         assert result.fired is True
 
-    def test_feb29_birthday_fires_on_feb29_in_leap_year(
-        self, storage_root: Path
-    ) -> None:
+    def test_feb29_birthday_fires_on_feb29_in_leap_year(self, storage_root: Path) -> None:
         _write_memory(storage_root, "user.birthday", "1992-02-29")
         resource = _make_resource(memory_key="user.birthday", days_before=0)
         # 2028 is a leap year
@@ -310,7 +303,8 @@ class TestAuditLogFire:
             today=date(2026, 3, 12),
         )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "trigger.memory_anniversary.fired"
         )
         assert record["level"] == "info"
@@ -325,7 +319,8 @@ class TestAuditLogFire:
             today=date(2026, 3, 12),
         )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "trigger.memory_anniversary.fired"
         )
         assert record["detail"]["cron_id"] == "cron_det001"
@@ -340,7 +335,8 @@ class TestAuditLogFire:
             today=date(2026, 3, 12),
         )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "trigger.memory_anniversary.fired"
         )
         assert record["detail"]["memory_key"] == "user.birthday"
@@ -355,7 +351,8 @@ class TestAuditLogFire:
             today=date(2026, 3, 12),
         )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "trigger.memory_anniversary.fired"
         )
         assert record["detail"]["days_before"] == 3
@@ -370,7 +367,8 @@ class TestAuditLogFire:
             today=date(2026, 3, 12),
         )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "trigger.memory_anniversary.fired"
         )
         assert record["detail"]["anniversary_date"] == "1990-03-15"
@@ -385,7 +383,8 @@ class TestAuditLogFire:
             today=date(2026, 3, 12),
         )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "trigger.memory_anniversary.fired"
         )
         assert record["detail"]["fire_date"] == "2026-03-12"
@@ -411,7 +410,7 @@ class TestAuditLogFire:
 class TestAuditLogFailure:
     def test_missing_memory_writes_error_audit(self, storage_root: Path) -> None:
         resource = _make_resource(memory_key="user.missing")
-        with pytest.raises(Exception):
+        with pytest.raises(MemoryNotFoundError):
             fire_memory_anniversary_trigger(
                 resource,
                 storage_root=storage_root,
@@ -423,7 +422,7 @@ class TestAuditLogFailure:
 
     def test_missing_memory_audit_level_is_error(self, storage_root: Path) -> None:
         resource = _make_resource(memory_key="user.missing")
-        with pytest.raises(Exception):
+        with pytest.raises(MemoryNotFoundError):
             fire_memory_anniversary_trigger(
                 resource,
                 storage_root=storage_root,
@@ -431,14 +430,15 @@ class TestAuditLogFailure:
                 today=date(2026, 3, 12),
             )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "trigger.memory_anniversary.failed"
         )
         assert record["level"] == "error"
 
     def test_missing_memory_audit_code(self, storage_root: Path) -> None:
         resource = _make_resource(memory_key="user.missing")
-        with pytest.raises(Exception):
+        with pytest.raises(MemoryNotFoundError):
             fire_memory_anniversary_trigger(
                 resource,
                 storage_root=storage_root,
@@ -446,14 +446,15 @@ class TestAuditLogFailure:
                 today=date(2026, 3, 12),
             )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "trigger.memory_anniversary.failed"
         )
         assert record["code"] == "memory_not_found"
 
     def test_missing_memory_audit_detail_has_cron_id(self, storage_root: Path) -> None:
         resource = _make_resource(memory_key="user.missing", cron_id="cron_fail001")
-        with pytest.raises(Exception):
+        with pytest.raises(MemoryNotFoundError):
             fire_memory_anniversary_trigger(
                 resource,
                 storage_root=storage_root,
@@ -461,14 +462,15 @@ class TestAuditLogFailure:
                 today=date(2026, 3, 12),
             )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "trigger.memory_anniversary.failed"
         )
         assert record["detail"]["cron_id"] == "cron_fail001"
 
     def test_missing_memory_audit_detail_has_memory_key(self, storage_root: Path) -> None:
         resource = _make_resource(memory_key="user.missing")
-        with pytest.raises(Exception):
+        with pytest.raises(MemoryNotFoundError):
             fire_memory_anniversary_trigger(
                 resource,
                 storage_root=storage_root,
@@ -476,14 +478,15 @@ class TestAuditLogFailure:
                 today=date(2026, 3, 12),
             )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "trigger.memory_anniversary.failed"
         )
         assert record["detail"]["memory_key"] == "user.missing"
 
     def test_missing_memory_audit_detail_has_message(self, storage_root: Path) -> None:
         resource = _make_resource(memory_key="user.missing")
-        with pytest.raises(Exception):
+        with pytest.raises(MemoryNotFoundError):
             fire_memory_anniversary_trigger(
                 resource,
                 storage_root=storage_root,
@@ -491,7 +494,8 @@ class TestAuditLogFailure:
                 today=date(2026, 3, 12),
             )
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "trigger.memory_anniversary.failed"
         )
         assert len(record["detail"]["message"]) > 0
@@ -555,7 +559,7 @@ class TestOtelSpans:
 
     def test_failure_emits_span(self, storage_root: Path) -> None:
         resource = _make_resource(memory_key="user.missing")
-        with pytest.raises(Exception):
+        with pytest.raises(MemoryNotFoundError):
             fire_memory_anniversary_trigger(
                 resource,
                 storage_root=storage_root,
@@ -569,7 +573,7 @@ class TestOtelSpans:
         from opentelemetry.trace import StatusCode
 
         resource = _make_resource(memory_key="user.missing")
-        with pytest.raises(Exception):
+        with pytest.raises(MemoryNotFoundError):
             fire_memory_anniversary_trigger(
                 resource,
                 storage_root=storage_root,

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import json
-import uuid
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
+import json
 from pathlib import Path
 from typing import Any
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -30,7 +30,7 @@ def _now() -> str:
 # ---------------------------------------------------------------------------
 
 
-class HandlerType(str, Enum):
+class HandlerType(StrEnum):
     in_process = "in_process"
     subprocess = "subprocess"
     mcp = "mcp"
@@ -38,7 +38,7 @@ class HandlerType(str, Enum):
     container = "container"
 
 
-class FailureMode(str, Enum):
+class FailureMode(StrEnum):
     ignore = "ignore"
     warn = "warn"
     abort = "abort"
@@ -68,9 +68,7 @@ class HookCreateError(MeridianError):
 
 class HookInvalidRequestError(MeridianError):
     def __init__(self, *, message: str, timestamp: str) -> None:
-        super().__init__(
-            code="hook_invalid_request", message=message, timestamp=timestamp
-        )
+        super().__init__(code="hook_invalid_request", message=message, timestamp=timestamp)
 
     def http_status(self) -> int:
         return 422
@@ -209,7 +207,7 @@ def make_hooks_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=resource, status_code=201)
 

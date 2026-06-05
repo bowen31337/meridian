@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from meridian_sdk_tool import ToolContext
 
 from meridian_builtin_tools.spawn import _INPUT_SCHEMA, _OUTPUT_SCHEMA, spawn_tool
-from meridian_sdk_tool import ToolContext
 
 _CTX = ToolContext(workspace="/workspace", session_id="sess_spawn_test")
 _CTX2 = ToolContext(workspace="/workspace", session_id="sess_spawn_other")
@@ -59,9 +59,9 @@ async def test_response_has_child_session_id() -> None:
 async def test_child_session_id_is_uuid() -> None:
     result = await spawn_tool.execute(_args(), _CTX)
     cid = result.result["child_session_id"]
-    assert re.match(
-        r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", cid
-    ), f"Not a UUID: {cid!r}"
+    assert re.match(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", cid), (
+        f"Not a UUID: {cid!r}"
+    )
 
 
 @pytest.mark.anyio

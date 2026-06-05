@@ -22,11 +22,9 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
 from click.testing import CliRunner
-
 from meridian_cli.__main__ import cli
-
+import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -134,18 +132,24 @@ class TestSchemaFailure:
         assert "failed to generate config schema" in result.output
 
     def test_writes_error_audit_on_failure(self) -> None:
-        with patch(
-            "meridian_cli.meridianconfig._MeridianConfig.model_json_schema",
-            side_effect=RuntimeError("boom"),
-        ), patch("meridian_cli.meridianconfig.write_audit") as mock_audit:
+        with (
+            patch(
+                "meridian_cli.meridianconfig._MeridianConfig.model_json_schema",
+                side_effect=RuntimeError("boom"),
+            ),
+            patch("meridian_cli.meridianconfig.write_audit") as mock_audit,
+        ):
             _run(["meridianconfig", "schema"])
         mock_audit.assert_called_once()
         assert mock_audit.call_args[0][0] == "error"
 
     def test_audit_event_on_failure(self) -> None:
-        with patch(
-            "meridian_cli.meridianconfig._MeridianConfig.model_json_schema",
-            side_effect=RuntimeError("boom"),
-        ), patch("meridian_cli.meridianconfig.write_audit") as mock_audit:
+        with (
+            patch(
+                "meridian_cli.meridianconfig._MeridianConfig.model_json_schema",
+                side_effect=RuntimeError("boom"),
+            ),
+            patch("meridian_cli.meridianconfig.write_audit") as mock_audit,
+        ):
             _run(["meridianconfig", "schema"])
         assert mock_audit.call_args[0][1] == "meridianconfig.schema.failed"

@@ -26,13 +26,13 @@ re-raising.
 from __future__ import annotations
 
 import asyncio
-import json
-import uuid
+import contextlib
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
+import uuid
 
-import httpx
 from core_errors import (
     AuditLog,
     AuditLogEntry,
@@ -41,6 +41,7 @@ from core_errors import (
     get_tracer,
     record_invocation_event,
 )
+import httpx
 from opentelemetry.trace import StatusCode
 from sdk_channel import (
     ChannelCapabilities,
@@ -60,10 +61,7 @@ _INTENT_GUILD_MESSAGES = 1 << 9
 _INTENT_DIRECT_MESSAGES = 1 << 12
 _INTENT_MESSAGE_CONTENT = 1 << 15
 _DEFAULT_INTENTS = (
-    _INTENT_GUILDS
-    | _INTENT_GUILD_MESSAGES
-    | _INTENT_DIRECT_MESSAGES
-    | _INTENT_MESSAGE_CONTENT
+    _INTENT_GUILDS | _INTENT_GUILD_MESSAGES | _INTENT_DIRECT_MESSAGES | _INTENT_MESSAGE_CONTENT
 )
 
 DISCORD_EMBED_CONTENT_TYPE = "application/vnd.discord.embed+json"
@@ -230,7 +228,7 @@ class DiscordChannelDriver(ChannelDriver):
                     session_id=request.session_id,
                     timestamp=_now(),
                     cause=exc,
-                )
+                ) from exc
             embeds = embed_data if isinstance(embed_data, list) else [embed_data]
             return {"embeds": embeds}
         return {"content": request.content}
@@ -355,9 +353,7 @@ class DiscordChannelDriver(ChannelDriver):
                     )
 
                 response_data: dict[str, Any] = response.json()
-                message_id = str(
-                    response_data.get("id", f"discord_{uuid.uuid4().hex}")
-                )
+                message_id = str(response_data.get("id", f"discord_{uuid.uuid4().hex}"))
 
             except ChannelFailure:
                 raise
@@ -402,10 +398,8 @@ class DiscordChannelDriver(ChannelDriver):
         task = self._gateway_tasks.pop(request.channel_id, None)
         if task is not None and not task.done():
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
-            except (asyncio.CancelledError, Exception):
-                pass
 
     def capabilities(self) -> ChannelCapabilities:
         return ChannelCapabilities(

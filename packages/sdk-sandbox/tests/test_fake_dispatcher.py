@@ -6,9 +6,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from opentelemetry.trace import StatusCode
-
+import pytest
 from sdk_sandbox import (
     ExecutionContext,
     InProcessHandler,
@@ -91,33 +90,25 @@ class TestProtocolConformance:
 
 
 class TestDispatchHappyPath:
-    async def test_returns_sandbox_result(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_returns_sandbox_result(self, tmp_path: Path, mock_span: MockSpan) -> None:
         make_fixture(tmp_path, "test.echo")
         adapter = make_adapter(tmp_path)
         result = await adapter.dispatch(TOOL_DEF, {}, CTX)
         assert isinstance(result, SandboxResult)
 
-    async def test_returns_correct_content(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_returns_correct_content(self, tmp_path: Path, mock_span: MockSpan) -> None:
         make_fixture(tmp_path, "test.echo")
         adapter = make_adapter(tmp_path)
         result = await adapter.dispatch(TOOL_DEF, {}, CTX)
         assert result.content == "ok"
 
-    async def test_is_error_false_by_default(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_is_error_false_by_default(self, tmp_path: Path, mock_span: MockSpan) -> None:
         make_fixture(tmp_path, "test.echo")
         adapter = make_adapter(tmp_path)
         result = await adapter.dispatch(TOOL_DEF, {}, CTX)
         assert result.is_error is False
 
-    async def test_error_result_preserved(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_error_result_preserved(self, tmp_path: Path, mock_span: MockSpan) -> None:
         make_fixture(
             tmp_path,
             "test.echo",
@@ -128,18 +119,14 @@ class TestDispatchHappyPath:
         assert result.is_error is True
         assert result.error_code == "cap_denied"
 
-    async def test_no_audit_entries_on_success(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_no_audit_entries_on_success(self, tmp_path: Path, mock_span: MockSpan) -> None:
         make_fixture(tmp_path, "test.echo")
         audit = CapturingAuditLog()
         adapter = make_adapter(tmp_path, audit)
         await adapter.dispatch(TOOL_DEF, {}, CTX)
         assert audit.entries == []
 
-    async def test_skips_blank_lines(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_skips_blank_lines(self, tmp_path: Path, mock_span: MockSpan) -> None:
         path = tmp_path / "test.echo.ndjson"
         path.write_text(
             "\n" + json.dumps({"content": "hello"}) + "\n\n",
@@ -156,17 +143,13 @@ class TestDispatchHappyPath:
 
 
 class TestCallCycling:
-    async def test_first_call_reads_first_line(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_first_call_reads_first_line(self, tmp_path: Path, mock_span: MockSpan) -> None:
         make_fixture(tmp_path, "test.echo", [{"content": "first"}, {"content": "second"}])
         adapter = make_adapter(tmp_path)
         result = await adapter.dispatch(TOOL_DEF, {}, CTX)
         assert result.content == "first"
 
-    async def test_second_call_reads_second_line(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_second_call_reads_second_line(self, tmp_path: Path, mock_span: MockSpan) -> None:
         make_fixture(tmp_path, "test.echo", [{"content": "first"}, {"content": "second"}])
         adapter = make_adapter(tmp_path)
         await adapter.dispatch(TOOL_DEF, {}, CTX)
@@ -182,9 +165,7 @@ class TestCallCycling:
             result = await adapter.dispatch(TOOL_DEF, {}, CTX)
             assert result.content == "only"
 
-    async def test_independent_counters_per_tool(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_independent_counters_per_tool(self, tmp_path: Path, mock_span: MockSpan) -> None:
         tool_a = ToolDefinition(
             name="test.a",
             description="A",
@@ -222,25 +203,19 @@ class TestDispatchOTelSpan:
         await adapter.dispatch(TOOL_DEF, {}, CTX)
         assert mock_span.name == "fake.sandbox.dispatch"
 
-    async def test_span_attributes_tool_name(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_span_attributes_tool_name(self, tmp_path: Path, mock_span: MockSpan) -> None:
         make_fixture(tmp_path, "test.echo")
         adapter = make_adapter(tmp_path)
         await adapter.dispatch(TOOL_DEF, {}, CTX)
         assert mock_span.attributes["tool.name"] == "test.echo"
 
-    async def test_span_attributes_session_id(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_span_attributes_session_id(self, tmp_path: Path, mock_span: MockSpan) -> None:
         make_fixture(tmp_path, "test.echo")
         adapter = make_adapter(tmp_path)
         await adapter.dispatch(TOOL_DEF, {}, CTX)
         assert mock_span.attributes["session.id"] == "sess-fake"
 
-    async def test_fake_dispatch_event_attached(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_fake_dispatch_event_attached(self, tmp_path: Path, mock_span: MockSpan) -> None:
         make_fixture(tmp_path, "test.echo")
         adapter = make_adapter(tmp_path)
         await adapter.dispatch(TOOL_DEF, {}, CTX)
@@ -257,9 +232,7 @@ class TestDispatchOTelSpan:
         assert ev[1]["tool.name"] == "test.echo"
         assert ev[1]["session.id"] == "sess-fake"
 
-    async def test_span_ended_on_success(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_span_ended_on_success(self, tmp_path: Path, mock_span: MockSpan) -> None:
         make_fixture(tmp_path, "test.echo")
         adapter = make_adapter(tmp_path)
         await adapter.dispatch(TOOL_DEF, {}, CTX)
@@ -280,9 +253,7 @@ class TestDispatchFixtureFailure:
             await adapter.dispatch(TOOL_DEF, {}, CTX)
         assert exc_info.value.code == "FAKE_FIXTURE_FAILED"
 
-    async def test_sandbox_failure_tool_name(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_sandbox_failure_tool_name(self, tmp_path: Path, mock_span: MockSpan) -> None:
         adapter = make_adapter(tmp_path)
         with pytest.raises(SandboxFailure) as exc_info:
             await adapter.dispatch(TOOL_DEF, {}, CTX)
@@ -317,9 +288,7 @@ class TestDispatchFixtureFailure:
         assert entry.level == "error"
         assert entry.event == "fake_sandbox.fixture.failed"
 
-    async def test_audit_entry_tool_name(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_audit_entry_tool_name(self, tmp_path: Path, mock_span: MockSpan) -> None:
         audit = CapturingAuditLog()
         adapter = make_adapter(tmp_path, audit)
         with pytest.raises(SandboxFailure):
@@ -345,18 +314,14 @@ class TestDispatchFixtureFailure:
         assert mock_span.status is not None
         assert mock_span.status.status_code == StatusCode.ERROR
 
-    async def test_span_error_event_on_failure(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_span_error_event_on_failure(self, tmp_path: Path, mock_span: MockSpan) -> None:
         adapter = make_adapter(tmp_path)
         with pytest.raises(SandboxFailure):
             await adapter.dispatch(TOOL_DEF, {}, CTX)
         event_names = [e[0] for e in mock_span.events]
         assert "sandbox.error" in event_names
 
-    async def test_span_ended_on_failure(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_span_ended_on_failure(self, tmp_path: Path, mock_span: MockSpan) -> None:
         adapter = make_adapter(tmp_path)
         with pytest.raises(SandboxFailure):
             await adapter.dispatch(TOOL_DEF, {}, CTX)
@@ -389,10 +354,8 @@ class TestWriteSandboxFixture:
 
     def test_each_result_on_own_line(self, tmp_path: Path) -> None:
         path = tmp_path / "out.ndjson"
-        write_sandbox_fixture(
-            path, [{"content": "first"}, {"content": "second"}]
-        )
-        lines = [l for l in path.read_text().splitlines() if l.strip()]
+        write_sandbox_fixture(path, [{"content": "first"}, {"content": "second"}])
+        lines = [line for line in path.read_text().splitlines() if line.strip()]
         assert len(lines) == 2
         assert json.loads(lines[0])["content"] == "first"
         assert json.loads(lines[1])["content"] == "second"
@@ -403,7 +366,7 @@ class TestWriteSandboxFixture:
             path,
             [{"content": "hello", "duration_ms": 2.5, "is_error": False}],
         )
-        adapter = FakeSandboxAdapter(tmp_path)
+        FakeSandboxAdapter(tmp_path)
         # Re-use the load helper via dispatch would need a running event loop,
         # so just verify the file is valid NDJSON with the right content.
         data = json.loads(path.read_text().strip())

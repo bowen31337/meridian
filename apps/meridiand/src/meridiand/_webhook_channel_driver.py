@@ -16,15 +16,14 @@ and an audit-log entry is written before re-raising.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import hashlib
 import hmac
 import json
-import uuid
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
+import uuid
 
-import httpx
 from core_errors import (
     AuditLog,
     AuditLogEntry,
@@ -33,6 +32,7 @@ from core_errors import (
     get_tracer,
     record_invocation_event,
 )
+import httpx
 from opentelemetry.trace import StatusCode
 from sdk_channel import (
     ChannelCapabilities,

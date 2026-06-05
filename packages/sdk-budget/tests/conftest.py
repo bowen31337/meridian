@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-import pytest
 from core_errors import AuditLog, AuditLogEntry
-
+import pytest
 
 # ---------------------------------------------------------------------------
 # OTel mock

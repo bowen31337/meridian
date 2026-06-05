@@ -8,19 +8,19 @@ Tests cover:
   - Audit log: not written on success; written with correct fields on failure.
   - OTel on failure: span ERROR status, models.error event, exception recorded.
 """
+
 from __future__ import annotations
 
-import pytest
 from fastapi.testclient import TestClient
+from meridian_sdk_provider.protocol import ModelCapabilities, ModelEntry
 from opentelemetry.trace import StatusCode
 
-from meridian_sdk_provider.protocol import ModelCapabilities, ModelEntry
 from tests.conftest import CapturingAuditLog, MockTracer, make_app, make_test_model_router
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _client(
     audit_log: CapturingAuditLog | None = None,
@@ -31,6 +31,7 @@ def _client(
 # ---------------------------------------------------------------------------
 # GET /v1/models — status and schema
 # ---------------------------------------------------------------------------
+
 
 class TestListStatus:
     def test_returns_200(self, mock_tracer: MockTracer) -> None:
@@ -114,19 +115,44 @@ class TestModelValues:
         assert len(body["models"]) == 2
 
     def test_multiple_providers_aggregated(self, mock_tracer: MockTracer) -> None:
-        from meridian_sdk_provider import FakeModelAdapter, ModelRoutingPolicy, ModelRoutingRule, ModelRouter
+        from meridian_sdk_provider import (
+            FakeModelAdapter,
+            ModelRouter,
+            ModelRoutingPolicy,
+            ModelRoutingRule,
+        )
+
         router = ModelRouter(policy=ModelRoutingPolicy(rules=[ModelRoutingRule(model="p1:m1")]))
-        router.register_provider(FakeModelAdapter(name="p1", models=[
-            ModelEntry(provider="p1", model="m1", context_window=4096,
-                       capabilities=ModelCapabilities()),
-        ]))
-        router.register_provider(FakeModelAdapter(name="p2", models=[
-            ModelEntry(provider="p2", model="m2", context_window=8192,
-                       capabilities=ModelCapabilities(thinking=True)),
-        ]))
-        from fastapi import FastAPI
-        from core_errors import install_error_handler
+        router.register_provider(
+            FakeModelAdapter(
+                name="p1",
+                models=[
+                    ModelEntry(
+                        provider="p1",
+                        model="m1",
+                        context_window=4096,
+                        capabilities=ModelCapabilities(),
+                    ),
+                ],
+            )
+        )
+        router.register_provider(
+            FakeModelAdapter(
+                name="p2",
+                models=[
+                    ModelEntry(
+                        provider="p2",
+                        model="m2",
+                        context_window=8192,
+                        capabilities=ModelCapabilities(thinking=True),
+                    ),
+                ],
+            )
+        )
         from api_models._routes import make_router
+        from core_errors import install_error_handler
+        from fastapi import FastAPI
+
         app = FastAPI()
         install_error_handler(app)
         app.include_router(make_router(model_router=router))
@@ -137,9 +163,10 @@ class TestModelValues:
 
     def test_empty_provider_returns_empty_list(self, mock_tracer: MockTracer) -> None:
         router = make_test_model_router(models=[])
-        from fastapi import FastAPI
-        from core_errors import install_error_handler
         from api_models._routes import make_router
+        from core_errors import install_error_handler
+        from fastapi import FastAPI
+
         app = FastAPI()
         install_error_handler(app)
         app.include_router(make_router(model_router=router))
@@ -151,6 +178,7 @@ class TestModelValues:
 # ---------------------------------------------------------------------------
 # GET /v1/models — OTel
 # ---------------------------------------------------------------------------
+
 
 class TestListTelemetry:
     def test_span_name(self, mock_tracer: MockTracer) -> None:
@@ -181,8 +209,11 @@ class TestListTelemetry:
 # GET /v1/models — audit log
 # ---------------------------------------------------------------------------
 
+
 class TestListAuditLog:
-    def test_no_audit_on_success(self, mock_tracer: MockTracer, audit_log: CapturingAuditLog) -> None:
+    def test_no_audit_on_success(
+        self, mock_tracer: MockTracer, audit_log: CapturingAuditLog
+    ) -> None:
         _client(audit_log=audit_log).get("/v1/models")
         assert len(audit_log.entries) == 0
 
@@ -191,13 +222,15 @@ class TestListAuditLog:
 # GET /v1/models — OTel on failure
 # ---------------------------------------------------------------------------
 
+
 class TestListTelemetryOnFailure:
     def _make_failing_client(self, mock_tracer: MockTracer) -> TestClient:
         """Return a client whose model_router.list_models() always raises."""
         from unittest.mock import MagicMock
-        from fastapi import FastAPI
-        from core_errors import install_error_handler
+
         from api_models._routes import make_router
+        from core_errors import install_error_handler
+        from fastapi import FastAPI
 
         broken_router = MagicMock()
         broken_router.list_models.side_effect = RuntimeError("catalog unavailable")
@@ -234,11 +267,14 @@ class TestListTelemetryOnFailure:
         client.get("/v1/models")
         assert mock_tracer.spans[0].ended
 
-    def test_audit_written_on_failure(self, mock_tracer: MockTracer, audit_log: CapturingAuditLog) -> None:
+    def test_audit_written_on_failure(
+        self, mock_tracer: MockTracer, audit_log: CapturingAuditLog
+    ) -> None:
         from unittest.mock import MagicMock
-        from fastapi import FastAPI
-        from core_errors import install_error_handler
+
         from api_models._routes import make_router
+        from core_errors import install_error_handler
+        from fastapi import FastAPI
 
         broken_router = MagicMock()
         broken_router.list_models.side_effect = RuntimeError("catalog unavailable")
@@ -249,11 +285,14 @@ class TestListTelemetryOnFailure:
         client.get("/v1/models")
         assert len(audit_log.entries) == 1
 
-    def test_audit_entry_level_error(self, mock_tracer: MockTracer, audit_log: CapturingAuditLog) -> None:
+    def test_audit_entry_level_error(
+        self, mock_tracer: MockTracer, audit_log: CapturingAuditLog
+    ) -> None:
         from unittest.mock import MagicMock
-        from fastapi import FastAPI
-        from core_errors import install_error_handler
+
         from api_models._routes import make_router
+        from core_errors import install_error_handler
+        from fastapi import FastAPI
 
         broken_router = MagicMock()
         broken_router.list_models.side_effect = RuntimeError("catalog unavailable")
@@ -264,11 +303,14 @@ class TestListTelemetryOnFailure:
         client.get("/v1/models")
         assert audit_log.entries[0].level == "error"
 
-    def test_audit_entry_event_name(self, mock_tracer: MockTracer, audit_log: CapturingAuditLog) -> None:
+    def test_audit_entry_event_name(
+        self, mock_tracer: MockTracer, audit_log: CapturingAuditLog
+    ) -> None:
         from unittest.mock import MagicMock
-        from fastapi import FastAPI
-        from core_errors import install_error_handler
+
         from api_models._routes import make_router
+        from core_errors import install_error_handler
+        from fastapi import FastAPI
 
         broken_router = MagicMock()
         broken_router.list_models.side_effect = RuntimeError("catalog unavailable")
@@ -279,11 +321,14 @@ class TestListTelemetryOnFailure:
         client.get("/v1/models")
         assert audit_log.entries[0].event == "models.list.failed"
 
-    def test_audit_entry_operation(self, mock_tracer: MockTracer, audit_log: CapturingAuditLog) -> None:
+    def test_audit_entry_operation(
+        self, mock_tracer: MockTracer, audit_log: CapturingAuditLog
+    ) -> None:
         from unittest.mock import MagicMock
-        from fastapi import FastAPI
-        from core_errors import install_error_handler
+
         from api_models._routes import make_router
+        from core_errors import install_error_handler
+        from fastapi import FastAPI
 
         broken_router = MagicMock()
         broken_router.list_models.side_effect = RuntimeError("catalog unavailable")

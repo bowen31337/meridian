@@ -28,13 +28,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -81,9 +79,7 @@ class TestChannelPairSuccess:
     def test_with_user_profile_id_returns_201(self, storage_root: Path) -> None:
         client = _make_client(storage_root)
         channel_id = _create_channel(client)
-        resp = client.post(
-            f"/v1/channels/{channel_id}/pair", json={"user_profile_id": "user_abc"}
-        )
+        resp = client.post(f"/v1/channels/{channel_id}/pair", json={"user_profile_id": "user_abc"})
         assert resp.status_code == 201
 
 
@@ -223,8 +219,7 @@ class TestChannelPairAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/channels/ch_missing/pair", json={})
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "channel.pair.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "channel.pair.failed"
         )
         assert record["level"] == "error"
 
@@ -232,8 +227,7 @@ class TestChannelPairAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/channels/ch_missing/pair", json={})
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "channel.pair.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "channel.pair.failed"
         )
         assert record["code"] == "channel_not_found"
 
@@ -241,8 +235,7 @@ class TestChannelPairAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/channels/ch_missing/pair", json={})
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "channel.pair.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "channel.pair.failed"
         )
         assert record["detail"]["channel_id"] == "ch_missing"
 
@@ -250,8 +243,7 @@ class TestChannelPairAuditLog:
         client = _make_client(storage_root)
         client.post("/v1/channels/ch_missing/pair", json={})
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "channel.pair.failed"
+            r for r in _audit_records(storage_root) if r.get("event") == "channel.pair.failed"
         )
         assert len(record["detail"]["message"]) > 0
 

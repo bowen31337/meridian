@@ -19,13 +19,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Fixture helpers
@@ -84,10 +82,14 @@ class TestUsageDeltaAccumulation:
 
     def test_single_worker_single_call_total_is_one(self, storage_root: Path) -> None:
         _write_model_fixture(storage_root / "fixtures" / "w-1x1", [_end_turn_call()])
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/acc-1x1/parallel_runs",
-            json={"children": [{"fixture_session_id": "w-1x1"}]},
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post(
+                "/v1/x/sessions/acc-1x1/parallel_runs",
+                json={"children": [{"fixture_session_id": "w-1x1"}]},
+            )
+            .json()
+        )
         assert body["total_model_calls"] == 1
 
     def test_single_worker_two_calls_total_is_two(self, storage_root: Path) -> None:
@@ -95,23 +97,27 @@ class TestUsageDeltaAccumulation:
         fd = storage_root / "fixtures" / "w-1x2"
         _write_model_fixture(fd, [_tool_use_call(), _end_turn_call()])
         _write_tool_fixture(fd, [{"content": "ok"}])
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/acc-1x2/parallel_runs",
-            json={"children": [{"fixture_session_id": "w-1x2"}]},
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post(
+                "/v1/x/sessions/acc-1x2/parallel_runs",
+                json={"children": [{"fixture_session_id": "w-1x2"}]},
+            )
+            .json()
+        )
         assert body["total_model_calls"] == 2
 
     def test_three_workers_one_call_each_total_is_three(self, storage_root: Path) -> None:
         for i in range(3):
-            _write_model_fixture(
-                storage_root / "fixtures" / f"w-3x1-{i}", [_end_turn_call()]
+            _write_model_fixture(storage_root / "fixtures" / f"w-3x1-{i}", [_end_turn_call()])
+        body = (
+            _make_client(storage_root)
+            .post(
+                "/v1/x/sessions/acc-3x1/parallel_runs",
+                json={"children": [{"fixture_session_id": f"w-3x1-{i}"} for i in range(3)]},
             )
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/acc-3x1/parallel_runs",
-            json={
-                "children": [{"fixture_session_id": f"w-3x1-{i}"} for i in range(3)]
-            },
-        ).json()
+            .json()
+        )
         assert body["total_model_calls"] == 3
 
     def test_three_workers_two_calls_each_total_is_six(self, storage_root: Path) -> None:
@@ -120,23 +126,29 @@ class TestUsageDeltaAccumulation:
             fd = storage_root / "fixtures" / f"w-3x2-{i}"
             _write_model_fixture(fd, [_tool_use_call(), _end_turn_call()])
             _write_tool_fixture(fd, [{"content": "ok"}])
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/acc-3x2/parallel_runs",
-            json={
-                "children": [{"fixture_session_id": f"w-3x2-{i}"} for i in range(3)]
-            },
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post(
+                "/v1/x/sessions/acc-3x2/parallel_runs",
+                json={"children": [{"fixture_session_id": f"w-3x2-{i}"} for i in range(3)]},
+            )
+            .json()
+        )
         assert body["total_model_calls"] == 6
 
     def test_total_within_budget_status_is_completed(self, storage_root: Path) -> None:
         _write_model_fixture(storage_root / "fixtures" / "w-budget-ok", [_end_turn_call()])
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/acc-budget-ok/parallel_runs",
-            json={
-                "children": [{"fixture_session_id": "w-budget-ok"}],
-                "budget_model_calls": 10,
-            },
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post(
+                "/v1/x/sessions/acc-budget-ok/parallel_runs",
+                json={
+                    "children": [{"fixture_session_id": "w-budget-ok"}],
+                    "budget_model_calls": 10,
+                },
+            )
+            .json()
+        )
         assert body["status"] == "completed"
 
 
@@ -150,9 +162,7 @@ class TestBudgetBreachViaUsageDelta:
 
     def _setup(self, storage_root: Path, n: int = 3) -> None:
         for i in range(n):
-            _write_model_fixture(
-                storage_root / "fixtures" / f"wb-{i}", [_end_turn_call()]
-            )
+            _write_model_fixture(storage_root / "fixtures" / f"wb-{i}", [_end_turn_call()])
 
     def test_breach_returns_422(self, storage_root: Path) -> None:
         self._setup(storage_root)
@@ -167,13 +177,17 @@ class TestBudgetBreachViaUsageDelta:
 
     def test_breach_error_code_is_budget_exceeded(self, storage_root: Path) -> None:
         self._setup(storage_root)
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/breach-code/parallel_runs",
-            json={
-                "children": [{"fixture_session_id": f"wb-{i}"} for i in range(3)],
-                "budget_model_calls": 1,
-            },
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post(
+                "/v1/x/sessions/breach-code/parallel_runs",
+                json={
+                    "children": [{"fixture_session_id": f"wb-{i}"} for i in range(3)],
+                    "budget_model_calls": 1,
+                },
+            )
+            .json()
+        )
         assert body["error"]["code"] == "budget_exceeded"
 
     def test_breach_audit_total_exceeds_budget(self, storage_root: Path) -> None:
@@ -191,14 +205,10 @@ class TestBudgetBreachViaUsageDelta:
         )
         assert record["detail"]["total_model_calls"] > record["detail"]["budget_model_calls"]
 
-    def test_breach_audit_total_comes_from_usage_delta_events(
-        self, storage_root: Path
-    ) -> None:
+    def test_breach_audit_total_comes_from_usage_delta_events(self, storage_root: Path) -> None:
         # 2 workers × 1 call each with budget 1; breach after 2nd delta → total == 2
         for i in range(2):
-            _write_model_fixture(
-                storage_root / "fixtures" / f"wb2-{i}", [_end_turn_call()]
-            )
+            _write_model_fixture(storage_root / "fixtures" / f"wb2-{i}", [_end_turn_call()])
         _make_client(storage_root).post(
             "/v1/x/sessions/breach-delta-src/parallel_runs",
             json={
@@ -243,9 +253,7 @@ class TestMidExecutionCancellation:
         )
         assert resp.status_code == 422
 
-    def test_mid_execution_total_reflects_calls_before_breach(
-        self, storage_root: Path
-    ) -> None:
+    def test_mid_execution_total_reflects_calls_before_breach(self, storage_root: Path) -> None:
         # Worker has 2 model calls; budget=0 → breach after call 1 → total == 1, not 2
         self._setup_tool_use_worker(storage_root, "w-mid-total")
         _make_client(storage_root).post(
@@ -278,13 +286,17 @@ class TestMidExecutionCancellation:
 
     def test_mid_execution_error_code_is_budget_exceeded(self, storage_root: Path) -> None:
         self._setup_tool_use_worker(storage_root, "w-mid-code")
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/mid-code/parallel_runs",
-            json={
-                "children": [{"fixture_session_id": "w-mid-code"}],
-                "budget_model_calls": 0,
-            },
-        ).json()
+        body = (
+            _make_client(storage_root)
+            .post(
+                "/v1/x/sessions/mid-code/parallel_runs",
+                json={
+                    "children": [{"fixture_session_id": "w-mid-code"}],
+                    "budget_model_calls": 0,
+                },
+            )
+            .json()
+        )
         assert body["error"]["code"] == "budget_exceeded"
 
 
@@ -298,9 +310,7 @@ class TestBudgetAggregationOtel:
         _otel_exporter.clear()
 
     def test_otel_span_emitted_on_budget_breach(self, storage_root: Path) -> None:
-        _write_model_fixture(
-            storage_root / "fixtures" / "otel-breach", [_end_turn_call()]
-        )
+        _write_model_fixture(storage_root / "fixtures" / "otel-breach", [_end_turn_call()])
         _make_client(storage_root).post(
             "/v1/x/sessions/otel-breach/parallel_runs",
             json={
@@ -312,9 +322,7 @@ class TestBudgetAggregationOtel:
         assert "session.parallel_runs" in span_names
 
     def test_otel_span_emitted_on_success(self, storage_root: Path) -> None:
-        _write_model_fixture(
-            storage_root / "fixtures" / "otel-ok", [_end_turn_call()]
-        )
+        _write_model_fixture(storage_root / "fixtures" / "otel-ok", [_end_turn_call()])
         _make_client(storage_root).post(
             "/v1/x/sessions/otel-ok/parallel_runs",
             json={"children": [{"fixture_session_id": "otel-ok"}]},

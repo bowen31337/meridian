@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import type React from "react";
+import { useEffect, useRef, useState } from "react";
+import { useParams } from "react-router-dom";
 import type { AgentDetail, AgentVersion } from "../api/client.js";
 import { createApiClient } from "../api/client.js";
 import { useMeridianApi } from "../api/context.js";
@@ -241,6 +242,7 @@ function VersionHistoryPanel({
               >
                 <td>
                   <button
+                    type="button"
                     onClick={() =>
                       setSelectedVersionId((prev) => (prev === ver.id ? null : ver.id))
                     }
@@ -284,18 +286,14 @@ export function AgentDetailPage(): React.ReactElement | null {
     loadedRef.current = true;
     const tracer = getTracer();
     const timestamp = new Date().toISOString();
-    tracer.startActiveSpan(
-      "agent.inspector",
-      { attributes: { "agent.id": agentId } },
-      (span) => {
-        recordApiInvocationEvent(span, {
-          name: "agent.inspector.invocation",
-          operation: "agent.inspector",
-          timestamp,
-        });
-        span.end();
-      },
-    );
+    tracer.startActiveSpan("agent.inspector", { attributes: { "agent.id": agentId } }, (span) => {
+      recordApiInvocationEvent(span, {
+        name: "agent.inspector.invocation",
+        operation: "agent.inspector",
+        timestamp,
+      });
+      span.end();
+    });
   }, [data, agentId]);
 
   useEffect(() => {

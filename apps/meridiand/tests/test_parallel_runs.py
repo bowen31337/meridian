@@ -25,13 +25,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -135,9 +133,7 @@ class TestParallelRunsSuccess:
         client = _make_client(storage_root, FileAuditLog(storage_root))
         body = client.post(
             "/v1/x/sessions/parent-5/parallel_runs",
-            json=_make_body(
-                children=[{"fixture_session_id": f"tc{i}"} for i in range(3)]
-            ),
+            json=_make_body(children=[{"fixture_session_id": f"tc{i}"} for i in range(3)]),
         ).json()
         assert body["total_children"] == 3
 
@@ -147,9 +143,7 @@ class TestParallelRunsSuccess:
         client = _make_client(storage_root, FileAuditLog(storage_root))
         body = client.post(
             "/v1/x/sessions/parent-6/parallel_runs",
-            json=_make_body(
-                children=[{"fixture_session_id": f"sc{i}"} for i in range(2)]
-            ),
+            json=_make_body(children=[{"fixture_session_id": f"sc{i}"} for i in range(2)]),
         ).json()
         assert body["succeeded"] == 2
 
@@ -299,9 +293,7 @@ class TestParallelRunsBudget:
             ),
         )
         records = _audit_records(storage_root)
-        assert any(
-            r.get("event") == "session.parallel_runs.budget_exceeded" for r in records
-        )
+        assert any(r.get("event") == "session.parallel_runs.budget_exceeded" for r in records)
 
     def test_budget_exceeded_audit_level_error(self, storage_root: Path) -> None:
         for i in range(3):
@@ -354,9 +346,7 @@ class TestParallelRunsBudget:
         )
         assert record["detail"]["budget_model_calls"] == 1
 
-    def test_budget_exceeded_audit_detail_has_total_model_calls(
-        self, storage_root: Path
-    ) -> None:
+    def test_budget_exceeded_audit_detail_has_total_model_calls(self, storage_root: Path) -> None:
         for i in range(3):
             _setup_fixture(storage_root, f"beat{i}")
         client = _make_client(storage_root, FileAuditLog(storage_root))
@@ -419,9 +409,6 @@ class TestParallelRunsRouteWiring:
         assert resp.status_code != 404
 
 
-from fastapi.testclient import TestClient  # noqa: E402
-
-
 # ---------------------------------------------------------------------------
 # OTel span tests
 # ---------------------------------------------------------------------------
@@ -482,9 +469,7 @@ class TestParallelRunsOtel:
         client = self._make_client(storage_root)
         client.post(
             "/v1/x/sessions/otel-count/parallel_runs",
-            json=_make_body(
-                children=[{"fixture_session_id": f"otel-cc{i}"} for i in range(2)]
-            ),
+            json=_make_body(children=[{"fixture_session_id": f"otel-cc{i}"} for i in range(2)]),
         )
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
         span = spans.get("session.parallel_runs")

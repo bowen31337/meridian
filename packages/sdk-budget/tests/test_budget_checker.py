@@ -18,10 +18,9 @@ Covers:
 
 from __future__ import annotations
 
-import pytest
 from core_errors import BudgetExceededError
 from opentelemetry.trace import StatusCode
-
+import pytest
 from sdk_budget import (
     BudgetChecker,
     BudgetCheckerOptions,
@@ -31,7 +30,6 @@ from sdk_budget import (
 )
 
 from .conftest import CapturingAuditLog, MockSpan
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -48,7 +46,9 @@ def make_checker(audit: CapturingAuditLog | None = None) -> BudgetChecker:
 # ---------------------------------------------------------------------------
 
 
-def test_clean_usage_returns_empty_result(mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+def test_clean_usage_returns_empty_result(
+    mock_span: MockSpan, audit_log: CapturingAuditLog
+) -> None:
     checker = make_checker(audit_log)
     config = BudgetConfig(
         scope="session",
@@ -318,14 +318,20 @@ def test_default_options_no_audit_side_effects(mock_span: MockSpan) -> None:
 
 def test_exact_boundary_triggers_soft(mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
     checker = make_checker(audit_log)
-    config = BudgetConfig(scope="session", scope_id="s-boundary", soft=BudgetThreshold(dollars=10.0))
+    config = BudgetConfig(
+        scope="session", scope_id="s-boundary", soft=BudgetThreshold(dollars=10.0)
+    )
     result = checker.check(config, UsageSnapshot(dollars=10.0))
     assert len(result.warnings) == 1
 
 
-def test_one_below_boundary_does_not_trigger(mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+def test_one_below_boundary_does_not_trigger(
+    mock_span: MockSpan, audit_log: CapturingAuditLog
+) -> None:
     checker = make_checker(audit_log)
-    config = BudgetConfig(scope="session", scope_id="s-below", hard=BudgetThreshold(input_tokens=1000))
+    config = BudgetConfig(
+        scope="session", scope_id="s-below", hard=BudgetThreshold(input_tokens=1000)
+    )
     result = checker.check(config, UsageSnapshot(input_tokens=999))
     assert result.warnings == []
     assert audit_log.entries == []
@@ -336,7 +342,9 @@ def test_one_below_boundary_does_not_trigger(mock_span: MockSpan, audit_log: Cap
 # ---------------------------------------------------------------------------
 
 
-def test_multiple_soft_warnings_collected(mock_span: MockSpan, audit_log: CapturingAuditLog) -> None:
+def test_multiple_soft_warnings_collected(
+    mock_span: MockSpan, audit_log: CapturingAuditLog
+) -> None:
     checker = make_checker(audit_log)
     config = BudgetConfig(
         scope="agent",

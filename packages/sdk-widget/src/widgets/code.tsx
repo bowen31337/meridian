@@ -1,4 +1,4 @@
-import React from "react";
+import type React from "react";
 import { defineWidget } from "../contract.js";
 import type { WidgetProps } from "../contract.js";
 
@@ -47,10 +47,7 @@ function CodeWidgetImpl({ props }: WidgetProps<CodeProps>): React.ReactElement {
           {filename}
         </div>
       )}
-      <pre
-        style={{ margin: 0, padding: "12px", overflow: "auto" }}
-        data-language={language}
-      >
+      <pre style={{ margin: 0, padding: "12px", overflow: "auto" }} data-language={language}>
         <code>{props.code as string}</code>
       </pre>
     </div>

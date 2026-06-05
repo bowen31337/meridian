@@ -49,8 +49,8 @@ Covers:
 
 from __future__ import annotations
 
-import pytest
 from opentelemetry.trace import StatusCode
+import pytest
 from storage_reposit import (
     EVENTS,
     PHASES,
@@ -62,7 +62,6 @@ from storage_reposit import (
 )
 
 from .conftest import CapturingAuditLog, MockSpan, StubPhaseStateMachine
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -135,7 +134,9 @@ class TestPhaseStateMachineInvalidInputs:
         for phase in PHASES:
             for event_type in EVENTS:
                 result = PhaseStateMachine().next_phase(phase, event_type)
-                assert result in PHASES, f"next_phase({phase!r}, {event_type!r}) = {result!r} not in PHASES"
+                assert result in PHASES, (
+                    f"next_phase({phase!r}, {event_type!r}) = {result!r} not in PHASES"
+                )
 
     def test_terminated_not_reachable_from_itself_except_via_terminate_events(self) -> None:
         machine = PhaseStateMachine()

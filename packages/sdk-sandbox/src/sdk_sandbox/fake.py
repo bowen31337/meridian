@@ -12,8 +12,8 @@ and a SandboxFailure is raised so the Sandbox runtime surfaces it to the caller.
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any
 

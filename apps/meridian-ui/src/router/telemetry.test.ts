@@ -32,7 +32,11 @@ describe("recordRouteNavigationEvent", () => {
   it("adds ui.navigation event with correct attributes", () => {
     const span = makeSpan();
     const ts = "2026-01-01T00:00:00.000Z";
-    recordRouteNavigationEvent(asSpan(span), { name: "ui.navigation", route: "/sessions", timestamp: ts });
+    recordRouteNavigationEvent(asSpan(span), {
+      name: "ui.navigation",
+      route: "/sessions",
+      timestamp: ts,
+    });
     expect(span.addEvent).toHaveBeenCalledWith(
       "ui.navigation",
       expect.objectContaining({

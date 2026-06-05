@@ -17,24 +17,19 @@ import json
 import logging
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
-
-import pytest
-import yaml
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from unittest.mock import patch
 
 from core_errors import AuditLog, AuditLogEntry, NoopAuditLog
-
 from meridian_plugin_loader import (
-    ENTRY_POINT_GROUP,
-    PluginLoadResult,
     PluginLoader,
     PluginManifest,
 )
 from meridian_plugin_loader._discovery import discover_from_yml
-
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+import pytest
+import yaml
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -102,8 +97,6 @@ def otel_exporter(monkeypatch: pytest.MonkeyPatch) -> InMemorySpanExporter:
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
-
-    import opentelemetry.trace as otel_trace
 
     def patched_get_tracer(*args: Any, **kwargs: Any) -> Any:
         return provider.get_tracer(*args, **kwargs)
@@ -201,7 +194,9 @@ class TestPluginLoaderFromEntryPoints:
             plugins_yml=tmp_path / "missing.yml",
         )
         ep_data = [_manifest_dict(name="ep-tool")]
-        with patch("meridian_plugin_loader._loader.discover_from_entry_points", return_value=ep_data):
+        with patch(
+            "meridian_plugin_loader._loader.discover_from_entry_points", return_value=ep_data
+        ):
             result = loader.load_all()
         assert len(result.manifests) == 1
         assert result.manifests[0].name == "ep-tool"
@@ -253,7 +248,9 @@ class TestPluginLoaderMerged:
         yml = _write_plugins_yml(tmp_path, [_manifest_dict(name="yml-tool")])
         loader = PluginLoader(audit_log=NoopAuditLog(), plugins_yml=yml)
         ep_data = [_manifest_dict(name="ep-tool")]
-        with patch("meridian_plugin_loader._loader.discover_from_entry_points", return_value=ep_data):
+        with patch(
+            "meridian_plugin_loader._loader.discover_from_entry_points", return_value=ep_data
+        ):
             result = loader.load_all()
         names = {m.name for m in result.manifests}
         assert "yml-tool" in names
@@ -489,30 +486,32 @@ class TestOtel:
 
 
 class TestStructuredLog:
-    def test_logs_load_all_started(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_logs_load_all_started(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
         loader = PluginLoader(audit_log=NoopAuditLog(), plugins_yml=tmp_path / "missing.yml")
-        with caplog.at_level(logging.INFO, logger="meridian.plugin_loader"):
-            with patch("meridian_plugin_loader._loader.discover_from_entry_points", return_value=[]):
-                loader.load_all()
+        with (
+            caplog.at_level(logging.INFO, logger="meridian.plugin_loader"),
+            patch("meridian_plugin_loader._loader.discover_from_entry_points", return_value=[]),
+        ):
+            loader.load_all()
         assert any("plugin_loader.load_all started" in r.message for r in caplog.records)
 
     def test_logs_plugin_loaded(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
         yml = _write_plugins_yml(tmp_path, [_manifest_dict(name="my-tool")])
         loader = PluginLoader(audit_log=NoopAuditLog(), plugins_yml=yml)
-        with caplog.at_level(logging.INFO, logger="meridian.plugin_loader"):
-            with patch("meridian_plugin_loader._loader.discover_from_entry_points", return_value=[]):
-                loader.load_all()
+        with (
+            caplog.at_level(logging.INFO, logger="meridian.plugin_loader"),
+            patch("meridian_plugin_loader._loader.discover_from_entry_points", return_value=[]),
+        ):
+            loader.load_all()
         assert any("plugin.loaded" in r.message for r in caplog.records)
 
-    def test_logs_load_all_complete(
-        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_logs_load_all_complete(self, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
         loader = PluginLoader(audit_log=NoopAuditLog(), plugins_yml=tmp_path / "missing.yml")
-        with caplog.at_level(logging.INFO, logger="meridian.plugin_loader"):
-            with patch("meridian_plugin_loader._loader.discover_from_entry_points", return_value=[]):
-                loader.load_all()
+        with (
+            caplog.at_level(logging.INFO, logger="meridian.plugin_loader"),
+            patch("meridian_plugin_loader._loader.discover_from_entry_points", return_value=[]),
+        ):
+            loader.load_all()
         assert any("plugin_loader.load_all complete" in r.message for r in caplog.records)
 
     def test_logs_error_on_invalid_manifest(
@@ -521,7 +520,9 @@ class TestStructuredLog:
         yml = tmp_path / "plugins.yml"
         yml.write_text(yaml.dump({"plugins": [{"name": "bad", "kind": "unknown_kind"}]}))
         loader = PluginLoader(audit_log=NoopAuditLog(), plugins_yml=yml)
-        with caplog.at_level(logging.ERROR, logger="meridian.plugin_loader"):
-            with patch("meridian_plugin_loader._loader.discover_from_entry_points", return_value=[]):
-                loader.load_all()
+        with (
+            caplog.at_level(logging.ERROR, logger="meridian.plugin_loader"),
+            patch("meridian_plugin_loader._loader.discover_from_entry_points", return_value=[]),
+        ):
+            loader.load_all()
         assert any(r.levelno == logging.ERROR for r in caplog.records)

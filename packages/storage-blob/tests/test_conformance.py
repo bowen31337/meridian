@@ -25,8 +25,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from opentelemetry.trace import StatusCode
+import pytest
 from storage_blob import (
     AuditLogEntry,
     BlobFailure,

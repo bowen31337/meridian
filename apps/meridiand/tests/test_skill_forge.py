@@ -8,7 +8,8 @@ Tests cover:
   - run_skill_forge_job marks the job status as "completed" on success.
   - run_skill_forge_job sets job.run_id to the returned run_id on success.
   - run_skill_forge_job emits OTel span "skill_forge.run".
-  - OTel span carries skill_forge.job_id, skill_forge.run_id, skill_forge.skill_id, skill_forge.job_type attributes.
+  - OTel span carries skill_forge.job_id, skill_forge.run_id, skill_forge.skill_id,
+    skill_forge.job_type attributes.
   - OTel span sets skill_forge.run.success=True on success.
   - run_skill_forge_job writes audit entry "skill_forge.ran" on success.
   - Audit entry level is "info" on success.
@@ -27,7 +28,8 @@ Tests cover:
   - Rate limiter try_acquire returns False when budget is exhausted.
   - Rate limiter resets count after 60-second window.
   - run_skill_forge_loop stops processing when rate budget is exhausted.
-  - SkillForgeConfig defaults: enabled=True, max_invocations_per_minute=10, check_interval_seconds=5.0.
+  - SkillForgeConfig defaults: enabled=True, max_invocations_per_minute=10,
+    check_interval_seconds=5.0.
   - SkillForgeConfig can be disabled via enabled=False (loop not started in create_app).
   - Disabled config: loop is not created in app lifespan when enabled=False.
   - Multiple pending jobs are all processed in one tick (within budget).
@@ -37,26 +39,24 @@ Tests cover:
 from __future__ import annotations
 
 import asyncio
-import json
+import contextlib
 from datetime import UTC, datetime, timedelta
+import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock
 
-import pytest
 from meridiand._audit import FileAuditLog
 from meridiand._config import SkillForgeConfig
 from meridiand._skill_forge import (
-    NoopSkillForgeProvider,
     SkillForgeProvider,
     SkillForgeRunError,
     _RateLimiter,
     run_skill_forge_job,
     run_skill_forge_loop,
 )
+import pytest
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -154,10 +154,8 @@ async def _run_one_tick(
     )
     await asyncio.sleep(0)
     task.cancel()
-    try:
+    with contextlib.suppress(asyncio.CancelledError):
         await task
-    except asyncio.CancelledError:
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -176,8 +174,11 @@ class TestRunSkillForgeJobResult:
         audit_log = FileAuditLog(storage_root)
         asyncio.run(
             run_skill_forge_job(
-                job, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=audit_log,
+                job,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=audit_log,
             )
         )
         assert _result_record(storage_root, "sfjob_test") is not None
@@ -189,8 +190,11 @@ class TestRunSkillForgeJobResult:
         audit_log = FileAuditLog(storage_root)
         run_id = asyncio.run(
             run_skill_forge_job(
-                job, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=audit_log,
+                job,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=audit_log,
             )
         )
         record = _result_record(storage_root, "sfjob_test")
@@ -204,8 +208,11 @@ class TestRunSkillForgeJobResult:
         audit_log = FileAuditLog(storage_root)
         asyncio.run(
             run_skill_forge_job(
-                job, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=audit_log,
+                job,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=audit_log,
             )
         )
         record = _result_record(storage_root, "sfjob_abc")
@@ -219,8 +226,11 @@ class TestRunSkillForgeJobResult:
         audit_log = FileAuditLog(storage_root)
         asyncio.run(
             run_skill_forge_job(
-                job, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=audit_log,
+                job,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=audit_log,
             )
         )
         record = _result_record(storage_root, "sfjob_test")
@@ -234,8 +244,11 @@ class TestRunSkillForgeJobResult:
         audit_log = FileAuditLog(storage_root)
         asyncio.run(
             run_skill_forge_job(
-                job, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=audit_log,
+                job,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=audit_log,
             )
         )
         record = _result_record(storage_root, "sfjob_test")
@@ -249,8 +262,11 @@ class TestRunSkillForgeJobResult:
         audit_log = FileAuditLog(storage_root)
         asyncio.run(
             run_skill_forge_job(
-                job, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider("my-result"), audit_log=audit_log,
+                job,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider("my-result"),
+                audit_log=audit_log,
             )
         )
         record = _result_record(storage_root, "sfjob_test")
@@ -264,8 +280,11 @@ class TestRunSkillForgeJobResult:
         audit_log = FileAuditLog(storage_root)
         asyncio.run(
             run_skill_forge_job(
-                job, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=audit_log,
+                job,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=audit_log,
             )
         )
         record = _result_record(storage_root, "sfjob_test")
@@ -279,8 +298,11 @@ class TestRunSkillForgeJobResult:
         audit_log = FileAuditLog(storage_root)
         run_id = asyncio.run(
             run_skill_forge_job(
-                job, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=audit_log,
+                job,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=audit_log,
             )
         )
         assert run_id.startswith("sfrun_")
@@ -293,8 +315,11 @@ class TestRunSkillForgeJobResult:
         (jobs_dir / "sfjob_u1.json").write_text(json.dumps(job1))
         id1 = asyncio.run(
             run_skill_forge_job(
-                job1, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=audit_log,
+                job1,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=audit_log,
             )
         )
 
@@ -302,8 +327,11 @@ class TestRunSkillForgeJobResult:
         (jobs_dir / "sfjob_u2.json").write_text(json.dumps(job2))
         id2 = asyncio.run(
             run_skill_forge_job(
-                job2, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=audit_log,
+                job2,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=audit_log,
             )
         )
 
@@ -323,8 +351,11 @@ class TestRunSkillForgeJobStatus:
         audit_log = FileAuditLog(storage_root)
         asyncio.run(
             run_skill_forge_job(
-                job, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=audit_log,
+                job,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=audit_log,
             )
         )
         updated = _read_job(storage_root, "sfjob_test")
@@ -337,8 +368,11 @@ class TestRunSkillForgeJobStatus:
         audit_log = FileAuditLog(storage_root)
         run_id = asyncio.run(
             run_skill_forge_job(
-                job, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=audit_log,
+                job,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=audit_log,
             )
         )
         updated = _read_job(storage_root, "sfjob_test")
@@ -361,8 +395,11 @@ class TestRunSkillForgeJobOtel:
         audit_log = FileAuditLog(storage_root)
         asyncio.run(
             run_skill_forge_job(
-                job, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=audit_log,
+                job,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=audit_log,
             )
         )
         span_names = [s.name for s in _otel_exporter.get_finished_spans()]
@@ -378,8 +415,11 @@ class TestRunSkillForgeJobOtel:
         (jobs_dir / f"{job['id']}.json").write_text(json.dumps(job))
         asyncio.run(
             run_skill_forge_job(
-                job, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=FileAuditLog(storage_root),
+                job,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=FileAuditLog(storage_root),
             )
         )
         span = self._get_span()
@@ -392,8 +432,11 @@ class TestRunSkillForgeJobOtel:
         (jobs_dir / f"{job['id']}.json").write_text(json.dumps(job))
         run_id = asyncio.run(
             run_skill_forge_job(
-                job, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=FileAuditLog(storage_root),
+                job,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=FileAuditLog(storage_root),
             )
         )
         span = self._get_span()
@@ -406,8 +449,11 @@ class TestRunSkillForgeJobOtel:
         (jobs_dir / f"{job['id']}.json").write_text(json.dumps(job))
         asyncio.run(
             run_skill_forge_job(
-                job, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=FileAuditLog(storage_root),
+                job,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=FileAuditLog(storage_root),
             )
         )
         span = self._get_span()
@@ -420,8 +466,11 @@ class TestRunSkillForgeJobOtel:
         (jobs_dir / f"{job['id']}.json").write_text(json.dumps(job))
         asyncio.run(
             run_skill_forge_job(
-                job, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=FileAuditLog(storage_root),
+                job,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=FileAuditLog(storage_root),
             )
         )
         span = self._get_span()
@@ -434,8 +483,11 @@ class TestRunSkillForgeJobOtel:
         (jobs_dir / f"{job['id']}.json").write_text(json.dumps(job))
         asyncio.run(
             run_skill_forge_job(
-                job, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=FileAuditLog(storage_root),
+                job,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=FileAuditLog(storage_root),
             )
         )
         span = self._get_span()
@@ -449,8 +501,11 @@ class TestRunSkillForgeJobOtel:
         with pytest.raises(SkillForgeRunError):
             asyncio.run(
                 run_skill_forge_job(
-                    job, jobs_dir=jobs_dir, results_dir=results_dir,
-                    provider=_FailProvider(), audit_log=FileAuditLog(storage_root),
+                    job,
+                    jobs_dir=jobs_dir,
+                    results_dir=results_dir,
+                    provider=_FailProvider(),
+                    audit_log=FileAuditLog(storage_root),
                 )
             )
         span = self._get_span()
@@ -470,8 +525,11 @@ class TestRunSkillForgeJobAudit:
         (jobs_dir / f"{job['id']}.json").write_text(json.dumps(job))
         asyncio.run(
             run_skill_forge_job(
-                job, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=FileAuditLog(storage_root),
+                job,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=FileAuditLog(storage_root),
             )
         )
         records = _audit_records(storage_root)
@@ -483,11 +541,16 @@ class TestRunSkillForgeJobAudit:
         (jobs_dir / f"{job['id']}.json").write_text(json.dumps(job))
         asyncio.run(
             run_skill_forge_job(
-                job, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=FileAuditLog(storage_root),
+                job,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=FileAuditLog(storage_root),
             )
         )
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.ran")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.ran"
+        )
         assert record["level"] == "info"
 
     def test_ran_audit_detail_has_job_id(self, storage_root: Path) -> None:
@@ -496,11 +559,16 @@ class TestRunSkillForgeJobAudit:
         (jobs_dir / f"{job['id']}.json").write_text(json.dumps(job))
         asyncio.run(
             run_skill_forge_job(
-                job, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=FileAuditLog(storage_root),
+                job,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=FileAuditLog(storage_root),
             )
         )
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.ran")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.ran"
+        )
         assert record["detail"]["job_id"] == "sfjob_audit"
 
     def test_ran_audit_detail_has_run_id(self, storage_root: Path) -> None:
@@ -509,11 +577,16 @@ class TestRunSkillForgeJobAudit:
         (jobs_dir / f"{job['id']}.json").write_text(json.dumps(job))
         run_id = asyncio.run(
             run_skill_forge_job(
-                job, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=FileAuditLog(storage_root),
+                job,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=FileAuditLog(storage_root),
             )
         )
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.ran")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.ran"
+        )
         assert record["detail"]["run_id"] == run_id
 
     def test_ran_audit_detail_has_skill_id(self, storage_root: Path) -> None:
@@ -522,11 +595,16 @@ class TestRunSkillForgeJobAudit:
         (jobs_dir / f"{job['id']}.json").write_text(json.dumps(job))
         asyncio.run(
             run_skill_forge_job(
-                job, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=FileAuditLog(storage_root),
+                job,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=FileAuditLog(storage_root),
             )
         )
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.ran")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.ran"
+        )
         assert record["detail"]["skill_id"] == "skill_audit_test"
 
     def test_ran_audit_detail_has_job_type(self, storage_root: Path) -> None:
@@ -535,11 +613,16 @@ class TestRunSkillForgeJobAudit:
         (jobs_dir / f"{job['id']}.json").write_text(json.dumps(job))
         asyncio.run(
             run_skill_forge_job(
-                job, jobs_dir=jobs_dir, results_dir=results_dir,
-                provider=_SuccessProvider(), audit_log=FileAuditLog(storage_root),
+                job,
+                jobs_dir=jobs_dir,
+                results_dir=results_dir,
+                provider=_SuccessProvider(),
+                audit_log=FileAuditLog(storage_root),
             )
         )
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.ran")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.ran"
+        )
         assert record["detail"]["job_type"] == "generate_tests"
 
     def test_failure_raises_skill_forge_run_error(self, storage_root: Path) -> None:
@@ -549,8 +632,11 @@ class TestRunSkillForgeJobAudit:
         with pytest.raises(SkillForgeRunError):
             asyncio.run(
                 run_skill_forge_job(
-                    job, jobs_dir=jobs_dir, results_dir=results_dir,
-                    provider=_FailProvider(), audit_log=FileAuditLog(storage_root),
+                    job,
+                    jobs_dir=jobs_dir,
+                    results_dir=results_dir,
+                    provider=_FailProvider(),
+                    audit_log=FileAuditLog(storage_root),
                 )
             )
 
@@ -561,8 +647,11 @@ class TestRunSkillForgeJobAudit:
         with pytest.raises(SkillForgeRunError):
             asyncio.run(
                 run_skill_forge_job(
-                    job, jobs_dir=jobs_dir, results_dir=results_dir,
-                    provider=_FailProvider(), audit_log=FileAuditLog(storage_root),
+                    job,
+                    jobs_dir=jobs_dir,
+                    results_dir=results_dir,
+                    provider=_FailProvider(),
+                    audit_log=FileAuditLog(storage_root),
                 )
             )
         records = _audit_records(storage_root)
@@ -575,11 +664,16 @@ class TestRunSkillForgeJobAudit:
         with pytest.raises(SkillForgeRunError):
             asyncio.run(
                 run_skill_forge_job(
-                    job, jobs_dir=jobs_dir, results_dir=results_dir,
-                    provider=_FailProvider(), audit_log=FileAuditLog(storage_root),
+                    job,
+                    jobs_dir=jobs_dir,
+                    results_dir=results_dir,
+                    provider=_FailProvider(),
+                    audit_log=FileAuditLog(storage_root),
                 )
             )
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.run.failed")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.run.failed"
+        )
         assert record["level"] == "error"
 
     def test_failure_audit_detail_has_message(self, storage_root: Path) -> None:
@@ -589,11 +683,16 @@ class TestRunSkillForgeJobAudit:
         with pytest.raises(SkillForgeRunError):
             asyncio.run(
                 run_skill_forge_job(
-                    job, jobs_dir=jobs_dir, results_dir=results_dir,
-                    provider=_FailProvider(), audit_log=FileAuditLog(storage_root),
+                    job,
+                    jobs_dir=jobs_dir,
+                    results_dir=results_dir,
+                    provider=_FailProvider(),
+                    audit_log=FileAuditLog(storage_root),
                 )
             )
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.run.failed")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.run.failed"
+        )
         assert "message" in record["detail"] and record["detail"]["message"]
 
     def test_failure_audit_detail_has_job_id(self, storage_root: Path) -> None:
@@ -603,11 +702,16 @@ class TestRunSkillForgeJobAudit:
         with pytest.raises(SkillForgeRunError):
             asyncio.run(
                 run_skill_forge_job(
-                    job, jobs_dir=jobs_dir, results_dir=results_dir,
-                    provider=_FailProvider(), audit_log=FileAuditLog(storage_root),
+                    job,
+                    jobs_dir=jobs_dir,
+                    results_dir=results_dir,
+                    provider=_FailProvider(),
+                    audit_log=FileAuditLog(storage_root),
                 )
             )
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.run.failed")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.run.failed"
+        )
         assert record["detail"]["job_id"] == "sfjob_fail"
 
 
@@ -624,8 +728,11 @@ class TestRunSkillForgeJobErrorSurfacing:
         with pytest.raises(SkillForgeRunError):
             asyncio.run(
                 run_skill_forge_job(
-                    job, jobs_dir=jobs_dir, results_dir=results_dir,
-                    provider=_FailProvider(), audit_log=FileAuditLog(storage_root),
+                    job,
+                    jobs_dir=jobs_dir,
+                    results_dir=results_dir,
+                    provider=_FailProvider(),
+                    audit_log=FileAuditLog(storage_root),
                 )
             )
         updated = _read_job(storage_root, "sfjob_test")
@@ -638,8 +745,11 @@ class TestRunSkillForgeJobErrorSurfacing:
         with pytest.raises(SkillForgeRunError):
             asyncio.run(
                 run_skill_forge_job(
-                    job, jobs_dir=jobs_dir, results_dir=results_dir,
-                    provider=_FailProvider(), audit_log=FileAuditLog(storage_root),
+                    job,
+                    jobs_dir=jobs_dir,
+                    results_dir=results_dir,
+                    provider=_FailProvider(),
+                    audit_log=FileAuditLog(storage_root),
                 )
             )
         updated = _read_job(storage_root, "sfjob_test")
@@ -652,8 +762,11 @@ class TestRunSkillForgeJobErrorSurfacing:
         with pytest.raises(SkillForgeRunError):
             asyncio.run(
                 run_skill_forge_job(
-                    job, jobs_dir=jobs_dir, results_dir=results_dir,
-                    provider=_FailProvider(), audit_log=FileAuditLog(storage_root),
+                    job,
+                    jobs_dir=jobs_dir,
+                    results_dir=results_dir,
+                    provider=_FailProvider(),
+                    audit_log=FileAuditLog(storage_root),
                 )
             )
         updated = _read_job(storage_root, "sfjob_test")
@@ -751,14 +864,14 @@ class TestRateLimiter:
         audit_log = FileAuditLog(storage_root)
         asyncio.run(
             _run_one_tick(
-                storage_root, audit_log,
+                storage_root,
+                audit_log,
                 provider=_SuccessProvider(),
                 max_invocations_per_minute=2,
             )
         )
         completed = sum(
-            1 for i in range(5)
-            if _read_job(storage_root, f"sfjob_r{i}")["status"] == "completed"
+            1 for i in range(5) if _read_job(storage_root, f"sfjob_r{i}")["status"] == "completed"
         )
         # Budget of 2 means at most 2 jobs processed this tick.
         assert completed == 2

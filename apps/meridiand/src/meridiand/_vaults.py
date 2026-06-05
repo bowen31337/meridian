@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
-import uuid
 from datetime import UTC, datetime
+import json
 from pathlib import Path
 from typing import Any, Literal
+import uuid
 
 from core_errors import (
     AuditLog,
@@ -54,9 +54,7 @@ class VaultCreateError(MeridianError):
 
 class VaultInvalidRequestError(MeridianError):
     def __init__(self, *, message: str, timestamp: str) -> None:
-        super().__init__(
-            code="vault_invalid_request", message=message, timestamp=timestamp
-        )
+        super().__init__(code="vault_invalid_request", message=message, timestamp=timestamp)
 
     def http_status(self) -> int:
         return 422
@@ -315,9 +313,7 @@ def _vault_is_referenced(vault_id: str, storage_root: Path) -> bool:
                 continue
             config = record.get("config") or {}
             tvr = config.get("token_vault_ref", "")
-            if isinstance(tvr, str) and (
-                tvr == vault_id or tvr.startswith(f"{vault_id}/")
-            ):
+            if isinstance(tvr, str) and (tvr == vault_id or tvr.startswith(f"{vault_id}/")):
                 return True
 
     providers_dir = storage_root / "providers"
@@ -329,9 +325,7 @@ def _vault_is_referenced(vault_id: str, storage_root: Path) -> bool:
                 continue
             for field in ("vault_id", "vault_ref"):
                 ref = record.get(field, "")
-                if isinstance(ref, str) and (
-                    ref == vault_id or ref.startswith(f"{vault_id}/")
-                ):
+                if isinstance(ref, str) and (ref == vault_id or ref.startswith(f"{vault_id}/")):
                     return True
 
     return False
@@ -427,7 +421,7 @@ def make_vaults_router(
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=vault_record, status_code=201)
 
@@ -471,7 +465,7 @@ def make_vaults_router(
                         detail={"message": err2.message},
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content={"items": items}, status_code=200)
 
@@ -543,9 +537,7 @@ def make_vaults_router(
         return Response(status_code=204)
 
     @router.post("/v1/vaults/{vault_id}/secrets", status_code=201)
-    async def store_secret(
-        vault_id: str, body: VaultSecretStoreRequest
-    ) -> JSONResponse:
+    async def store_secret(vault_id: str, body: VaultSecretStoreRequest) -> JSONResponse:
         now = _now()
         tracer = get_tracer()
 
@@ -584,9 +576,7 @@ def make_vaults_router(
                         raise VaultSecretConflictError(
                             vault_id=vault_id, key=body.key, timestamp=now
                         )
-                    secret_record = vault_backend.store_secret(
-                        vault_id, body.key, body.value, now
-                    )
+                    secret_record = vault_backend.store_secret(vault_id, body.key, body.value, now)
                 else:
                     if os_keychain_backend is None:
                         raise VaultSecretStoreError(
@@ -647,7 +637,7 @@ def make_vaults_router(
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(
             content={
@@ -659,14 +649,10 @@ def make_vaults_router(
         )
 
     @router.get("/v1/vaults/{vault_id}/secrets/{name}/meta", status_code=200)
-    async def get_secret_meta(
-        vault_id: str, name: str, request: Request
-    ) -> JSONResponse:
+    async def get_secret_meta(vault_id: str, name: str, request: Request) -> JSONResponse:
         now = _now()
         tracer = get_tracer()
-        requester = (
-            request.client.host if request.client else None
-        ) or "unknown"
+        requester = (request.client.host if request.client else None) or "unknown"
 
         with tracer.start_as_current_span(
             "vault.secret.meta",
@@ -697,9 +683,7 @@ def make_vaults_router(
                         )
                     enc_record = vault_backend.get_secret(vault_id, name)
                     if enc_record is None:
-                        raise VaultSecretNotFoundError(
-                            vault_id=vault_id, name=name, timestamp=now
-                        )
+                        raise VaultSecretNotFoundError(vault_id=vault_id, name=name, timestamp=now)
                     record: dict[str, Any] = dict(enc_record)
                     record["last_accessed_at"] = now
                     counts: dict[str, int] = dict(record.get("requester_counts") or {})
@@ -715,9 +699,7 @@ def make_vaults_router(
                         )
                     ks_record = os_keychain_backend.get_secret(vault_id, name)
                     if ks_record is None:
-                        raise VaultSecretNotFoundError(
-                            vault_id=vault_id, name=name, timestamp=now
-                        )
+                        raise VaultSecretNotFoundError(vault_id=vault_id, name=name, timestamp=now)
                     record = dict(ks_record)
                     record["last_accessed_at"] = now
                     counts = dict(record.get("requester_counts") or {})
@@ -771,7 +753,7 @@ def make_vaults_router(
                         },
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content=meta, status_code=200)
 
@@ -847,14 +829,12 @@ def make_vaults_router(
                         detail={"vault_id": vault_id, "message": err2.message},
                     )
                 )
-                raise err2
+                raise err2 from exc
 
         return JSONResponse(content={"items": items}, status_code=200)
 
     @router.delete("/v1/vaults/{vault_id}/secrets/{name}", status_code=204)
-    async def delete_vault_secret(
-        vault_id: str, name: str, confirm: bool = False
-    ) -> Response:
+    async def delete_vault_secret(vault_id: str, name: str, confirm: bool = False) -> Response:
         now = _now()
         tracer = get_tracer()
 
@@ -908,9 +888,7 @@ def make_vaults_router(
                         )
 
                 if not found:
-                    raise VaultSecretNotFoundError(
-                        vault_id=vault_id, name=name, timestamp=now
-                    )
+                    raise VaultSecretNotFoundError(vault_id=vault_id, name=name, timestamp=now)
 
             except (
                 VaultSecretDeleteConfirmationError,

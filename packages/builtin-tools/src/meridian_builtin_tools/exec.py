@@ -36,6 +36,7 @@ the ``timed_out`` field rather than as an error.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import Any
 
 from meridian_sdk_tool import ToolContext, meridian_tool
@@ -104,9 +105,7 @@ _OUTPUT_SCHEMA: dict[str, Any] = {
         },
         "truncated": {
             "type": "boolean",
-            "description": (
-                "True when stdout or stderr exceeded the output cap and was trimmed."
-            ),
+            "description": ("True when stdout or stderr exceeded the output cap and was trimmed."),
         },
     },
 }
@@ -140,15 +139,11 @@ async def _run_command(
     raw_stdout = b""
     raw_stderr = b""
     try:
-        raw_stdout, raw_stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout
-        )
-    except asyncio.TimeoutError:
+        raw_stdout, raw_stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except TimeoutError:
         timed_out = True
-        try:
+        with contextlib.suppress(ProcessLookupError):
             proc.kill()
-        except ProcessLookupError:
-            pass
         await proc.wait()
 
     exit_code: int = proc.returncode if proc.returncode is not None else -1
@@ -197,7 +192,8 @@ def _record_invocation(command: str, exit_code: int, timed_out: bool) -> None:
 @meridian_tool(
     name="exec",
     description=(
-        "Run a shell command in the session workspace and return stdout, stderr, and the exit code. "
+        "Run a shell command in the session workspace and return stdout, stderr, "
+        "and the exit code. "
         "The command is executed by /bin/sh with cwd set to the workspace root. "
         "Supports pipes, redirection, and all POSIX shell constructs. "
         "Non-zero exit codes are returned in exit_code, not treated as tool errors. "

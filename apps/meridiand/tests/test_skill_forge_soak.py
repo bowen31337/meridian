@@ -42,7 +42,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
@@ -52,9 +51,9 @@ from meridiand._skill_forge_soak import (
     _proposal_matches,
     make_skill_forge_soak_router,
 )
+import pytest
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -123,8 +122,8 @@ def _make_client(
     storage_root: Path,
     provider=None,
 ) -> TestClient:
-    from fastapi import FastAPI
     from core_errors import HandlerOptions, install_error_handler
+    from fastapi import FastAPI
 
     audit = FileAuditLog(storage_root)
     router = make_skill_forge_soak_router(
@@ -240,7 +239,9 @@ class TestSoakRunFixtureMatching:
     def test_non_matching_fixture_is_miss(self, storage_root: Path) -> None:
         fd = _fixtures_dir(storage_root)
         # f1 misses, f2 hits → precision=50% → 200 with fixtures list
-        _write_fixture(fd, "f1.json", fixture_id="f1", job_type="miss_type", expected_proposal="expected")
+        _write_fixture(
+            fd, "f1.json", fixture_id="f1", job_type="miss_type", expected_proposal="expected"
+        )
         _write_fixture(fd, "f2.json", fixture_id="f2", job_type="hit_type", expected_proposal="hit")
         provider = _MappingProvider({"miss_type": "wrong", "hit_type": "hit"})
         client = _make_client(storage_root, provider)
@@ -262,7 +263,9 @@ class TestSoakRunFixtureMatching:
     def test_fixture_expected_proposal_in_response(self, storage_root: Path) -> None:
         fd = _fixtures_dir(storage_root)
         # f1 misses, f2 hits to keep precision at 50%
-        _write_fixture(fd, "f1.json", fixture_id="f1", job_type="a", expected_proposal="my-expected")
+        _write_fixture(
+            fd, "f1.json", fixture_id="f1", job_type="a", expected_proposal="my-expected"
+        )
         _write_fixture(fd, "f2.json", fixture_id="f2", job_type="b", expected_proposal="hit")
         provider = _MappingProvider({"a": "actual", "b": "hit"})
         client = _make_client(storage_root, provider)
@@ -424,31 +427,41 @@ class TestSoakRunAudit:
     def test_success_audit_level_is_info(self, storage_root: Path) -> None:
         client = _make_client(storage_root, _FixedProvider("x"))
         client.post("/v1/x/skill-forge/soak-run")
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.soak.ran")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.soak.ran"
+        )
         assert record["level"] == "info"
 
     def test_success_audit_detail_has_run_id(self, storage_root: Path) -> None:
         client = _make_client(storage_root, _FixedProvider("x"))
         client.post("/v1/x/skill-forge/soak-run")
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.soak.ran")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.soak.ran"
+        )
         assert "run_id" in record["detail"] and record["detail"]["run_id"]
 
     def test_success_audit_detail_has_precision(self, storage_root: Path) -> None:
         client = _make_client(storage_root, _FixedProvider("x"))
         client.post("/v1/x/skill-forge/soak-run")
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.soak.ran")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.soak.ran"
+        )
         assert "precision" in record["detail"]
 
     def test_success_audit_detail_has_hit_count(self, storage_root: Path) -> None:
         client = _make_client(storage_root, _FixedProvider("x"))
         client.post("/v1/x/skill-forge/soak-run")
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.soak.ran")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.soak.ran"
+        )
         assert "hit_count" in record["detail"]
 
     def test_success_audit_detail_has_fixture_count(self, storage_root: Path) -> None:
         client = _make_client(storage_root, _FixedProvider("x"))
         client.post("/v1/x/skill-forge/soak-run")
-        record = next(r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.soak.ran")
+        record = next(
+            r for r in _audit_records(storage_root) if r.get("event") == "skill_forge.soak.ran"
+        )
         assert "fixture_count" in record["detail"]
 
     def test_failure_writes_failed_audit_entry(self, storage_root: Path) -> None:
@@ -465,7 +478,8 @@ class TestSoakRunAudit:
         client = _make_client(storage_root, _FixedProvider("wrong"))
         client.post("/v1/x/skill-forge/soak-run")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.soak.run.failed"
         )
         assert record["level"] == "error"
@@ -476,7 +490,8 @@ class TestSoakRunAudit:
         client = _make_client(storage_root, _FixedProvider("wrong"))
         client.post("/v1/x/skill-forge/soak-run")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.soak.run.failed"
         )
         assert "run_id" in record["detail"] and record["detail"]["run_id"]
@@ -487,7 +502,8 @@ class TestSoakRunAudit:
         client = _make_client(storage_root, _FixedProvider("wrong"))
         client.post("/v1/x/skill-forge/soak-run")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.soak.run.failed"
         )
         assert "precision" in record["detail"]
@@ -498,7 +514,8 @@ class TestSoakRunAudit:
         client = _make_client(storage_root, _FixedProvider("wrong"))
         client.post("/v1/x/skill-forge/soak-run")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.soak.run.failed"
         )
         assert "hit_count" in record["detail"]
@@ -509,7 +526,8 @@ class TestSoakRunAudit:
         client = _make_client(storage_root, _FixedProvider("wrong"))
         client.post("/v1/x/skill-forge/soak-run")
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_forge.soak.run.failed"
         )
         assert "fixture_count" in record["detail"]

@@ -22,6 +22,14 @@
     }
   },
   "files": {
-    "ignore": ["packages/sdk-ts/src/**", "node_modules/**", "dist/**", "coverage/**"]
+    "ignore": [
+      "packages/sdk-ts/src/**",
+      "node_modules/**",
+      "dist/**",
+      "coverage/**",
+      ".venv/**",
+      ".import_linter_cache/**",
+      ".claw-forge/**"
+    ]
   }
 }

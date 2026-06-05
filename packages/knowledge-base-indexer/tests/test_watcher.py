@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from pathlib import Path
 
@@ -31,10 +32,8 @@ async def _collect_events(
     watcher.start()
     try:
         action()
-        try:
+        with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(ready.wait(), timeout=timeout)
-        except TimeoutError:
-            pass
     finally:
         watcher.stop()
 

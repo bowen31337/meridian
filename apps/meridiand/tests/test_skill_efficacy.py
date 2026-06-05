@@ -49,16 +49,15 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from meridiand._audit import FileAuditLog
 from meridiand._skill_efficacy import (
     SkillEfficacyError,
     compare_proposal_trajectories,
 )
 from meridiand._skill_forge import build_skill_version_proposal
+import pytest
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Test doubles
@@ -84,9 +83,7 @@ class _FixedRunner:
         *,
         skill_instructions: str | None,
     ) -> bool:
-        self.calls.append(
-            {"test_case": test_case, "skill_instructions": skill_instructions}
-        )
+        self.calls.append({"test_case": test_case, "skill_instructions": skill_instructions})
         return self._with if skill_instructions is not None else self._without
 
 
@@ -145,11 +142,13 @@ def _make_forge_result(
     instructions: str = "Do something useful.",
     tests: list[dict[str, Any]] | None = None,
 ) -> str:
-    return json.dumps({
-        "instructions": instructions,
-        "tools": [],
-        "tests": tests if tests is not None else [{"name": "test_one", "input": {}}],
-    })
+    return json.dumps(
+        {
+            "instructions": instructions,
+            "tools": [],
+            "tests": tests if tests is not None else [{"name": "test_one", "input": {}}],
+        }
+    )
 
 
 def _audit_records(storage_root: Path) -> list[dict[str, Any]]:
@@ -196,9 +195,7 @@ class TestEfficacyRecordStorage:
         _call(storage_root, efficacy_dir=eff_dir)
         assert len(_efficacy_records(eff_dir)) == 1
 
-    def test_efficacy_record_id_has_skefficacy_prefix(
-        self, storage_root: Path
-    ) -> None:
+    def test_efficacy_record_id_has_skefficacy_prefix(self, storage_root: Path) -> None:
         result = _call(storage_root)
         assert result["id"].startswith("skefficacy_")
 
@@ -213,21 +210,15 @@ class TestEfficacyRecordStorage:
         assert result["skill_id"] == "skill_abc"
 
     def test_efficacy_record_has_test_case_count(self, storage_root: Path) -> None:
-        proposal = _make_proposal(
-            tests=[{"name": "t1"}, {"name": "t2"}, {"name": "t3"}]
-        )
+        proposal = _make_proposal(tests=[{"name": "t1"}, {"name": "t2"}, {"name": "t3"}])
         result = _call(storage_root, proposal=proposal)
         assert result["test_case_count"] == 3
 
-    def test_efficacy_record_has_pass_rate_without_skill(
-        self, storage_root: Path
-    ) -> None:
+    def test_efficacy_record_has_pass_rate_without_skill(self, storage_root: Path) -> None:
         result = _call(storage_root, runner=_FixedRunner(with_skill=True, without_skill=False))
         assert "pass_rate_without_skill" in result
 
-    def test_efficacy_record_has_pass_rate_with_skill(
-        self, storage_root: Path
-    ) -> None:
+    def test_efficacy_record_has_pass_rate_with_skill(self, storage_root: Path) -> None:
         result = _call(storage_root, runner=_FixedRunner(with_skill=True, without_skill=False))
         assert "pass_rate_with_skill" in result
 
@@ -273,17 +264,13 @@ class TestEfficacyRecordStorage:
 
 
 class TestMetricComputation:
-    def test_runner_called_with_none_instructions_for_without_arm(
-        self, storage_root: Path
-    ) -> None:
+    def test_runner_called_with_none_instructions_for_without_arm(self, storage_root: Path) -> None:
         runner = _FixedRunner()
         _call(storage_root, runner=runner)
         without_calls = [c for c in runner.calls if c["skill_instructions"] is None]
         assert len(without_calls) == 1
 
-    def test_runner_called_with_instructions_for_with_arm(
-        self, storage_root: Path
-    ) -> None:
+    def test_runner_called_with_instructions_for_with_arm(self, storage_root: Path) -> None:
         runner = _FixedRunner()
         proposal = _make_proposal(instructions="My instructions.")
         _call(storage_root, proposal=proposal, runner=runner)
@@ -296,9 +283,7 @@ class TestMetricComputation:
         assert result["lift"] == 0.0
         assert result["test_case_count"] == 0
 
-    def test_all_pass_with_skill_none_without_lift_is_one(
-        self, storage_root: Path
-    ) -> None:
+    def test_all_pass_with_skill_none_without_lift_is_one(self, storage_root: Path) -> None:
         proposal = _make_proposal(tests=[{"name": "t1"}, {"name": "t2"}])
         runner = _FixedRunner(with_skill=True, without_skill=False)
         result = _call(storage_root, proposal=proposal, runner=runner)
@@ -312,24 +297,18 @@ class TestMetricComputation:
         result = _call(storage_root, proposal=proposal, runner=runner)
         assert result["lift"] == pytest.approx(-1.0)
 
-    def test_lift_equals_pass_rate_with_minus_pass_rate_without(
-        self, storage_root: Path
-    ) -> None:
+    def test_lift_equals_pass_rate_with_minus_pass_rate_without(self, storage_root: Path) -> None:
         result = _call(storage_root, runner=_FixedRunner(with_skill=True, without_skill=False))
         expected = result["pass_rate_with_skill"] - result["pass_rate_without_skill"]
         assert result["lift"] == pytest.approx(expected)
 
-    def test_pass_rate_with_skill_computed_correctly(
-        self, storage_root: Path
-    ) -> None:
+    def test_pass_rate_with_skill_computed_correctly(self, storage_root: Path) -> None:
         proposal = _make_proposal(tests=[{"name": "t1"}, {"name": "t2"}])
         runner = _FixedRunner(with_skill=True, without_skill=False)
         result = _call(storage_root, proposal=proposal, runner=runner)
         assert result["pass_rate_with_skill"] == pytest.approx(1.0)
 
-    def test_pass_rate_without_skill_computed_correctly(
-        self, storage_root: Path
-    ) -> None:
+    def test_pass_rate_without_skill_computed_correctly(self, storage_root: Path) -> None:
         proposal = _make_proposal(tests=[{"name": "t1"}, {"name": "t2"}])
         runner = _FixedRunner(with_skill=True, without_skill=False)
         result = _call(storage_root, proposal=proposal, runner=runner)
@@ -350,16 +329,14 @@ class TestAuditLogSuccess:
     def test_audit_level_is_info(self, storage_root: Path) -> None:
         _call(storage_root)
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill_efficacy.compared"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill_efficacy.compared"
         )
         assert record["level"] == "info"
 
     def test_audit_detail_has_metric_id(self, storage_root: Path) -> None:
         result = _call(storage_root)
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill_efficacy.compared"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill_efficacy.compared"
         )
         assert record["detail"]["metric_id"] == result["id"]
 
@@ -367,8 +344,7 @@ class TestAuditLogSuccess:
         proposal = _make_proposal(proposal_id="skillver_audit")
         _call(storage_root, proposal=proposal)
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill_efficacy.compared"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill_efficacy.compared"
         )
         assert record["detail"]["proposal_id"] == "skillver_audit"
 
@@ -376,8 +352,7 @@ class TestAuditLogSuccess:
         proposal = _make_proposal(skill_id="skill_audit")
         _call(storage_root, proposal=proposal)
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill_efficacy.compared"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill_efficacy.compared"
         )
         assert record["detail"]["skill_id"] == "skill_audit"
 
@@ -385,34 +360,28 @@ class TestAuditLogSuccess:
         proposal = _make_proposal(tests=[{"name": "a"}, {"name": "b"}])
         _call(storage_root, proposal=proposal)
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill_efficacy.compared"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill_efficacy.compared"
         )
         assert record["detail"]["test_case_count"] == 2
 
-    def test_audit_detail_has_pass_rate_without_skill(
-        self, storage_root: Path
-    ) -> None:
+    def test_audit_detail_has_pass_rate_without_skill(self, storage_root: Path) -> None:
         _call(storage_root)
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill_efficacy.compared"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill_efficacy.compared"
         )
         assert "pass_rate_without_skill" in record["detail"]
 
     def test_audit_detail_has_pass_rate_with_skill(self, storage_root: Path) -> None:
         _call(storage_root)
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill_efficacy.compared"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill_efficacy.compared"
         )
         assert "pass_rate_with_skill" in record["detail"]
 
     def test_audit_detail_has_lift(self, storage_root: Path) -> None:
         _call(storage_root)
         record = next(
-            r for r in _audit_records(storage_root)
-            if r.get("event") == "skill_efficacy.compared"
+            r for r in _audit_records(storage_root) if r.get("event") == "skill_efficacy.compared"
         )
         assert "lift" in record["detail"]
 
@@ -436,9 +405,7 @@ class TestFailureRunnerRaises:
         err = SkillEfficacyError(message="boom", timestamp="2024-01-01T00:00:00+00:00")
         assert err.code == "skill_efficacy_failed"
 
-    def test_failure_writes_compare_failed_audit_entry(
-        self, storage_root: Path
-    ) -> None:
+    def test_failure_writes_compare_failed_audit_entry(self, storage_root: Path) -> None:
         proposal = _make_proposal(tests=[{"name": "t1"}])
         with pytest.raises(SkillEfficacyError):
             _call(storage_root, proposal=proposal, runner=_ErrorRunner())
@@ -450,7 +417,8 @@ class TestFailureRunnerRaises:
         with pytest.raises(SkillEfficacyError):
             _call(storage_root, proposal=proposal, runner=_ErrorRunner())
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_efficacy.compare.failed"
         )
         assert record["level"] == "error"
@@ -460,7 +428,8 @@ class TestFailureRunnerRaises:
         with pytest.raises(SkillEfficacyError):
             _call(storage_root, proposal=proposal, runner=_ErrorRunner())
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_efficacy.compare.failed"
         )
         assert record["detail"]["metric_id"].startswith("skefficacy_")
@@ -470,7 +439,8 @@ class TestFailureRunnerRaises:
         with pytest.raises(SkillEfficacyError):
             _call(storage_root, proposal=proposal, runner=_ErrorRunner())
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_efficacy.compare.failed"
         )
         assert record["detail"]["proposal_id"] == "skillver_fail"
@@ -480,7 +450,8 @@ class TestFailureRunnerRaises:
         with pytest.raises(SkillEfficacyError):
             _call(storage_root, proposal=proposal, runner=_ErrorRunner())
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_efficacy.compare.failed"
         )
         assert record["detail"]["skill_id"] == "skill_fail"
@@ -490,7 +461,8 @@ class TestFailureRunnerRaises:
         with pytest.raises(SkillEfficacyError):
             _call(storage_root, proposal=proposal, runner=_ErrorRunner())
         record = next(
-            r for r in _audit_records(storage_root)
+            r
+            for r in _audit_records(storage_root)
             if r.get("event") == "skill_efficacy.compare.failed"
         )
         assert "message" in record["detail"] and record["detail"]["message"]
@@ -516,9 +488,7 @@ class TestOtelSpans:
         spans = {s.name: s for s in _otel_exporter.get_finished_spans()}
         return spans.get("skill_efficacy.compare_trajectories")
 
-    def test_emits_compare_trajectories_span_on_success(
-        self, storage_root: Path
-    ) -> None:
+    def test_emits_compare_trajectories_span_on_success(self, storage_root: Path) -> None:
         _call(storage_root)
         span_names = [s.name for s in _otel_exporter.get_finished_spans()]
         assert "skill_efficacy.compare_trajectories" in span_names
@@ -558,9 +528,7 @@ class TestOtelSpans:
         assert span is not None
         assert span.attributes["skill_efficacy.pass_rate_without_skill"] == pytest.approx(0.0)
 
-    def test_span_has_pass_rate_with_skill_attribute_on_success(
-        self, storage_root: Path
-    ) -> None:
+    def test_span_has_pass_rate_with_skill_attribute_on_success(self, storage_root: Path) -> None:
         _call(storage_root, runner=_FixedRunner(with_skill=True, without_skill=False))
         span = self._get_span()
         assert span is not None
@@ -572,26 +540,20 @@ class TestOtelSpans:
         assert span is not None
         assert span.attributes["skill_efficacy.lift"] == pytest.approx(1.0)
 
-    def test_span_success_attribute_true_on_success(
-        self, storage_root: Path
-    ) -> None:
+    def test_span_success_attribute_true_on_success(self, storage_root: Path) -> None:
         _call(storage_root)
         span = self._get_span()
         assert span is not None
         assert span.attributes["skill_efficacy.compare_trajectories.success"] is True
 
-    def test_emits_compare_trajectories_span_on_failure(
-        self, storage_root: Path
-    ) -> None:
+    def test_emits_compare_trajectories_span_on_failure(self, storage_root: Path) -> None:
         proposal = _make_proposal(tests=[{"name": "t1"}])
         with pytest.raises(SkillEfficacyError):
             _call(storage_root, proposal=proposal, runner=_ErrorRunner())
         span_names = [s.name for s in _otel_exporter.get_finished_spans()]
         assert "skill_efficacy.compare_trajectories" in span_names
 
-    def test_span_success_attribute_false_on_failure(
-        self, storage_root: Path
-    ) -> None:
+    def test_span_success_attribute_false_on_failure(self, storage_root: Path) -> None:
         proposal = _make_proposal(tests=[{"name": "t1"}])
         with pytest.raises(SkillEfficacyError):
             _call(storage_root, proposal=proposal, runner=_ErrorRunner())
@@ -615,9 +577,7 @@ class TestProposalIntegration:
     ) -> tuple[str, Path]:
         audit_log = FileAuditLog(storage_root)
         eff_dir = storage_root / "skill_forge" / "efficacy"
-        result_text = _make_forge_result(
-            tests=tests if tests is not None else [{"name": "t1"}]
-        )
+        result_text = _make_forge_result(tests=tests if tests is not None else [{"name": "t1"}])
         proposal_id = asyncio.run(
             build_skill_version_proposal(
                 result_text=result_text,
@@ -633,22 +593,16 @@ class TestProposalIntegration:
         )
         return proposal_id, eff_dir
 
-    def test_build_proposal_stores_efficacy_record(
-        self, storage_root: Path
-    ) -> None:
+    def test_build_proposal_stores_efficacy_record(self, storage_root: Path) -> None:
         _, eff_dir = self._call_build(storage_root)
         assert len(_efficacy_records(eff_dir)) == 1
 
-    def test_efficacy_record_proposal_id_matches_created_proposal(
-        self, storage_root: Path
-    ) -> None:
+    def test_efficacy_record_proposal_id_matches_created_proposal(self, storage_root: Path) -> None:
         proposal_id, eff_dir = self._call_build(storage_root)
         records = _efficacy_records(eff_dir)
         assert records[0]["proposal_id"] == proposal_id
 
-    def test_efficacy_stored_even_when_no_tests(
-        self, storage_root: Path
-    ) -> None:
+    def test_efficacy_stored_even_when_no_tests(self, storage_root: Path) -> None:
         _, eff_dir = self._call_build(storage_root, tests=[])
         records = _efficacy_records(eff_dir)
         assert len(records) == 1

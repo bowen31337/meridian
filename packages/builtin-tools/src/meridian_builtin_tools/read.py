@@ -118,16 +118,14 @@ def _resolve_safe(workspace: str, rel_path: str) -> Path:
                     sym_rel = str(current.relative_to(ws))
                 except ValueError:
                     sym_rel = str(current)
-                raise ValueError(
-                    f"Symlink {sym_rel!r} points outside workspace root"
-                )
+                raise ValueError(f"Symlink {sym_rel!r} points outside workspace root") from None
 
     # Final confinement check: resolved path (covers dotdot and other escapes).
     target = (ws / rel_path).resolve()
     try:
         target.relative_to(ws)
     except ValueError:
-        raise ValueError(f"Path {rel_path!r} resolves outside workspace root")
+        raise ValueError(f"Path {rel_path!r} resolves outside workspace root") from None
 
     return target
 

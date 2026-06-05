@@ -48,13 +48,9 @@ class PhaseStateMachine:
     def next_phase(self, current: str, event_type: str) -> str:
         """Return the next phase given the current phase and the triggering event."""
         if current not in PHASES:
-            raise ValueError(
-                f"Unknown phase: {current!r}. Valid phases: {sorted(PHASES)}"
-            )
+            raise ValueError(f"Unknown phase: {current!r}. Valid phases: {sorted(PHASES)}")
         if event_type not in EVENTS:
-            raise ValueError(
-                f"Unknown event type: {event_type!r}. Valid events: {sorted(EVENTS)}"
-            )
+            raise ValueError(f"Unknown event type: {event_type!r}. Valid events: {sorted(EVENTS)}")
         return _TRANSITIONS[(current, event_type)]
 
 

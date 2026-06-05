@@ -1,17 +1,15 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 import fnmatch
 import hashlib
 import json
 import os
+from pathlib import Path
 import re
 import tempfile
-from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any, Literal
 
-import sqlite_vec
-import sqlean
 from core_errors import (
     AuditLog,
     AuditLogEntry,
@@ -25,6 +23,8 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from meridian_kb_indexer import Chunk, WorkspaceIndexer, should_index_path
 from pydantic import BaseModel
+import sqlean
+import sqlite_vec
 
 _WORKSPACE_ENV = "WORKSPACE"
 
@@ -202,12 +202,11 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
 )
 """
 
-_CREATE_VEC = f"CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0(embedding FLOAT[{_EMBED_DIM}])"
-
-_INSERT_SQL = (
-    f"INSERT INTO chunks_fts ({', '.join(_COLS)}) "
-    f"VALUES ({', '.join('?' * len(_COLS))})"
+_CREATE_VEC = (
+    f"CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0(embedding FLOAT[{_EMBED_DIM}])"
 )
+
+_INSERT_SQL = f"INSERT INTO chunks_fts ({', '.join(_COLS)}) VALUES ({', '.join('?' * len(_COLS))})"
 
 _SELECT_COLS = ", ".join(_COLS)
 _SELECT_COLS_F = ", ".join(f"f.{c}" for c in _COLS)
@@ -249,9 +248,7 @@ class KbStore:
             if old:
                 placeholders = ",".join("?" * len(old))
                 old_ids = [r[0] for r in old]
-                conn.execute(
-                    f"DELETE FROM chunks_vec WHERE rowid IN ({placeholders})", old_ids
-                )
+                conn.execute(f"DELETE FROM chunks_vec WHERE rowid IN ({placeholders})", old_ids)
             conn.execute("DELETE FROM chunks_fts WHERE file_path = ?", [file_path])
 
             # Insert new chunks; link each FTS5 rowid into chunks_vec.
@@ -287,9 +284,7 @@ class KbStore:
         ).fetchone()
         return row is not None
 
-    def glob_search(
-        self, pattern: str, scope: str | None, limit: int
-    ) -> list[dict[str, Any]]:
+    def glob_search(self, pattern: str, scope: str | None, limit: int) -> list[dict[str, Any]]:
         conn = self._get_conn()
         if scope:
             rows = conn.execute(
@@ -307,9 +302,7 @@ class KbStore:
                     break
         return results
 
-    def bm25_search(
-        self, query: str, scope: str | None, limit: int
-    ) -> list[dict[str, Any]]:
+    def bm25_search(self, query: str, scope: str | None, limit: int) -> list[dict[str, Any]]:
         words = re.findall(r"\w+", query)
         if not words:
             return []
@@ -331,9 +324,7 @@ class KbStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def vector_search(
-        self, query: str, scope: str | None, limit: int
-    ) -> list[dict[str, Any]]:
+    def vector_search(self, query: str, scope: str | None, limit: int) -> list[dict[str, Any]]:
         """KNN search via sqlite-vec, filtered by scope."""
         conn = self._get_conn()
         q_embed = _hash_embed(query)
@@ -454,7 +445,7 @@ def make_kb_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(
             content={
@@ -493,7 +484,7 @@ def make_kb_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         detail={"message": err.message},
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(content=data)
 
@@ -552,7 +543,7 @@ def make_kb_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
                         },
                     )
                 )
-                raise err
+                raise err from exc
 
         return JSONResponse(
             content={

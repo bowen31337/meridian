@@ -1,5 +1,6 @@
-import React, { useCallback, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import type React from "react";
+import { useCallback, useState } from "react";
 import type { Message, Session } from "../api/client.js";
 import { createApiClient } from "../api/client.js";
 import { useMeridianApi } from "../api/context.js";

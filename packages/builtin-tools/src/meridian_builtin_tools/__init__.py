@@ -22,7 +22,15 @@ from .read import read_tool
 from .spawn import spawn_tool
 from .write import write_tool
 
-ALL_TOOLS = [canvas_op_tool, exec_tool, grep_tool, kb_search_tool, read_tool, spawn_tool, write_tool]
+ALL_TOOLS = [
+    canvas_op_tool,
+    exec_tool,
+    grep_tool,
+    kb_search_tool,
+    read_tool,
+    spawn_tool,
+    write_tool,
+]
 
 __all__ = [
     "canvas_op_tool",

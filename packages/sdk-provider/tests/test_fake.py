@@ -87,11 +87,15 @@ _DEFAULT_EVENTS: list[dict[str, Any]] = [
 ]
 
 
-def make_adapter(fixtures_dir: Path, audit_log: CollectingAuditLog | None = None) -> FakeModelAdapter:
+def make_adapter(
+    fixtures_dir: Path, audit_log: CollectingAuditLog | None = None
+) -> FakeModelAdapter:
     return FakeModelAdapter(fixtures_dir, audit_log=audit_log)
 
 
-def make_fixture(fixtures_dir: Path, model: str, events: list[dict[str, Any]] | None = None) -> Path:
+def make_fixture(
+    fixtures_dir: Path, model: str, events: list[dict[str, Any]] | None = None
+) -> Path:
     slug = model.replace(":", "_").replace("/", "_")
     path = fixtures_dir / f"{slug}.ndjson"
     write_model_fixture(path, events or _DEFAULT_EVENTS)
@@ -130,18 +134,14 @@ class TestProtocolConformance:
 
 
 class TestCallHappyPath:
-    async def test_yields_correct_event_count(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_yields_correct_event_count(self, tmp_path: Path, mock_span: MockSpan) -> None:
         make_fixture(tmp_path, "test-provider:test-model")
         adapter = make_adapter(tmp_path)
         opts = make_opts(model="test-provider:test-model")
         events = [e async for e in adapter.call(opts)]
         assert len(events) == 3
 
-    async def test_yields_typed_events(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_yields_typed_events(self, tmp_path: Path, mock_span: MockSpan) -> None:
         make_fixture(tmp_path, "test-provider:test-model")
         adapter = make_adapter(tmp_path)
         opts = make_opts(model="test-provider:test-model")
@@ -150,9 +150,7 @@ class TestCallHappyPath:
         assert isinstance(events[1], TextDeltaEvent)
         assert isinstance(events[2], MessageStopEvent)
 
-    async def test_text_delta_content(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_text_delta_content(self, tmp_path: Path, mock_span: MockSpan) -> None:
         make_fixture(tmp_path, "test-provider:test-model")
         adapter = make_adapter(tmp_path)
         opts = make_opts(model="test-provider:test-model")
@@ -160,9 +158,7 @@ class TestCallHappyPath:
         assert isinstance(events[1], TextDeltaEvent)
         assert events[1].text == "hello"
 
-    async def test_replay_is_stateless(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_replay_is_stateless(self, tmp_path: Path, mock_span: MockSpan) -> None:
         make_fixture(tmp_path, "test-provider:test-model")
         adapter = make_adapter(tmp_path)
         opts = make_opts(model="test-provider:test-model")
@@ -172,9 +168,7 @@ class TestCallHappyPath:
         for a, b in zip(first, second):
             assert type(a) is type(b)
 
-    async def test_skips_blank_lines(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_skips_blank_lines(self, tmp_path: Path, mock_span: MockSpan) -> None:
         slug = "test-provider_test-model"
         path = tmp_path / f"{slug}.ndjson"
         path.write_text(
@@ -189,9 +183,7 @@ class TestCallHappyPath:
         events = [e async for e in adapter.call(opts)]
         assert len(events) == 2
 
-    async def test_no_audit_entries_on_success(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_no_audit_entries_on_success(self, tmp_path: Path, mock_span: MockSpan) -> None:
         make_fixture(tmp_path, "test-provider:test-model")
         audit = CollectingAuditLog()
         adapter = make_adapter(tmp_path, audit)
@@ -212,25 +204,19 @@ class TestCallOTelSpan:
         [e async for e in adapter.call(make_opts(model="test-provider:test-model"))]
         assert mock_span.name == "fake.model.call"
 
-    async def test_span_attributes_provider_name(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_span_attributes_provider_name(self, tmp_path: Path, mock_span: MockSpan) -> None:
         make_fixture(tmp_path, "test-provider:test-model")
         adapter = FakeModelAdapter(tmp_path, name="acme-fake")
         [e async for e in adapter.call(make_opts(model="test-provider:test-model"))]
         assert mock_span.attributes["provider.name"] == "acme-fake"
 
-    async def test_span_attributes_model(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_span_attributes_model(self, tmp_path: Path, mock_span: MockSpan) -> None:
         make_fixture(tmp_path, "test-provider:test-model")
         adapter = make_adapter(tmp_path)
         [e async for e in adapter.call(make_opts(model="test-provider:test-model"))]
         assert mock_span.attributes["model"] == "test-provider:test-model"
 
-    async def test_invocation_event_attached(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_invocation_event_attached(self, tmp_path: Path, mock_span: MockSpan) -> None:
         make_fixture(tmp_path, "test-provider:test-model")
         adapter = make_adapter(tmp_path)
         [e async for e in adapter.call(make_opts(model="test-provider:test-model"))]
@@ -246,9 +232,7 @@ class TestCallOTelSpan:
         inv = next(e for e in mock_span.events if e[0] == "provider.invocation")
         assert inv[1]["provider.kind"] == "fake"
 
-    async def test_span_ended_on_success(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_span_ended_on_success(self, tmp_path: Path, mock_span: MockSpan) -> None:
         make_fixture(tmp_path, "test-provider:test-model")
         adapter = make_adapter(tmp_path)
         [e async for e in adapter.call(make_opts(model="test-provider:test-model"))]
@@ -261,17 +245,13 @@ class TestCallOTelSpan:
 
 
 class TestCallFixtureFailure:
-    async def test_raises_on_missing_fixture(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_raises_on_missing_fixture(self, tmp_path: Path, mock_span: MockSpan) -> None:
         adapter = make_adapter(tmp_path)
         opts = make_opts(model="test-provider:test-model")
         with pytest.raises(FileNotFoundError, match="Fixture not found"):
             [e async for e in adapter.call(opts)]
 
-    async def test_raises_on_invalid_json(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_raises_on_invalid_json(self, tmp_path: Path, mock_span: MockSpan) -> None:
         slug = "test-provider_test-model"
         (tmp_path / f"{slug}.ndjson").write_text("not-json\n", encoding="utf-8")
         adapter = make_adapter(tmp_path)
@@ -279,9 +259,7 @@ class TestCallFixtureFailure:
         with pytest.raises(ValueError, match="invalid ModelEvent"):
             [e async for e in adapter.call(opts)]
 
-    async def test_raises_on_wrong_event_type(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_raises_on_wrong_event_type(self, tmp_path: Path, mock_span: MockSpan) -> None:
         slug = "test-provider_test-model"
         (tmp_path / f"{slug}.ndjson").write_text(
             json.dumps({"type": "unknown_type_xyz"}) + "\n", encoding="utf-8"
@@ -333,9 +311,7 @@ class TestCallFixtureFailure:
             [e async for e in adapter.call(opts)]
         assert exc_info.value in mock_span.recorded_exceptions
 
-    async def test_span_ended_on_failure(
-        self, tmp_path: Path, mock_span: MockSpan
-    ) -> None:
+    async def test_span_ended_on_failure(self, tmp_path: Path, mock_span: MockSpan) -> None:
         adapter = make_adapter(tmp_path)
         opts = make_opts(model="test-provider:test-model")
         with pytest.raises(FileNotFoundError):
@@ -416,7 +392,7 @@ class TestWriteModelFixture:
                 {"type": "message_stop", "stop_reason": "end_turn"},
             ],
         )
-        lines = [l for l in path.read_text().splitlines() if l.strip()]
+        lines = [line for line in path.read_text().splitlines() if line.strip()]
         assert len(lines) == 2
         assert json.loads(lines[0])["type"] == "message_start"
         assert json.loads(lines[1])["type"] == "message_stop"

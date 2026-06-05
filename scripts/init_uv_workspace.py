@@ -10,9 +10,9 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+from pathlib import Path
 import subprocess
 import sys
-from pathlib import Path
 
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode

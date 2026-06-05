@@ -69,12 +69,14 @@ src/meridiand/_skill_efficacy.py
 src/meridiand/_skill_forge.py
 src/meridiand/_skill_forge_precision.py
 src/meridiand/_skill_forge_proposals.py
+src/meridiand/_skill_forge_sel.py
 src/meridiand/_skill_forge_soak.py
 src/meridiand/_skill_suggestions.py
 src/meridiand/_skills.py
 src/meridiand/_slack_channel_driver.py
 src/meridiand/_soft_budget_exceeded.py
 src/meridiand/_spawn.py
+src/meridiand/_submit_tool_results.py
 src/meridiand/_system_audit_middleware.py
 src/meridiand/_system_channel.py
 src/meridiand/_system_config.py
@@ -179,6 +181,7 @@ tests/test_skill_forge_proposal.py
 tests/test_skill_forge_proposals_approve.py
 tests/test_skill_forge_proposals_list.py
 tests/test_skill_forge_proposals_reject.py
+tests/test_skill_forge_sel.py
 tests/test_skill_forge_soak.py
 tests/test_skill_suggestions.py
 tests/test_skills.py
@@ -186,6 +189,7 @@ tests/test_slack_channel_driver.py
 tests/test_soft_budget_exceeded.py
 tests/test_spawn.py
 tests/test_sse_backpressure.py
+tests/test_submit_tool_results.py
 tests/test_system_audit_middleware.py
 tests/test_system_channel.py
 tests/test_system_integration.py

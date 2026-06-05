@@ -28,14 +28,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from meridiand._vault_backend_os_keychain import OsKeychainVaultBackend
-
-from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # In-memory keyring for test isolation
@@ -108,9 +104,7 @@ def _create_vault(client: TestClient, **overrides) -> dict:
 
 
 def _store_secret(client: TestClient, vault_id: str, **overrides) -> dict:
-    return client.post(
-        f"/v1/vaults/{vault_id}/secrets", json=_secret_body(**overrides)
-    ).json()
+    return client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(**overrides)).json()
 
 
 def _audit_records(storage_root: Path) -> list[dict]:
@@ -262,9 +256,7 @@ class TestApiOsKeychainBackendStore:
         client = _make_client(storage_root)
         vault_id = _create_vault(client)["id"]
         client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="dup2"))
-        body = client.post(
-            f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="dup2")
-        ).json()
+        body = client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body(key="dup2")).json()
         assert body["error"]["code"] == "vault_secret_conflict"
 
     def test_value_stored_in_keychain_not_plaintext(self, storage_root: Path) -> None:
@@ -379,9 +371,7 @@ class TestApiBackendNotConfigured:
     def test_store_without_backend_error_code(self, storage_root: Path) -> None:
         client = _make_client(storage_root, with_backend=False)
         vault_id = _create_vault(client)["id"]
-        body = client.post(
-            f"/v1/vaults/{vault_id}/secrets", json=_secret_body()
-        ).json()
+        body = client.post(f"/v1/vaults/{vault_id}/secrets", json=_secret_body()).json()
         assert body["error"]["code"] == "vault_secret_store_failed"
 
     def test_store_without_backend_writes_audit(self, storage_root: Path) -> None:

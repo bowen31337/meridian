@@ -5,7 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NoopAuditLog } from "../../workspace/audit.js";
 import type { AuditLogEntry } from "../../workspace/types.js";
 import { MeridianApiProvider } from "../context.js";
-import { useCloseSession, useCreateSession, useGetSession, useListSessions } from "./useSessions.js";
+import {
+  useCloseSession,
+  useCreateSession,
+  useGetSession,
+  useListSessions,
+} from "./useSessions.js";
 
 // ---------------------------------------------------------------------------
 // OTel mock — pass-through span, no SDK bootstrap needed.
@@ -114,10 +119,14 @@ describe("useListSessions", () => {
   });
 
   it("sets isError and writes to audit log on failure", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ code: "SERVER_ERROR", message: "boom" }, 500));
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse({ code: "SERVER_ERROR", message: "boom" }, 500),
+    );
     const auditLog = makeAuditLog();
 
-    const { result } = renderHook(() => useListSessions(), { wrapper: createWrapper({ auditLog }) });
+    const { result } = renderHook(() => useListSessions(), {
+      wrapper: createWrapper({ auditLog }),
+    });
     await waitFor(() => expect(result.current.isError).toBe(true));
 
     expect(auditLog.entries).toHaveLength(1);
@@ -139,9 +148,13 @@ describe("useGetSession", () => {
   });
 
   it("writes to audit log on 404", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ code: "NOT_FOUND", message: "not found" }, 404));
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse({ code: "NOT_FOUND", message: "not found" }, 404),
+    );
     const auditLog = makeAuditLog();
-    const { result } = renderHook(() => useGetSession("missing"), { wrapper: createWrapper({ auditLog }) });
+    const { result } = renderHook(() => useGetSession("missing"), {
+      wrapper: createWrapper({ auditLog }),
+    });
     await waitFor(() => expect(result.current.isError).toBe(true));
 
     expect(auditLog.entries[0]?.event).toBe("api.sessions.get.failed");
@@ -169,9 +182,13 @@ describe("useCreateSession", () => {
   });
 
   it("writes to audit log on failure", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ code: "BAD_REQUEST", message: "bad input" }, 400));
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse({ code: "BAD_REQUEST", message: "bad input" }, 400),
+    );
     const auditLog = makeAuditLog();
-    const { result } = renderHook(() => useCreateSession(), { wrapper: createWrapper({ auditLog }) });
+    const { result } = renderHook(() => useCreateSession(), {
+      wrapper: createWrapper({ auditLog }),
+    });
 
     result.current.mutate({ provider: "bad", model: "bad" });
     await waitFor(() => expect(result.current.isError).toBe(true));
@@ -190,14 +207,18 @@ describe("useCloseSession", () => {
 
     result.current.mutate("s1");
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    const url = vi.mocked(fetch).mock.calls[0]![0] as string;
+    const url = vi.mocked(fetch).mock.calls[0]?.[0] as string;
     expect(url).toContain("/sessions/s1");
   });
 
   it("writes to audit log on failure", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(jsonResponse({ code: "NOT_FOUND", message: "not found" }, 404));
+    vi.mocked(fetch).mockResolvedValueOnce(
+      jsonResponse({ code: "NOT_FOUND", message: "not found" }, 404),
+    );
     const auditLog = makeAuditLog();
-    const { result } = renderHook(() => useCloseSession(), { wrapper: createWrapper({ auditLog }) });
+    const { result } = renderHook(() => useCloseSession(), {
+      wrapper: createWrapper({ auditLog }),
+    });
 
     result.current.mutate("s_gone");
     await waitFor(() => expect(result.current.isError).toBe(true));

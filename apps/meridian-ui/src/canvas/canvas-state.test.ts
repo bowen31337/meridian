@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
 import type { CanvasOp } from "@meridian/sdk-widget";
+import { describe, expect, it } from "vitest";
 import { applyCanvasOp, toContentBlock } from "./canvas-state.js";
 
 function makeOp(overrides: Partial<CanvasOp> = {}): CanvasOp {
@@ -41,7 +41,10 @@ describe("applyCanvasOp — set", () => {
 
 describe("applyCanvasOp — patch", () => {
   it("merges props into the existing entry", () => {
-    let state = applyCanvasOp(new Map(), makeOp({ op: "set", props: { text: "hi", extra: "keep" } }));
+    let state = applyCanvasOp(
+      new Map(),
+      makeOp({ op: "set", props: { text: "hi", extra: "keep" } }),
+    );
     state = applyCanvasOp(state, makeOp({ op: "patch", props: { text: "updated" }, sequence: 2 }));
     expect(state.get("w1")?.props).toEqual({ text: "updated", extra: "keep" });
   });
@@ -109,7 +112,8 @@ describe("applyCanvasOp — clear", () => {
 describe("toContentBlock", () => {
   it("returns a ContentBlockCanvasOp with op=set", () => {
     const state = applyCanvasOp(new Map(), makeOp({ op: "set" }));
-    const entry = state.get("w1")!;
+    const entry = state.get("w1");
+    if (!entry) throw new Error("expected entry for w1");
     const block = toContentBlock(entry);
     expect(block.type).toBe("canvas_op");
     expect(block.canvas_op.op).toBe("set");
@@ -120,8 +124,13 @@ describe("toContentBlock", () => {
   });
 
   it("preserves sequence and timestamp from the entry", () => {
-    const state = applyCanvasOp(new Map(), makeOp({ sequence: 7, timestamp: "2026-01-01T00:00:00Z" }));
-    const block = toContentBlock(state.get("w1")!);
+    const state = applyCanvasOp(
+      new Map(),
+      makeOp({ sequence: 7, timestamp: "2026-01-01T00:00:00Z" }),
+    );
+    const entry = state.get("w1");
+    if (!entry) throw new Error("expected entry for w1");
+    const block = toContentBlock(entry);
     expect(block.canvas_op.sequence).toBe(7);
     expect(block.canvas_op.timestamp).toBe("2026-01-01T00:00:00Z");
   });

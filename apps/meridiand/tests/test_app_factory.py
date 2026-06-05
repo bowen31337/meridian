@@ -21,19 +21,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
+from core_errors import AuditLog, AuditLogEntry, NoopAuditLog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.testclient import TestClient
-
-from core_errors import AuditLog, AuditLogEntry, NoopAuditLog
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
 from meridiand._config import CorsConfig
+import pytest
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -302,9 +300,8 @@ class TestFactoryFailure:
         assert entry.detail["error_type"] == "RuntimeError"
 
     def test_failure_emits_error_span(self, monkeypatch) -> None:
-        from opentelemetry.trace import StatusCode
-
         from meridiand import _app
+        from opentelemetry.trace import StatusCode
 
         def _explode(*args, **kwargs):
             raise RuntimeError("injected failure")
@@ -343,9 +340,7 @@ class TestRouteWiring:
         assert resp.status_code == 404
 
     def test_phase_route_absent_without_event_log(self, storage_root: Path) -> None:
-        app = create_app(
-            FileAuditLog(storage_root), storage_root=storage_root, event_log=None
-        )
+        app = create_app(FileAuditLog(storage_root), storage_root=storage_root, event_log=None)
         client = TestClient(app, raise_server_exceptions=False)
-        resp = client.get(f"/v1/x/sessions/wiring-phase/phase")
+        resp = client.get("/v1/x/sessions/wiring-phase/phase")
         assert resp.status_code == 404

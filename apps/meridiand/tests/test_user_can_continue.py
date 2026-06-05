@@ -28,7 +28,6 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
-import pytest
 from fastapi.testclient import TestClient
 from meridiand._app import create_app
 from meridiand._audit import FileAuditLog
@@ -36,7 +35,6 @@ from storage_event_log import LocalEventLogWriter
 from storage_reposit import LocalEventLogReader
 
 from tests._otel_shared import otel_exporter as _otel_exporter
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -88,47 +86,33 @@ def _read_audit(storage_root: Path) -> list[dict[str, Any]]:
 
 class TestUserCanContinueResponse:
     def test_returns_200_on_success(self, storage_root: Path) -> None:
-        resp = _make_client(storage_root).post(
-            "/v1/x/sessions/sess1/user-can-continue"
-        )
+        resp = _make_client(storage_root).post("/v1/x/sessions/sess1/user-can-continue")
         assert resp.status_code == 200
 
     def test_response_has_session_id(self, storage_root: Path) -> None:
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/sess2/user-can-continue"
-        ).json()
+        body = _make_client(storage_root).post("/v1/x/sessions/sess2/user-can-continue").json()
         assert body["session_id"] == "sess2"
 
     def test_response_after_is_running(self, storage_root: Path) -> None:
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/sess3/user-can-continue"
-        ).json()
+        body = _make_client(storage_root).post("/v1/x/sessions/sess3/user-can-continue").json()
         assert body["after"] == "running"
 
     def test_response_reason_is_user_approved(self, storage_root: Path) -> None:
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/sess4/user-can-continue"
-        ).json()
+        body = _make_client(storage_root).post("/v1/x/sessions/sess4/user-can-continue").json()
         assert body["reason"] == "user_approved"
 
     def test_response_before_defaults_to_created(self, storage_root: Path) -> None:
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/sess5/user-can-continue"
-        ).json()
+        body = _make_client(storage_root).post("/v1/x/sessions/sess5/user-can-continue").json()
         assert body["before"] == "created"
 
     def test_response_before_reflects_waiting_for_user(self, storage_root: Path) -> None:
         _seed_phase(storage_root, "sess6", "waiting_for_user")
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/sess6/user-can-continue"
-        ).json()
+        body = _make_client(storage_root).post("/v1/x/sessions/sess6/user-can-continue").json()
         assert body["before"] == "waiting_for_user"
 
     def test_response_before_reflects_prior_phase(self, storage_root: Path) -> None:
         _seed_phase(storage_root, "sess7", "paused")
-        body = _make_client(storage_root).post(
-            "/v1/x/sessions/sess7/user-can-continue"
-        ).json()
+        body = _make_client(storage_root).post("/v1/x/sessions/sess7/user-can-continue").json()
         assert body["before"] == "paused"
 
 
@@ -284,9 +268,7 @@ class TestUserCanContinueOtel:
 
 class TestUserCanContinueRouterWiring:
     def test_route_exists_with_storage_root_and_event_log(self, storage_root: Path) -> None:
-        resp = _make_client(storage_root).post(
-            "/v1/x/sessions/wire-sess1/user-can-continue"
-        )
+        resp = _make_client(storage_root).post("/v1/x/sessions/wire-sess1/user-can-continue")
         assert resp.status_code != 404
 
     def test_no_storage_root_returns_404(self, storage_root: Path) -> None:

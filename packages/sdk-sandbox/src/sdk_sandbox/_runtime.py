@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import dataclasses
 from collections.abc import Callable
+import dataclasses
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -210,9 +210,7 @@ class Sandbox:
             missing_caps = tool.required_capabilities - context.granted_capabilities
             if missing_caps:
                 missing_str = ", ".join(sorted(missing_caps))
-                denial_message = (
-                    f'Capability denied for tool "{name}"; missing: {missing_str}'
-                )
+                denial_message = f'Capability denied for tool "{name}"; missing: {missing_str}'
                 record_capability_denial(
                     span,
                     tool_name=name,
@@ -346,8 +344,7 @@ class Sandbox:
             except InputSchemaError as exc:
                 offending_path = exc.errors[0] if exc.errors else str(exc)
                 schema_message = (
-                    f'Input schema validation failed for tool "{name}": '
-                    f"{offending_path}"
+                    f'Input schema validation failed for tool "{name}": {offending_path}'
                 )
                 record_input_schema_failure(
                     span,
@@ -404,7 +401,7 @@ class Sandbox:
                     dispatcher.dispatch(tool, input, context),
                     timeout=tool.timeout_ms / 1000,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 timeout_message = f'Tool "{name}" timed out after {tool.timeout_ms}ms'
                 record_tool_timeout(
                     span,
@@ -465,8 +462,7 @@ class Sandbox:
                 except OutputSchemaError as exc:
                     offending_path = exc.errors[0] if exc.errors else str(exc)
                     schema_message = (
-                        f'Output schema validation failed for tool "{name}": '
-                        f"{offending_path}"
+                        f'Output schema validation failed for tool "{name}": {offending_path}'
                     )
                     record_output_schema_failure(
                         span,

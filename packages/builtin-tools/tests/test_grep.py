@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from meridian_sdk_tool import ToolContext
 
 from meridian_builtin_tools.grep import (
     _INPUT_SCHEMA,
@@ -15,7 +16,6 @@ from meridian_builtin_tools.grep import (
     _text_or_bytes,
     grep_tool,
 )
-from meridian_sdk_tool import ToolContext
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -37,8 +37,7 @@ def _make_workspace(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     (ws / "src" / "logout.py").write_text(
-        "def logout(session):\n"
-        "    session.clear()\n",
+        "def logout(session):\n    session.clear()\n",
         encoding="utf-8",
     )
 
@@ -48,9 +47,7 @@ def _make_workspace(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
 
-    (ws / "config.json").write_text(
-        '{"debug": false, "auth_required": true}\n', encoding="utf-8"
-    )
+    (ws / "config.json").write_text('{"debug": false, "auth_required": true}\n', encoding="utf-8")
 
     return ws
 
@@ -268,9 +265,7 @@ async def test_pattern_is_echoed(ws_ctx: ToolContext) -> None:
 @pytest.mark.skipif(not _RG_AVAILABLE, reason="ripgrep not installed")
 @pytest.mark.anyio
 async def test_glob_is_echoed_when_provided(ws_ctx: ToolContext) -> None:
-    result = await grep_tool.execute(
-        {"pattern": "authenticate", "glob": "**/*.py"}, ws_ctx
-    )
+    result = await grep_tool.execute({"pattern": "authenticate", "glob": "**/*.py"}, ws_ctx)
     assert result.result["glob"] == "**/*.py"
 
 
@@ -328,9 +323,7 @@ async def test_line_number_is_positive_integer(ws_ctx: ToolContext) -> None:
 @pytest.mark.skipif(not _RG_AVAILABLE, reason="ripgrep not installed")
 @pytest.mark.anyio
 async def test_context_lines_are_lists(ws_ctx: ToolContext) -> None:
-    result = await grep_tool.execute(
-        {"pattern": "authenticate", "context_lines": 1}, ws_ctx
-    )
+    result = await grep_tool.execute({"pattern": "authenticate", "context_lines": 1}, ws_ctx)
     for item in result.result["matches"]:
         assert isinstance(item["context_before"], list)
         assert isinstance(item["context_after"], list)
@@ -339,9 +332,7 @@ async def test_context_lines_are_lists(ws_ctx: ToolContext) -> None:
 @pytest.mark.skipif(not _RG_AVAILABLE, reason="ripgrep not installed")
 @pytest.mark.anyio
 async def test_zero_context_lines_returns_empty_context(ws_ctx: ToolContext) -> None:
-    result = await grep_tool.execute(
-        {"pattern": "authenticate", "context_lines": 0}, ws_ctx
-    )
+    result = await grep_tool.execute({"pattern": "authenticate", "context_lines": 0}, ws_ctx)
     for item in result.result["matches"]:
         assert item["context_before"] == []
         assert item["context_after"] == []
@@ -351,9 +342,7 @@ async def test_zero_context_lines_returns_empty_context(ws_ctx: ToolContext) -> 
 @pytest.mark.anyio
 async def test_context_lines_bounded_by_file_start(ws_ctx: ToolContext) -> None:
     # authenticate appears on line 1 of auth.py — context_before must be empty
-    result = await grep_tool.execute(
-        {"pattern": "def authenticate", "context_lines": 3}, ws_ctx
-    )
+    result = await grep_tool.execute({"pattern": "def authenticate", "context_lines": 3}, ws_ctx)
     auth_matches = [m for m in result.result["matches"] if "auth.py" in m["file_path"]]
     assert auth_matches
     assert auth_matches[0]["context_before"] == []
@@ -367,9 +356,7 @@ async def test_context_lines_bounded_by_file_start(ws_ctx: ToolContext) -> None:
 @pytest.mark.skipif(not _RG_AVAILABLE, reason="ripgrep not installed")
 @pytest.mark.anyio
 async def test_glob_restricts_to_python_files(ws_ctx: ToolContext) -> None:
-    result = await grep_tool.execute(
-        {"pattern": "auth", "glob": "**/*.py"}, ws_ctx
-    )
+    result = await grep_tool.execute({"pattern": "auth", "glob": "**/*.py"}, ws_ctx)
     assert not result.is_error
     for item in result.result["matches"]:
         assert item["file_path"].endswith(".py")
@@ -378,9 +365,7 @@ async def test_glob_restricts_to_python_files(ws_ctx: ToolContext) -> None:
 @pytest.mark.skipif(not _RG_AVAILABLE, reason="ripgrep not installed")
 @pytest.mark.anyio
 async def test_glob_restricts_to_markdown_files(ws_ctx: ToolContext) -> None:
-    result = await grep_tool.execute(
-        {"pattern": "auth", "glob": "**/*.md"}, ws_ctx
-    )
+    result = await grep_tool.execute({"pattern": "auth", "glob": "**/*.md"}, ws_ctx)
     assert not result.is_error
     for item in result.result["matches"]:
         assert item["file_path"].endswith(".md")
@@ -389,9 +374,7 @@ async def test_glob_restricts_to_markdown_files(ws_ctx: ToolContext) -> None:
 @pytest.mark.skipif(not _RG_AVAILABLE, reason="ripgrep not installed")
 @pytest.mark.anyio
 async def test_nonmatching_glob_returns_empty_results(ws_ctx: ToolContext) -> None:
-    result = await grep_tool.execute(
-        {"pattern": "auth", "glob": "**/*.nonexistent"}, ws_ctx
-    )
+    result = await grep_tool.execute({"pattern": "auth", "glob": "**/*.nonexistent"}, ws_ctx)
     assert not result.is_error
     assert result.result["total"] == 0
 
@@ -404,9 +387,7 @@ async def test_nonmatching_glob_returns_empty_results(ws_ctx: ToolContext) -> No
 @pytest.mark.skipif(not _RG_AVAILABLE, reason="ripgrep not installed")
 @pytest.mark.anyio
 async def test_fixed_strings_matches_literal_text(ws_ctx: ToolContext) -> None:
-    result = await grep_tool.execute(
-        {"pattern": "auth_required", "fixed_strings": True}, ws_ctx
-    )
+    result = await grep_tool.execute({"pattern": "auth_required", "fixed_strings": True}, ws_ctx)
     assert not result.is_error
     assert result.result["total"] > 0
     for item in result.result["matches"]:
@@ -418,9 +399,7 @@ async def test_fixed_strings_matches_literal_text(ws_ctx: ToolContext) -> None:
 async def test_fixed_strings_does_not_interpret_regex(ws_ctx: ToolContext) -> None:
     # "auth.required" as regex would match "auth_required" (. matches any char);
     # as a literal string it should not.
-    result = await grep_tool.execute(
-        {"pattern": "auth.required", "fixed_strings": True}, ws_ctx
-    )
+    result = await grep_tool.execute({"pattern": "auth.required", "fixed_strings": True}, ws_ctx)
     assert not result.is_error
     assert result.result["total"] == 0
 
@@ -433,9 +412,7 @@ async def test_fixed_strings_does_not_interpret_regex(ws_ctx: ToolContext) -> No
 @pytest.mark.skipif(not _RG_AVAILABLE, reason="ripgrep not installed")
 @pytest.mark.anyio
 async def test_case_insensitive_finds_mixed_case(ws_ctx: ToolContext) -> None:
-    result = await grep_tool.execute(
-        {"pattern": "AUTHENTICATE", "case_insensitive": True}, ws_ctx
-    )
+    result = await grep_tool.execute({"pattern": "AUTHENTICATE", "case_insensitive": True}, ws_ctx)
     assert not result.is_error
     assert result.result["total"] > 0
 
@@ -443,9 +420,7 @@ async def test_case_insensitive_finds_mixed_case(ws_ctx: ToolContext) -> None:
 @pytest.mark.skipif(not _RG_AVAILABLE, reason="ripgrep not installed")
 @pytest.mark.anyio
 async def test_case_sensitive_misses_different_case(ws_ctx: ToolContext) -> None:
-    result = await grep_tool.execute(
-        {"pattern": "AUTHENTICATE", "case_insensitive": False}, ws_ctx
-    )
+    result = await grep_tool.execute({"pattern": "AUTHENTICATE", "case_insensitive": False}, ws_ctx)
     assert not result.is_error
     assert result.result["total"] == 0
 
@@ -575,8 +550,9 @@ async def test_rg_not_found_error_code_is_execution_failed(
 async def test_rg_not_found_writes_audit_log(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import meridian_builtin_tools.grep as grep_mod
     from meridian_sdk_tool import meridian_tool as _mk_tool
+
+    import meridian_builtin_tools.grep as grep_mod
 
     monkeypatch.setattr(grep_mod.shutil, "which", lambda _: None)
     audit_path = str(tmp_path / "audit.ndjson")
@@ -587,9 +563,7 @@ async def test_rg_not_found_writes_audit_log(
         output_schema=_OUTPUT_SCHEMA,
         audit_log_path=audit_path,
     )
-    async def _tool_with_audit(
-        args: dict[str, Any], ctx: ToolContext
-    ) -> dict[str, Any]:
+    async def _tool_with_audit(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
         from meridian_builtin_tools.grep import _run_rg
 
         matches, truncated = await _run_rg(
