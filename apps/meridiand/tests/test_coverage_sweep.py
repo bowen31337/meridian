@@ -24,6 +24,163 @@ def pagination_now() -> str:
 # ---------------------------------------------------------------------------
 
 
+class TestVaultLeakSoakHelpers:
+    def test_scan_skips_unreadable_files(self, tmp_path: Path) -> None:
+        from meridiand._vault_leak_soak import _scan_storage_root
+
+        # Create one readable + one that will raise OSError on read
+        (tmp_path / "f1.txt").write_text("clean")
+        (tmp_path / "subdir").mkdir()
+        leaks = _scan_storage_root(tmp_path, ["s3cret-CANARY"])
+        assert leaks == []  # no leaks expected
+
+    def test_scan_returns_empty_when_root_missing(self, tmp_path: Path) -> None:
+        from meridiand._vault_leak_soak import _scan_storage_root
+
+        leaks = _scan_storage_root(tmp_path / "nope", ["x"])
+        assert leaks == []
+
+    def test_scan_records_leak_when_canary_found(self, tmp_path: Path) -> None:
+        from meridiand._vault_leak_soak import _scan_storage_root
+
+        (tmp_path / "leaked.txt").write_text("here is s3cret-XYZ in plain text")
+        leaks = _scan_storage_root(tmp_path, ["s3cret-XYZ"])
+        assert len(leaks) == 1
+        assert leaks[0]["source"] == "file"
+
+    def test_scan_skips_unreadable_file(self, tmp_path: Path) -> None:
+        """A file that raises OSError on read is silently skipped (lines 97-98)."""
+        from meridiand._vault_leak_soak import _scan_storage_root
+
+        (tmp_path / "ok.txt").write_text("clean")
+        (tmp_path / "fail.txt").write_text("doomed")
+        real_read = Path.read_text
+
+        def _selective(self: Path, *a: Any, **k: Any) -> str:
+            if self.name == "fail.txt":
+                raise OSError("denied")
+            return real_read(self, *a, **k)
+
+        with patch.object(Path, "read_text", _selective):
+            leaks = _scan_storage_root(tmp_path, ["x"])
+        assert leaks == []
+
+    def test_memory_keyring_round_trip(self) -> None:
+        from meridiand._vault_leak_soak import _MemoryKeyring
+
+        k = _MemoryKeyring()
+        assert k.get_password("svc", "u") is None
+        k.set_password("svc", "u", "secret")
+        assert k.get_password("svc", "u") == "secret"
+        k.delete_password("svc", "u")
+        assert k.get_password("svc", "u") is None
+
+
+class TestSkillEfficacyHelpers:
+    async def test_noop_trajectory_runner_returns_false(self) -> None:
+        from meridiand._skill_efficacy import NoopTrajectoryRunner
+
+        r = NoopTrajectoryRunner()
+        assert await r.run({}, skill_instructions=None) is False
+
+    async def test_compare_reraises_typed_error(self, tmp_path: Path) -> None:
+        """SkillEfficacyError raised inside is re-raised verbatim (lines 203-219)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._skill_efficacy import (
+            SkillEfficacyError,
+            compare_proposal_trajectories,
+        )
+
+        class _BoomRunner:
+            async def run(self, *_a: Any, **_k: Any) -> bool:
+                raise SkillEfficacyError(
+                    message="pre-typed", timestamp=pagination_now(), cause=None
+                )
+
+        with pytest.raises(SkillEfficacyError):
+            await compare_proposal_trajectories(
+                proposal={
+                    "id": "p1",
+                    "skill_id": "s1",
+                    "instructions": "do x",
+                    "tests": [{"name": "t1"}],
+                },
+                efficacy_dir=tmp_path,
+                audit_log=NoopAuditLog(),
+                runner=_BoomRunner(),
+            )
+
+
+class TestAcpHttpTransport:
+    async def test_default_handler_returns_empty(self) -> None:
+        from meridiand._acp import DefaultAcpInboundHandler
+
+        h = DefaultAcpInboundHandler()
+        result = await h.handle("target", {"x": 1})
+        assert result == {}
+
+    async def test_http_peer_client_call(self) -> None:
+        import httpx
+
+        from meridiand._acp import HttpAcpPeerClient
+
+        def _handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"ok": True})
+
+        transport = httpx.MockTransport(_handler)
+        real_init = httpx.AsyncClient.__init__
+
+        def _patched_init(self: httpx.AsyncClient, *a: Any, **kw: Any) -> None:
+            kw.pop("transport", None)
+            real_init(self, *a, transport=transport, **kw)
+
+        with patch.object(httpx.AsyncClient, "__init__", _patched_init):
+            c = HttpAcpPeerClient()
+            out = await c.call("http://example.com/acp", {"msg": "hi"})
+        assert out == {"ok": True}
+
+
+class TestModelCallEventLogAdapter:
+    async def test_adapter_appends_session_event(self) -> None:
+        from meridiand._model_call_event_log import EventLogModelCallAdapter
+
+        captured: list[dict[str, Any]] = []
+
+        class _Runtime:
+            async def append(self, *, session_id: str, event_type: str, data: dict[str, Any]) -> None:
+                captured.append({"session_id": session_id, "event_type": event_type, "data": data})
+
+        adapter = EventLogModelCallAdapter(_Runtime())
+        await adapter.record_started(
+            session_id="s1",
+            routing_rule="r",
+            provider_name="p",
+            model="m",
+        )
+        assert captured == [
+            {
+                "session_id": "s1",
+                "event_type": "model_call.started",
+                "data": {"routing_rule": "r", "provider_name": "p", "model": "m"},
+            }
+        ]
+
+
+class TestSystemPromptTemplateErrors:
+    def test_expand_error_http_status(self) -> None:
+        from meridiand._system_prompt_template import TemplateExpandError
+
+        err = TemplateExpandError(message="m", timestamp="t", cause=None)
+        assert err.http_status() == 500
+
+    def test_memory_not_found_error_http_status(self) -> None:
+        from meridiand._system_prompt_template import TemplateMemoryNotFoundError
+
+        err = TemplateMemoryNotFoundError(memory_key="k", timestamp="t")
+        assert err.http_status() == 404
+
+
 class TestHealthzReadyzMetricsErrors:
     def test_healthz_error_http_status(self) -> None:
         from meridiand._healthz import HealthzError
