@@ -12,8 +12,8 @@ from sdk_channel import (
     validate_manifest,
 )
 from sdk_channel._audit import NoopAuditLog
-from sdk_channel._telemetry import get_tracer
-from sdk_channel._types import AuditLogEntry
+from sdk_channel._telemetry import get_tracer, record_invocation_event
+from sdk_channel._types import AuditLogEntry, StructuredEvent
 
 from .conftest import CapturingAuditLog, MockSpan
 from .test_conformance import StubDriver, make_options, make_send, make_start, make_stop
@@ -21,6 +21,22 @@ from .test_conformance import StubDriver, make_options, make_send, make_start, m
 
 def test_get_tracer_returns_tracer() -> None:
     assert isinstance(get_tracer(), trace.Tracer)
+
+
+def test_record_invocation_event_skips_non_scalar() -> None:
+    span = MockSpan()
+    event = StructuredEvent(
+        name="channel.invocation",
+        channel_id="c1",
+        channel_kind="slack",
+        session_id="s1",
+        timestamp=None,  # type: ignore[arg-type]
+        operation="send",
+    )
+    record_invocation_event(span, event)  # type: ignore[arg-type]
+    _name, attrs = span.events[0]
+    assert "timestamp" not in attrs
+    assert attrs["channel_id"] == "c1"
 
 
 def test_noop_audit_log_write_is_silent() -> None:

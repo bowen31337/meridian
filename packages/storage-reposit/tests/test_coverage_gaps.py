@@ -7,12 +7,28 @@ from opentelemetry import trace
 
 from storage_reposit._audit import NoopAuditLog
 from storage_reposit._migration_runtime import MigrationOptions, MigrationRuntime
-from storage_reposit._telemetry import get_tracer
-from storage_reposit._types import AuditLogEntry, IndexerFailure
+from storage_reposit._telemetry import get_tracer, record_invocation_event
+from storage_reposit._types import AuditLogEntry, IndexerFailure, StructuredEvent
+
+from .conftest import MockSpan
 
 
 def test_get_tracer_returns_tracer() -> None:
     assert isinstance(get_tracer(), trace.Tracer)
+
+
+def test_record_invocation_event_skips_non_scalar() -> None:
+    span = MockSpan()
+    event = StructuredEvent(
+        name="reposit.invocation",
+        session_id="s1",
+        timestamp=None,  # type: ignore[arg-type]
+        operation="apply",
+    )
+    record_invocation_event(span, event)  # type: ignore[arg-type]
+    _name, attrs = span.events[0]
+    assert "timestamp" not in attrs
+    assert attrs["session_id"] == "s1"
 
 
 def test_noop_audit_log_write_is_silent() -> None:

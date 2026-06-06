@@ -7,12 +7,28 @@ from opentelemetry import trace
 
 from system_ulid._audit import NoopAuditLog
 from system_ulid._generator import MonotonicUlidGenerator, _time_ms
-from system_ulid._telemetry import get_tracer
-from system_ulid._types import AuditLogEntry
+from system_ulid._telemetry import get_tracer, record_invocation_event
+from system_ulid._types import AuditLogEntry, StructuredEvent
+
+from .conftest import MockSpan
 
 
 def test_get_tracer_returns_tracer() -> None:
     assert isinstance(get_tracer(), trace.Tracer)
+
+
+def test_record_invocation_event_skips_non_scalar() -> None:
+    span = MockSpan()
+    event = StructuredEvent(
+        name="ulid.invocation",
+        prefix="ulid",
+        timestamp=None,  # type: ignore[arg-type]
+        operation="generate",
+    )
+    record_invocation_event(span, event)  # type: ignore[arg-type]
+    _name, attrs = span.events[0]
+    assert "timestamp" not in attrs
+    assert attrs["prefix"] == "ulid"
 
 
 def test_noop_audit_log_write_is_silent() -> None:

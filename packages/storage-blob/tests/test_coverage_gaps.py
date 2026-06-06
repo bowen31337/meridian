@@ -6,8 +6,8 @@ import pytest
 from opentelemetry import trace
 from storage_blob import BlobFailure, BlobRuntime
 from storage_blob._audit import NoopAuditLog
-from storage_blob._telemetry import get_tracer
-from storage_blob._types import AuditLogEntry
+from storage_blob._telemetry import get_tracer, record_invocation_event
+from storage_blob._types import AuditLogEntry, StructuredEvent
 
 from .conftest import CapturingAuditLog, MockSpan
 from .test_conformance import StubBlobStore, make_options
@@ -15,6 +15,20 @@ from .test_conformance import StubBlobStore, make_options
 
 def test_get_tracer_returns_tracer() -> None:
     assert isinstance(get_tracer(), trace.Tracer)
+
+
+def test_record_invocation_event_skips_non_scalar() -> None:
+    span = MockSpan()
+    event = StructuredEvent(
+        name="blob.invocation",
+        key="k1",
+        timestamp=None,  # type: ignore[arg-type]
+        operation="put",
+    )
+    record_invocation_event(span, event)  # type: ignore[arg-type]
+    _name, attrs = span.events[0]
+    assert "timestamp" not in attrs
+    assert attrs["key"] == "k1"
 
 
 def test_noop_audit_log_write_is_silent() -> None:
