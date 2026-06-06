@@ -600,6 +600,40 @@ class TestPoolDrain:
         await pool.stop()
         assert pool._reaper_task is None
 
+    async def test_start_is_idempotent_while_running(
+        self, span_tracer: SpanCapturingTracer, audit_log: CapturingAuditLog
+    ) -> None:
+        _, pool = _make_pool(PoolDriver())
+        await pool.start()
+        first_task = pool._reaper_task
+        await pool.start()  # already running -> must not spawn a second reaper
+        assert pool._reaper_task is first_task
+        await pool.stop()
+
+
+class _YieldingPoolDriver(PoolDriver):
+    """Pool driver whose provision yields once, exposing the provision race."""
+
+    async def provision(self, request: ProvisionRequest) -> None:
+        await asyncio.sleep(0)
+        await super().provision(request)
+
+
+class TestConcurrentProvision:
+    async def test_second_waiter_skips_reprovision(
+        self, span_tracer: SpanCapturingTracer, audit_log: CapturingAuditLog
+    ) -> None:
+        driver = _YieldingPoolDriver()
+        _, pool = _make_pool(driver)
+        opts = _make_opts(audit_log)
+        req = _exec_req(driver.kind, env_id="shared")
+        # Two concurrent executes race on the same entry: the first provisions
+        # while the second blocks on provision_lock, then finds it already
+        # provisioned (the inner double-check short-circuits).
+        await asyncio.gather(pool.execute(req, opts), pool.execute(req, opts))
+        assert len(driver.provisions) == 1
+        assert len(driver.executions) == 2
+
 
 # ---------------------------------------------------------------------------
 # Provision failure

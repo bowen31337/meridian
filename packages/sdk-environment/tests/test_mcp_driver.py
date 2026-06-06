@@ -239,6 +239,36 @@ def _make_sse_transport(
     return client_ctx
 
 
+def _make_sse_transport_from_lines(sse_lines: list[str]) -> MagicMock:
+    """Like _make_sse_transport but with caller-supplied raw SSE lines."""
+
+    async def _aiter_lines():
+        for line in sse_lines:
+            yield line
+
+    stream_resp = MagicMock()
+    stream_resp.raise_for_status = MagicMock()
+    stream_resp.aiter_lines = _aiter_lines
+
+    stream_ctx = MagicMock()
+    stream_ctx.__aenter__ = AsyncMock(return_value=stream_resp)
+    stream_ctx.__aexit__ = AsyncMock(return_value=False)
+
+    post_resp = MagicMock()
+    post_resp.raise_for_status = MagicMock()
+    post_resp.status_code = 202
+
+    client_mock = MagicMock()
+    client_mock.stream = MagicMock(return_value=stream_ctx)
+    client_mock.post = AsyncMock(return_value=post_resp)
+
+    client_ctx = MagicMock()
+    client_ctx.__aenter__ = AsyncMock(return_value=client_mock)
+    client_ctx.__aexit__ = AsyncMock(return_value=False)
+
+    return client_ctx
+
+
 _DEFAULT_INIT_RESP = {
     "jsonrpc": "2.0",
     "id": "init",
@@ -843,3 +873,41 @@ class TestRuntimeIntegration:
         assert isinstance(result, ExecuteResult)
         assert result.stdout == "sse ok"
         assert audit_log.entries == []
+
+
+# ---------------------------------------------------------------------------
+# SSE reader edge branches
+# ---------------------------------------------------------------------------
+
+
+class TestSseReaderBranches:
+    async def test_ignored_lines_blank_no_data_and_unknown_id(self) -> None:
+        """Covers _sse_reader/_dispatch_sse_event edge branches:
+        - a leading blank line with no accumulated data (if data_lines: False)
+        - an ignored 'id:'/'retry:' line (elif not line: False)
+        - a JSON-RPC message whose id is neither 'init' nor 'call'
+        """
+        driver = _sse_driver()
+        sse_lines = [
+            "",  # blank with no accumulated data -> 346->349
+            "id: 123",  # ignored line type -> 344->339
+            "retry: 5000",  # ignored line type -> 344->339
+            "event: endpoint",
+            "data: /message",
+            "",
+            "event: message",
+            f"data: {json.dumps(_DEFAULT_INIT_RESP)}",
+            "",
+            "event: message",
+            # unrecognized id -> falls through 368/370 to exit
+            f"data: {json.dumps({'jsonrpc': '2.0', 'id': 'stray', 'result': {}})}",
+            "",
+            "event: message",
+            f"data: {json.dumps(_ok_rpc('done'))}",
+            "",
+        ]
+        client_ctx = _make_sse_transport_from_lines(sse_lines)
+        with patch("sdk_environment._mcp_driver._httpx.AsyncClient", return_value=client_ctx):
+            result = await driver.execute(_execute_req())
+        assert isinstance(result, ExecuteResult)
+        assert result.stdout == "done"

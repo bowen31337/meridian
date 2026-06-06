@@ -906,3 +906,26 @@ class TestRuntimeIntegration:
 
         assert exc_info.value.code == "ENV_RECLAIM_FAILED"
         assert len(audit_log.entries) == 1
+
+
+class TestResolvePrivateKey:
+    def test_vault_returns_none_record_falls_through(self) -> None:
+        vault = MagicMock()
+        vault.get_secret.return_value = None  # missing secret -> record is None
+        driver = _driver(vault=vault, vault_id="vid", secret_name="key")
+        assert driver._resolve_private_key_pem() is None
+
+    def test_vault_record_without_value_falls_through(self) -> None:
+        vault = MagicMock()
+        vault.get_secret.return_value = {"value": ""}  # present but empty pem
+        driver = _driver(vault=vault, vault_id="vid", secret_name="key")
+        assert driver._resolve_private_key_pem() is None
+
+    def test_vault_record_without_value_uses_key_file(self) -> None:
+        vault = MagicMock()
+        vault.get_secret.return_value = {}  # no "value" key at all
+        driver = _driver(
+            vault=vault, vault_id="vid", secret_name="key", private_key_path="/tmp/id_ed25519"
+        )
+        with patch("builtins.open", mock_open(read_data="file_pem")):
+            assert driver._resolve_private_key_pem() == "file_pem"
