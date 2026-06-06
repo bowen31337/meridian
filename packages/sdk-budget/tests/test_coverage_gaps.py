@@ -15,6 +15,7 @@ from sdk_budget._overrun_discipline import (
 from sdk_budget._telemetry import (
     get_tracer,
     record_budget_exceeded,
+    record_cost_accumulate_failure,
     record_hard_transition_failure,
     record_soft_overrun_failure,
 )
@@ -54,6 +55,31 @@ def test_record_hard_transition_failure_records_cause() -> None:
     record_hard_transition_failure(span, err)
     assert cause in span.recorded_exceptions
     assert any(e[0] == "budget.overrun.hard.failure" for e in span.events)
+
+
+# --- telemetry: error.cause is None (no record_exception) branches ---
+
+
+def test_record_cost_accumulate_failure_without_cause() -> None:
+    span = MockSpan()
+    err = MeridianError(code="x", message="m", timestamp=TS)
+    record_cost_accumulate_failure(span, err)
+    assert span.recorded_exceptions == []
+    assert any(e[0] == "cost.accumulate.failure" for e in span.events)
+
+
+def test_record_soft_overrun_failure_without_cause() -> None:
+    span = MockSpan()
+    err = MeridianError(code="x", message="m", timestamp=TS)
+    record_soft_overrun_failure(span, err)
+    assert span.recorded_exceptions == []
+
+
+def test_record_hard_transition_failure_without_cause() -> None:
+    span = MockSpan()
+    err = MeridianError(code="x", message="m", timestamp=TS)
+    record_hard_transition_failure(span, err)
+    assert span.recorded_exceptions == []
 
 
 # --- re-raise / generic-except branches in the runtimes ---

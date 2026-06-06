@@ -18,6 +18,7 @@ Covers:
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from storage_event_log import (
@@ -172,6 +173,38 @@ class TestUnsubscribe:
         bus.publish("s1", event)
         assert q1.empty()
         assert q2.get_nowait() is event
+
+
+# ---------------------------------------------------------------------------
+# _drop edge branches
+# ---------------------------------------------------------------------------
+
+
+class TestDropBranches:
+    async def test_drop_one_of_multiple_keeps_session_registered(self) -> None:
+        bus = SubscriberBus()
+        q1 = bus.subscribe("s1")
+        q2 = bus.subscribe("s1")
+        # Saturate only q1 directly so the next publish overflows it alone.
+        for i in range(SUBSCRIBER_CHANNEL_SIZE):
+            q1.put_nowait(_make_event(seq=i))
+        bus.publish("s1", _make_event(seq=9999))
+        # q1 evicted: drained and holding only the lagged sentinel.
+        assert q1.qsize() == 1
+        assert q1.get_nowait() is None
+        # q2 survived and still receives events (session not deleted).
+        assert q2.get_nowait() is not None
+        follow_up = _make_event(seq=10000)
+        bus.publish("s1", follow_up)
+        assert q2.get_nowait() is follow_up
+
+    async def test_drop_unknown_session_drains_and_sentinels(self) -> None:
+        bus = SubscriberBus()
+        q: asyncio.Queue[SessionEvent | None] = asyncio.Queue(maxsize=2)
+        q.put_nowait(_make_event())  # non-empty so the drain loop runs
+        bus._drop("ghost-session", q)  # session never registered -> bucket is None
+        assert q.qsize() == 1
+        assert q.get_nowait() is None
 
 
 # ---------------------------------------------------------------------------
