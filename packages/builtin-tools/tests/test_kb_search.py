@@ -19,6 +19,7 @@ from meridian_kb_indexer._reader import (
 from meridian_builtin_tools.kb_search import (
     _INPUT_SCHEMA,
     _OUTPUT_SCHEMA,
+    _record_invocation,
     kb_search_tool,
 )
 
@@ -38,6 +39,16 @@ except ImportError:
 from meridian_sdk_tool import ToolContext
 
 _CTX = ToolContext(workspace="/workspace", session_id="sess_kb_test")
+
+
+def test_record_invocation_swallows_telemetry_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _boom() -> None:
+        raise RuntimeError("span unavailable")
+
+    monkeypatch.setattr("opentelemetry.trace.get_current_span", _boom)
+    _record_invocation("query text", "session", 5)
 
 # ---------------------------------------------------------------------------
 # DB helpers

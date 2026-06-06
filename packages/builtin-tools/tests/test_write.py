@@ -12,6 +12,7 @@ from meridian_sdk_tool import ToolContext
 from meridian_builtin_tools.write import (
     _INPUT_SCHEMA,
     _OUTPUT_SCHEMA,
+    _record_invocation,
     _resolve_safe,
     write_tool,
 )
@@ -239,6 +240,27 @@ async def test_write_default_mode_is_overwrite(ws_ctx: ToolContext, workspace: P
     result = await write_tool.execute({"path": "default.txt", "content": "new"}, ws_ctx)
     assert not result.is_error
     assert (workspace / "default.txt").read_text(encoding="utf-8") == "new"
+
+
+@pytest.mark.anyio
+async def test_write_rejects_content_over_size_cap(
+    ws_ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("meridian_builtin_tools.write._MAX_CONTENT_BYTES", 4)
+    result = await write_tool.execute({"path": "big.txt", "content": "toolong"}, ws_ctx)
+    assert result.is_error
+    assert result.error is not None
+
+
+def test_record_invocation_swallows_telemetry_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _boom() -> None:
+        raise RuntimeError("span unavailable")
+
+    monkeypatch.setattr("opentelemetry.trace.get_current_span", _boom)
+    # Must not raise despite the telemetry backend failing.
+    _record_invocation("p.txt", "overwrite", 3, True)
 
 
 # ---------------------------------------------------------------------------

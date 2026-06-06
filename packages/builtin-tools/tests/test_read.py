@@ -13,6 +13,7 @@ from meridian_sdk_tool import ToolContext
 from meridian_builtin_tools.read import (
     _INPUT_SCHEMA,
     _OUTPUT_SCHEMA,
+    _record_invocation,
     _resolve_safe,
     read_tool,
 )
@@ -133,6 +134,27 @@ async def test_read_returns_file_content(ws_ctx: ToolContext, workspace: Path) -
     result = await read_tool.execute({"path": "hello.txt"}, ws_ctx)
     assert not result.is_error
     assert result.result["content"] == "hello world"
+
+
+@pytest.mark.anyio
+async def test_read_rejects_file_over_size_cap(
+    ws_ctx: ToolContext, workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (workspace / "big.txt").write_text("toolong", encoding="utf-8")
+    monkeypatch.setattr("meridian_builtin_tools.read._MAX_FILE_BYTES", 4)
+    result = await read_tool.execute({"path": "big.txt"}, ws_ctx)
+    assert result.is_error
+    assert result.error is not None
+
+
+def test_record_invocation_swallows_telemetry_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _boom() -> None:
+        raise RuntimeError("span unavailable")
+
+    monkeypatch.setattr("opentelemetry.trace.get_current_span", _boom)
+    _record_invocation("p.txt", "utf-8", 3)
 
 
 @pytest.mark.anyio

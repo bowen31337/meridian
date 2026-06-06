@@ -13,6 +13,8 @@ from meridian_builtin_tools.grep import (
     _INPUT_SCHEMA,
     _OUTPUT_SCHEMA,
     _parse_rg_json,
+    _record_invocation,
+    _run_rg,
     _text_or_bytes,
     grep_tool,
 )
@@ -591,3 +593,125 @@ async def test_rg_not_found_writes_audit_log(
     entry = json.loads(lines[-1])
     assert "grep" in entry.get("tool_name", "")
     assert "error" in entry
+
+
+# ---------------------------------------------------------------------------
+# _parse_rg_json branch coverage
+# ---------------------------------------------------------------------------
+
+
+def _ndjson(*objs: dict[str, Any]) -> bytes:
+    return "\n".join(json.dumps(o) for o in objs).encode("utf-8")
+
+
+def test_parse_rg_json_skips_blank_lines() -> None:
+    # A blank line between NDJSON records must be skipped (line 200).
+    body = (
+        json.dumps({"type": "begin", "data": {"path": {"text": "a.py"}}})
+        + "\n\n   \n"
+        + json.dumps({"type": "match", "data": {"line_number": 1, "lines": {"text": "hit\n"}}})
+        + "\n"
+        + json.dumps({"type": "end", "data": {}})
+    ).encode("utf-8")
+    matches, truncated = _parse_rg_json(body, "", 50)
+    assert not truncated
+    assert len(matches) == 1
+    assert matches[0]["line"] == "hit"
+
+
+def test_parse_rg_json_path_not_under_workspace_left_unstripped() -> None:
+    # workspace set but path does not start with it → no stripping (214->218 False).
+    body = _ndjson(
+        {"type": "begin", "data": {"path": {"text": "/other/a.py"}}},
+        {"type": "match", "data": {"line_number": 2, "lines": {"text": "x\n"}}},
+        {"type": "end", "data": {}},
+    )
+    matches, _ = _parse_rg_json(body, "/workspace", 50)
+    assert matches[0]["file_path"] == "/other/a.py"
+
+
+def test_parse_rg_json_ignores_unknown_message_type_inside_file() -> None:
+    # A message that is neither "match" nor "context" inside the file block is
+    # ignored (223->228 False).
+    body = _ndjson(
+        {"type": "begin", "data": {"path": {"text": "a.py"}}},
+        {"type": "summary", "data": {}},
+        {"type": "match", "data": {"line_number": 3, "lines": {"text": "y\n"}}},
+        {"type": "end", "data": {}},
+    )
+    matches, _ = _parse_rg_json(body, "", 50)
+    assert len(matches) == 1
+    assert matches[0]["line_number"] == 3
+
+
+# ---------------------------------------------------------------------------
+# _run_rg error paths
+# ---------------------------------------------------------------------------
+
+
+class _FakeProc:
+    def __init__(self, returncode: int) -> None:
+        self.returncode = returncode
+        self.killed = False
+
+    async def communicate(self) -> tuple[bytes, bytes]:
+        return b"", b"boom on stderr"
+
+    def kill(self) -> None:
+        self.killed = True
+
+    async def wait(self) -> int:
+        return 0
+
+
+@pytest.mark.anyio
+async def test_run_rg_timeout_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    proc = _FakeProc(returncode=0)
+
+    async def _fake_exec(*_a: Any, **_k: Any) -> _FakeProc:
+        return proc
+
+    async def _fake_wait_for(coro: Any, *_a: Any, **_k: Any) -> Any:
+        coro.close()
+        raise TimeoutError
+
+    monkeypatch.setattr("shutil.which", lambda _name: "/usr/bin/rg")
+    monkeypatch.setattr("asyncio.create_subprocess_exec", _fake_exec)
+    monkeypatch.setattr("asyncio.wait_for", _fake_wait_for)
+
+    with pytest.raises(RuntimeError, match="timed out"):
+        await _run_rg("p", "/ws", None, 0, False, False, 50)
+    assert proc.killed is True
+
+
+@pytest.mark.anyio
+async def test_run_rg_error_exit_code_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    proc = _FakeProc(returncode=2)
+
+    async def _fake_exec(*_a: Any, **_k: Any) -> _FakeProc:
+        return proc
+
+    async def _fake_wait_for(coro: Any, *, timeout: float) -> tuple[bytes, bytes]:
+        return await coro
+
+    monkeypatch.setattr("shutil.which", lambda _name: "/usr/bin/rg")
+    monkeypatch.setattr("asyncio.create_subprocess_exec", _fake_exec)
+    monkeypatch.setattr("asyncio.wait_for", _fake_wait_for)
+
+    with pytest.raises(RuntimeError, match="ripgrep error"):
+        await _run_rg("p", "/ws", None, 0, False, False, 50)
+
+
+# ---------------------------------------------------------------------------
+# _record_invocation telemetry-error swallowing
+# ---------------------------------------------------------------------------
+
+
+def test_record_invocation_swallows_telemetry_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _boom() -> None:
+        raise RuntimeError("span unavailable")
+
+    monkeypatch.setattr("opentelemetry.trace.get_current_span", _boom)
+    _record_invocation("pattern", None, 0)

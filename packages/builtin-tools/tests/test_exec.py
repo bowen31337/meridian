@@ -14,9 +14,21 @@ from meridian_builtin_tools.exec import (
     _MAX_OUTPUT_BYTES,
     _MAX_TIMEOUT_SECONDS,
     _OUTPUT_SCHEMA,
+    _record_invocation,
     _run_command,
     exec_tool,
 )
+
+
+def test_record_invocation_swallows_telemetry_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _boom() -> None:
+        raise RuntimeError("span unavailable")
+
+    monkeypatch.setattr("opentelemetry.trace.get_current_span", _boom)
+    _record_invocation("echo hi", 0, False)
+
 
 # ---------------------------------------------------------------------------
 # Shared fixtures / constants
