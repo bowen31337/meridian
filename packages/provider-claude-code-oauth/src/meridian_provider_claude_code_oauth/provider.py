@@ -175,7 +175,12 @@ class SystemOAuthProvider:
                 routing_rule=None,
             )
             try:
-                async for event in self._manager.call(opts):
+                stream = self._manager.call(opts)
+                while True:
+                    try:
+                        event = await stream.__anext__()
+                    except StopAsyncIteration:
+                        break
                     yield event
             except DisallowedToolError as exc:
                 record_provider_failure(span, exc, provider_name=self.name, model=opts.model)

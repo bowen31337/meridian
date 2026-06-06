@@ -1098,3 +1098,76 @@ class TestPublicAPI:
 
         assert hasattr(pkg, "create_sdk_mcp_server")
         assert pkg.create_sdk_mcp_server is create_sdk_mcp_server
+
+
+# ---------------------------------------------------------------------------
+# serve() edge-cases — readline failure, blank line, invalid JSON
+# ---------------------------------------------------------------------------
+
+
+class _RawBytesReader:
+    """Async reader that returns pre-supplied raw lines (or raises)."""
+
+    def __init__(self, lines: list[bytes | type]) -> None:
+        self._lines = list(lines)
+
+    async def readline(self) -> bytes:
+        if not self._lines:
+            return b""
+        item = self._lines.pop(0)
+        if isinstance(item, type) and issubclass(item, Exception):
+            raise item("boom")
+        assert isinstance(item, bytes)
+        return item
+
+
+class TestServeEdgeCases:
+    async def test_serve_breaks_on_readline_exception(self) -> None:
+        server = _make_server()
+        reader = _RawBytesReader([RuntimeError])
+        writer = _FakeWriter()
+        await server.serve(reader, writer)  # type: ignore[arg-type]
+        assert writer.responses() == []
+
+    async def test_serve_skips_blank_lines(self) -> None:
+        server = _make_server()
+        reader = _RawBytesReader(
+            [
+                b"\n",  # blank — skipped
+                b"   \n",  # whitespace-only — skipped
+                (json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}) + "\n").encode(),
+            ]
+        )
+        writer = _FakeWriter()
+        await server.serve(reader, writer)  # type: ignore[arg-type]
+        responses = writer.responses()
+        assert len(responses) == 1
+        assert "result" in responses[0]
+
+    async def test_serve_skips_invalid_json(self) -> None:
+        server = _make_server()
+        reader = _RawBytesReader(
+            [
+                b"not json {{{\n",  # invalid — skipped, no response
+                (json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}) + "\n").encode(),
+            ]
+        )
+        writer = _FakeWriter()
+        await server.serve(reader, writer)  # type: ignore[arg-type]
+        responses = writer.responses()
+        assert len(responses) == 1
+        assert responses[0]["id"] == 2
+
+    async def test_tools_call_unknown_tool_notification_no_response(self) -> None:
+        """tools/call with unknown name AND no id (notification) → no response."""
+        server = _make_server()
+        responses = await _exchange(
+            server,
+            {
+                "jsonrpc": "2.0",
+                # no "id" → this is a notification
+                "method": "tools/call",
+                "params": {"name": "no_such_tool", "arguments": {}},
+            },
+        )
+        assert responses == []

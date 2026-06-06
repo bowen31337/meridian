@@ -182,6 +182,12 @@ class TestLockFile:
         with pytest.raises(LockFileFormatError, match="version"):
             read_lock(lock)
 
+    def test_pins_not_a_dict_raises(self, tmp_path: Path) -> None:
+        lock = tmp_path / "meridian.lock"
+        lock.write_text(json.dumps({"version": 1, "pins": "not-a-dict"}))
+        with pytest.raises(LockFileFormatError, match="'pins' field must be a JSON object"):
+            read_lock(lock)
+
     def test_missing_claude_code_pin_raises(self, tmp_path: Path) -> None:
         lock = tmp_path / "meridian.lock"
         lock.write_text(json.dumps({"version": 1, "pins": {}}))
@@ -722,3 +728,28 @@ class TestSystemOAuthProviderLockIntegration:
         )
         assert isinstance(provider._manager, CliSubprocessManager)
         assert provider._manager._cli_version == "unknown"
+
+    def test_provider_continues_with_malformed_lock_file(self, tmp_path: Path) -> None:
+        # Malformed lock must not raise; version falls back to "unknown".
+        lock = tmp_path / "meridian.lock"
+        lock.write_text("not json {{{")
+        provider = SystemOAuthProvider(
+            cli_path="/nonexistent/claude",
+            lock_path=lock,
+        )
+        assert isinstance(provider._manager, CliSubprocessManager)
+        assert provider._manager._cli_version == "unknown"
+
+    async def test_count_tokens_raises_not_implemented(self, tmp_path: Path) -> None:
+        from meridian_sdk_provider.types import ModelCountReq
+
+        provider = SystemOAuthProvider(
+            cli_path="/nonexistent/claude",
+            lock_path=tmp_path / "nonexistent.lock",
+        )
+        with pytest.raises(NotImplementedError, match="count_tokens"):
+            await provider.count_tokens(
+                ModelCountReq(
+                    model="claude-sonnet-4-6", messages=[Message(role="user", content="hi")]
+                )
+            )
