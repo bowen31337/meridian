@@ -297,39 +297,26 @@ def _chunk_text(file_path: str, content: str) -> list[Chunk]:
         else:
             if in_para:
                 body = "".join(lines[para_start:i]).strip()
-                if body:
-                    chunks.append(
-                        Chunk(
-                            file_path=file_path,
-                            kind="text",
-                            content=body,
-                            start_line=para_start + 1,
-                            end_line=i,
-                        )
+                chunks.append(
+                    Chunk(
+                        file_path=file_path,
+                        kind="text",
+                        content=body,
+                        start_line=para_start + 1,
+                        end_line=i,
                     )
+                )
                 in_para = False
 
     if in_para:
         body = "".join(lines[para_start:]).strip()
-        if body:
-            chunks.append(
-                Chunk(
-                    file_path=file_path,
-                    kind="text",
-                    content=body,
-                    start_line=para_start + 1,
-                    end_line=len(lines),
-                )
-            )
-
-    if not chunks and content.strip():
         chunks.append(
             Chunk(
                 file_path=file_path,
                 kind="text",
-                content=content.strip(),
-                start_line=1,
-                end_line=max(len(lines), 1),
+                content=body,
+                start_line=para_start + 1,
+                end_line=len(lines),
             )
         )
 
