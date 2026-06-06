@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -17,7 +18,7 @@ from meridian_sdk_provider.errors import (
     ProviderServerError,
     ProviderTimeoutError,
 )
-from meridian_sdk_provider.ollama import OllamaProvider
+from meridian_sdk_provider.ollama import OllamaProvider, _convert_message
 from meridian_sdk_provider.types import (
     MessageStartEvent,
     MessageStopEvent,
@@ -254,6 +255,37 @@ class TestCallStreamingEvents:
         provider = _make_provider(chat_body=_text_stream(""))
         events = [e async for e in provider.call(_make_opts())]
         assert not any(isinstance(e, TextDeltaEvent) for e in events)
+
+    async def test_early_close_exits_stream_loop(self, mock_span: MockSpan) -> None:
+        # Closing the generator after a partial read raises GeneratorExit through
+        # the streaming loop, exiting `call` without normal loop completion.
+        provider = _make_provider(chat_body=_text_stream("Hi there"))
+        agen = provider.call(_make_opts())
+        first = await agen.__anext__()
+        assert isinstance(first, MessageStartEvent)
+        await agen.aclose()
+
+
+class TestConvertMessageBlocks:
+    def test_unknown_block_type_skipped_and_no_tool_calls(self) -> None:
+        msg = SimpleNamespace(
+            role="assistant",
+            content=[
+                SimpleNamespace(type="text", text="hello"),
+                SimpleNamespace(type="image", data="ignored"),
+            ],
+        )
+        entry = _convert_message(msg)
+        assert entry == {"role": "assistant", "content": "hello"}
+        assert "tool_calls" not in entry
+
+    def test_tool_use_block_produces_tool_calls(self) -> None:
+        msg = SimpleNamespace(
+            role="assistant",
+            content=[SimpleNamespace(type="tool_use", name="search", input={"q": "x"})],
+        )
+        entry = _convert_message(msg)
+        assert entry["tool_calls"] == [{"function": {"name": "search", "arguments": {"q": "x"}}}]
 
     async def test_multiple_text_chunks(self, mock_span: MockSpan) -> None:
         body = _ndjson(

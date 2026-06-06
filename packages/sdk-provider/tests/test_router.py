@@ -648,3 +648,43 @@ async def test_set_event_log_replaces_noop(event_log: CollectingModelCallEventLo
     [e async for e in router.call(make_opts(session_id="sess-5"))]
 
     assert len(event_log.started) == 1
+
+
+# ─── capability-constraint helpers ──────────────────────────────────────────
+
+
+class TestCapConstraintHelpers:
+    def test_strip_skips_string_content_and_non_cache_blocks(self) -> None:
+        from meridian_sdk_provider import CacheControl, Message, TextBlock
+        from meridian_sdk_provider.router import _strip_cache_control
+
+        string_msg = Message(role="system", content="plain text")
+        block_msg = Message(
+            role="user",
+            content=[
+                TextBlock(type="text", text="cached", cache_control=CacheControl()),
+                TextBlock(type="text", text="plain", cache_control=None),
+            ],
+        )
+        result = _strip_cache_control([string_msg, block_msg])
+
+        assert result[0].content == "plain text"  # string content left untouched
+        assert result[1].content[0].cache_control is None  # cached block stripped
+        assert result[1].content[1].cache_control is None  # plain block unchanged
+
+    def test_apply_constraints_keeps_thinking_when_supported(self) -> None:
+        from meridian_sdk_provider.router import _apply_cap_constraints
+
+        opts = ModelCallOpts(
+            model="p:m",
+            messages=[{"role": "user", "content": "hi"}],
+            enable_thinking=True,
+            thinking_budget_tokens=512,
+            stream=True,
+        )
+        caps = ProviderCapabilities(streaming=False, thinking=True)
+        result = _apply_cap_constraints(opts, caps)
+
+        assert result.stream is False  # streaming cleared
+        assert result.enable_thinking is True  # thinking preserved
+        assert result.thinking_budget_tokens == 512

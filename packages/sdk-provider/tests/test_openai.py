@@ -19,7 +19,7 @@ from meridian_sdk_provider.errors import (
     ProviderServerError,
     ProviderTimeoutError,
 )
-from meridian_sdk_provider.openai import OpenAIProvider
+from meridian_sdk_provider.openai import OpenAIProvider, _convert_message
 from meridian_sdk_provider.types import (
     MessageStartEvent,
     MessageStopEvent,
@@ -34,6 +34,19 @@ from .conftest import CollectingAuditLog
 
 _API_KEY = "sk-test-key"
 _MOCK_REQUEST = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+
+
+class TestConvertMessageBlocks:
+    def test_unknown_block_type_skipped(self) -> None:
+        msg = SimpleNamespace(
+            role="user",
+            content=[
+                SimpleNamespace(type="text", text="hi"),
+                SimpleNamespace(type="image", data="ignored"),
+            ],
+        )
+        entry = _convert_message(msg)
+        assert entry == {"role": "user", "content": "hi"}
 
 
 # ---------------------------------------------------------------------------

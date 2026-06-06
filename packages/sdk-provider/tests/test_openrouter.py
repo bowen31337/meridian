@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -17,7 +18,7 @@ from meridian_sdk_provider.errors import (
     ProviderServerError,
     ProviderTimeoutError,
 )
-from meridian_sdk_provider.openrouter import OpenRouterProvider
+from meridian_sdk_provider.openrouter import OpenRouterProvider, _convert_message
 from meridian_sdk_provider.types import (
     MessageStartEvent,
     MessageStopEvent,
@@ -227,6 +228,44 @@ def _make_provider(
     return OpenRouterProvider(
         _API_KEY, name="test-openrouter", audit_log=audit_log, _http=http_client
     )
+
+
+def _sse_no_done(*chunks: dict[str, Any]) -> bytes:
+    """SSE body without a trailing ``data: [DONE]`` terminator."""
+    lines: list[str] = []
+    for chunk in chunks:
+        lines.append(f"data: {json.dumps(chunk)}")
+        lines.append("")
+    return "\n".join(lines).encode()
+
+
+class TestConvertMessageBlocks:
+    def test_unknown_block_type_skipped(self) -> None:
+        msg = SimpleNamespace(
+            role="user",
+            content=[
+                SimpleNamespace(type="text", text="hi"),
+                SimpleNamespace(type="image", data="ignored"),
+            ],
+        )
+        entry = _convert_message(msg)
+        assert entry == {"role": "user", "content": "hi"}
+
+
+class TestStreamWithoutDoneTerminator:
+    async def test_completes_when_stream_exhausts(self, mock_span: MockSpan) -> None:
+        # When the SSE stream ends without a [DONE] sentinel, the read loop must
+        # exhaust naturally and still emit a final message_stop event.
+        body = _sse_no_done(
+            {
+                "id": "chatcmpl-x",
+                "model": "openai/gpt-4o",
+                "choices": [{"delta": {"content": "hi"}, "index": 0, "finish_reason": "stop"}],
+            }
+        )
+        provider = _make_provider(chat_body=body)
+        events = [e async for e in provider.call(_make_opts())]
+        assert any(isinstance(e, MessageStopEvent) for e in events)
 
 
 # ---------------------------------------------------------------------------
