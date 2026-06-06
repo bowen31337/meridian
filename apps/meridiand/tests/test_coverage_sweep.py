@@ -290,6 +290,135 @@ class TestCliChannelDriverHelpers:
         with pytest.raises(ValueError, match="JSON object"):
             driver._write_tool_call(json.dumps([1, 2, 3]))
 
+    async def test_idempotency_non_http_passthrough(self) -> None:
+        """websocket scope is passed straight through (lines 51-52)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._idempotency_middleware import IdempotencyKeyMiddleware
+
+        called: list[str] = []
+
+        async def _handler(scope: Any, receive: Any, send: Any) -> None:
+            called.append(scope["type"])
+
+        mw = IdempotencyKeyMiddleware(_handler, audit_log=NoopAuditLog())
+        await mw({"type": "websocket"}, lambda: None, lambda _m: None)
+        assert called == ["websocket"]
+
+    async def test_idempotency_capturing_send_passes_through_other_messages(self) -> None:
+        """A message type other than start/body falls through to await send (125->127)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._idempotency_middleware import IdempotencyKeyMiddleware
+
+        async def _handler(scope: Any, receive: Any, send: Any) -> None:
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.trailers", "headers": []})  # other type
+            await send({"type": "http.response.body", "body": b"ok", "more_body": False})
+
+        mw = IdempotencyKeyMiddleware(_handler, audit_log=NoopAuditLog())
+
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/x/agents",
+            "query_string": b"",
+            "headers": [(b"idempotency-key", b"trailing-msg-key")],
+            "client": ("127.0.0.1", 50000),
+            "server": ("127.0.0.1", 8888),
+        }
+
+        async def receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        sent_types: list[str] = []
+
+        async def send(m: Any) -> None:
+            sent_types.append(m["type"])
+
+        await mw(scope, receive, send)
+        assert "http.response.trailers" in sent_types
+
+    async def test_idempotency_no_response_skip_cache(self) -> None:
+        """If handler never sends response.start, cache write is skipped (line 132)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._idempotency_middleware import IdempotencyKeyMiddleware
+
+        async def _handler(scope: Any, receive: Any, send: Any) -> None:
+            return  # never sends anything
+
+        mw = IdempotencyKeyMiddleware(_handler, audit_log=NoopAuditLog())
+
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/x/agents",
+            "query_string": b"",
+            "headers": [(b"idempotency-key", b"key-only-this-test")],
+            "client": ("127.0.0.1", 50000),
+            "server": ("127.0.0.1", 8888),
+        }
+
+        async def receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def send(_m: Any) -> None:
+            pass
+
+        # Should complete without raising
+        await mw(scope, receive, send)
+
+    async def test_idempotency_cache_store_failure_writes_audit(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When _CachedResponse construction raises, audit error is written (132, 143-144)."""
+        from core_errors import AuditLog, AuditLogEntry
+
+        from meridiand._idempotency_middleware import IdempotencyKeyMiddleware
+
+        captured: list[AuditLogEntry] = []
+
+        class _Audit(AuditLog):
+            def write(self, entry: AuditLogEntry) -> None:
+                captured.append(entry)
+
+        async def _handler(scope: Any, receive: Any, send: Any) -> None:
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b'{"ok":true}', "more_body": False})
+
+        mw = IdempotencyKeyMiddleware(_handler, audit_log=_Audit())
+
+        # Patch _CachedResponse to raise so the except handler fires
+        monkeypatch.setattr(
+            "meridiand._idempotency_middleware._CachedResponse",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("cache write boom")),
+        )
+
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/x/agents",
+            "query_string": b"",
+            "headers": [(b"idempotency-key", b"k1")],
+            "client": ("127.0.0.1", 50000),
+            "server": ("127.0.0.1", 8888),
+        }
+
+        async def receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        sent: list[dict[str, Any]] = []
+
+        async def send(msg: dict[str, Any]) -> None:
+            sent.append(msg)
+
+        await mw(scope, receive, send)
+        # Audit was written for the cache-store failure
+        assert any(
+            e.event == "idempotency.cache.store.failed" for e in captured
+        ), [e.event for e in captured]
+
     async def test_channel_failure_reraised(self, tmp_path: Path) -> None:
         """ChannelFailure raised by _write_content is re-raised verbatim (line 295)."""
         from sdk_channel import ChannelFailure, SendRequest
