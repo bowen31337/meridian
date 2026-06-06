@@ -24,6 +24,271 @@ def pagination_now() -> str:
 # ---------------------------------------------------------------------------
 
 
+class TestCheckpointPerCall:
+    """Cover the tool-call completion tracking + per-call duration logic in _checkpoint."""
+
+    def test_per_call_duration_tracking(self, tmp_path: Path) -> None:
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(audit, storage_root=tmp_path)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        body1 = {
+            "seq": 1,
+            "phase": "thinking",
+            "pending_tool_calls": [{"id": "t1", "name": "bash"}, {"id": "t2", "name": "grep"}],
+            "message_tail": [{"role": "user", "content": "x"}],
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+            "taken_at": "2024-01-01T00:00:00+00:00",
+        }
+        r1 = client.post("/v1/x/sessions/s1/checkpoint", json=body1)
+        assert r1.status_code == 200
+
+        # Second checkpoint: t1 completed; t2 still pending
+        body2 = {
+            **body1,
+            "seq": 2,
+            "pending_tool_calls": [{"id": "t2", "name": "grep"}],
+            "taken_at": "2024-01-01T00:00:01+00:00",
+        }
+        r2 = client.post("/v1/x/sessions/s1/checkpoint", json=body2)
+        assert r2.status_code == 200
+
+    def test_corrupt_latest_skipped(self, tmp_path: Path) -> None:
+        """latest.json that can't be parsed is silently skipped (120-123)."""
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(audit, storage_root=tmp_path)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        # Pre-write a corrupt latest.json
+        cp_dir = tmp_path / "checkpoints" / "s2"
+        cp_dir.mkdir(parents=True)
+        (cp_dir / "latest.json").write_text("not json {{{")
+
+        body = {
+            "seq": 1,
+            "phase": "thinking",
+            "pending_tool_calls": [],
+            "message_tail": [{"role": "user", "content": "x"}],
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+            "taken_at": "2024-01-01T00:00:00+00:00",
+        }
+        resp = client.post("/v1/x/sessions/s2/checkpoint", json=body)
+        assert resp.status_code == 200
+
+    def test_per_call_duration_with_bad_timestamp(self, tmp_path: Path) -> None:
+        """Bad taken_at in prev_taken_at raises inside try/except — silently skipped (143-148)."""
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(audit, storage_root=tmp_path)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        cp_dir = tmp_path / "checkpoints" / "s3"
+        cp_dir.mkdir(parents=True)
+        prev = {
+            "seq": 1,
+            "phase": "thinking",
+            "pending_tool_calls": [{"id": "x", "name": "n"}],
+            "message_tail": [],
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+            "taken_at": "not-a-timestamp",
+        }
+        (cp_dir / "latest.json").write_text(json.dumps(prev))
+
+        body = {
+            "seq": 2,
+            "phase": "thinking",
+            "pending_tool_calls": [],
+            "message_tail": [],
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+            "taken_at": "2024-01-01T00:00:00+00:00",
+        }
+        resp = client.post("/v1/x/sessions/s3/checkpoint", json=body)
+        assert resp.status_code == 200
+
+    def test_prev_call_not_dict_or_missing_id_skipped(self, tmp_path: Path) -> None:
+        """A previous pending_tool_call that's not a dict or missing id is skipped (120->119)."""
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(audit, storage_root=tmp_path)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        cp_dir = tmp_path / "checkpoints" / "s4"
+        cp_dir.mkdir(parents=True)
+        # Mix of non-dict, dict-no-id, and valid call
+        prev = {
+            "seq": 1,
+            "phase": "thinking",
+            "pending_tool_calls": [
+                "not a dict",  # non-dict — skipped
+                {"name": "nopid"},  # dict but no id — skipped
+                {"id": "ok", "name": "k"},  # valid
+            ],
+            "message_tail": [],
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+            "taken_at": "2024-01-01T00:00:00+00:00",
+        }
+        (cp_dir / "latest.json").write_text(json.dumps(prev))
+
+        body = {
+            "seq": 2,
+            "phase": "thinking",
+            "pending_tool_calls": [],
+            "message_tail": [],
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+            "taken_at": "2024-01-01T00:00:01+00:00",
+        }
+        resp = client.post("/v1/x/sessions/s4/checkpoint", json=body)
+        assert resp.status_code == 200
+
+    def test_no_completed_calls_skips_metrics(self, tmp_path: Path) -> None:
+        """If prev_calls have all carried over to current, completed=[] (136->159)."""
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(audit, storage_root=tmp_path)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        cp_dir = tmp_path / "checkpoints" / "s5"
+        cp_dir.mkdir(parents=True)
+        prev = {
+            "seq": 1,
+            "phase": "thinking",
+            "pending_tool_calls": [{"id": "t1", "name": "a"}],
+            "message_tail": [],
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+            "taken_at": "2024-01-01T00:00:00+00:00",
+        }
+        (cp_dir / "latest.json").write_text(json.dumps(prev))
+
+        # body still has t1 → not completed
+        body = {
+            "seq": 2,
+            "phase": "thinking",
+            "pending_tool_calls": [{"id": "t1", "name": "a"}],
+            "message_tail": [],
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+            "taken_at": "2024-01-01T00:00:01+00:00",
+        }
+        resp = client.post("/v1/x/sessions/s5/checkpoint", json=body)
+        assert resp.status_code == 200
+
+    def test_per_call_duration_no_prev_taken_at(self, tmp_path: Path) -> None:
+        """prev with no taken_at falls through (138->149)."""
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(audit, storage_root=tmp_path)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        cp_dir = tmp_path / "checkpoints" / "s6"
+        cp_dir.mkdir(parents=True)
+        prev = {
+            "seq": 1,
+            "phase": "thinking",
+            "pending_tool_calls": [{"id": "t1", "name": "a"}],
+            "message_tail": [],
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+            "taken_at": "",  # falsy — triggers 138->149
+        }
+        (cp_dir / "latest.json").write_text(json.dumps(prev))
+
+        body = {
+            "seq": 2,
+            "phase": "thinking",
+            "pending_tool_calls": [],
+            "message_tail": [],
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+            "taken_at": "2024-01-01T00:00:01+00:00",
+        }
+        resp = client.post("/v1/x/sessions/s6/checkpoint", json=body)
+        assert resp.status_code == 200
+
+    def test_per_call_duration_naive_timestamps(self, tmp_path: Path) -> None:
+        """Naive (no-tz) timestamps trigger the tzinfo-None branches (143, 145)."""
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(audit, storage_root=tmp_path)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        cp_dir = tmp_path / "checkpoints" / "s7"
+        cp_dir.mkdir(parents=True)
+        prev = {
+            "seq": 1,
+            "phase": "thinking",
+            "pending_tool_calls": [{"id": "t1", "name": "a"}],
+            "message_tail": [],
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+            "taken_at": "2024-01-01T00:00:00",  # naive — no tz
+        }
+        (cp_dir / "latest.json").write_text(json.dumps(prev))
+
+        body = {
+            "seq": 2,
+            "phase": "thinking",
+            "pending_tool_calls": [],
+            "message_tail": [],
+            "usage": {"input_tokens": 0, "output_tokens": 0},
+            "taken_at": "2024-01-01T00:00:01",  # naive — no tz
+        }
+        resp = client.post("/v1/x/sessions/s7/checkpoint", json=body)
+        assert resp.status_code == 200
+
+    def test_checkpoint_typed_error_reraised(self, tmp_path: Path) -> None:
+        """CheckpointError raised inside is re-raised verbatim (line 171)."""
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+        from meridiand._checkpoint import CheckpointError
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(audit, storage_root=tmp_path)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        with patch(
+            "meridiand._checkpoint.dispatch_hooks",
+            side_effect=CheckpointError(message="pre-typed", timestamp=pagination_now(), cause=None),
+        ):
+            body = {
+                "seq": 1,
+                "phase": "thinking",
+                "pending_tool_calls": [],
+                "message_tail": [],
+                "usage": {"input_tokens": 0, "output_tokens": 0},
+                "taken_at": "2024-01-01T00:00:00+00:00",
+            }
+            resp = client.post("/v1/x/sessions/s8/checkpoint", json=body)
+        assert resp.status_code == 422
+
+
 class TestErrorClassesHttpStatus:
     """One-liner http_status tests for error classes across modules."""
 
