@@ -737,9 +737,13 @@ class _SqliteMemoryRepo(MemoryRepository):
                         timestamp=now,
                     )
                 vec_rowid: int = row[0]
+                # vec0 virtual tables do not support UPSERT, so replace any
+                # existing vector for this rowid with a delete-then-insert.
                 await self._conn.execute(
-                    "INSERT INTO memory_entries_vec(rowid, embedding) VALUES (?, ?)"
-                    " ON CONFLICT(rowid) DO UPDATE SET embedding = excluded.embedding",
+                    "DELETE FROM memory_entries_vec WHERE rowid = ?", (vec_rowid,)
+                )
+                await self._conn.execute(
+                    "INSERT INTO memory_entries_vec(rowid, embedding) VALUES (?, ?)",
                     (vec_rowid, embedding),
                 )
                 await self._conn.commit()
