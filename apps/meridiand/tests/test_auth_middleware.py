@@ -155,6 +155,23 @@ class TestLoopbackEnforcement:
         status, _ = await _invoke(mw, client=("10.0.0.1", 50000))
         assert status == 403
 
+    async def test_invalid_host_returns_403(self) -> None:
+        """Non-IP host string (e.g. 'notanip') hits the ValueError fallback."""
+        mw = _make_middleware()
+        status, _ = await _invoke(mw, client=("notanip", 50000))
+        assert status == 403
+
+    async def test_bearer_extraction_skips_non_auth_headers(self) -> None:
+        """A non-Authorization header before Authorization is skipped (covers 26->25)."""
+        mw = _make_middleware(bearer_token="secret")
+        headers = [
+            (b"x-trace-id", b"abc"),
+            (b"content-type", b"application/json"),
+            (b"authorization", b"Bearer secret"),
+        ]
+        status, _ = await _invoke(mw, headers=headers)
+        assert status == 200
+
     async def test_non_loopback_error_code(self) -> None:
         mw = _make_middleware()
         _, body = await _invoke(mw, client=("192.168.1.50", 50000))
