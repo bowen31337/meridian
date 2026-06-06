@@ -16,12 +16,14 @@ Placeholders are $1, $2, … (asyncpg style).
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import asyncpg
 
 from ._contract import (
     AgentRepository,
+    AuditLogEntryRepository,
     ChannelRepository,
     EnvironmentRepository,
     MemoryRepository,
@@ -39,12 +41,16 @@ from ._runtime import RepositoryDriver
 from ._types import (
     Agent,
     AgentFilter,
+    AuditLogEntryFilter,
+    AuditLogEntryRecord,
     Channel,
     ChannelFilter,
     Environment,
     EnvironmentFilter,
     MemoryEntry,
     MemoryFilter,
+    MemoryVecSearchFilter,
+    MemoryVecSearchResult,
     Message,
     MessageFilter,
     Session,
@@ -173,6 +179,21 @@ def _webhook(r: Record) -> Webhook:
         status=r[4],
         created_at=r[5],
         updated_at=r[6],
+    )
+
+
+def _audit_log_entry_record(r: Record) -> AuditLogEntryRecord:
+    detail_raw = r[7]
+    return AuditLogEntryRecord(
+        id=r[0],
+        level=r[1],
+        event=r[2],
+        entity_type=r[3],
+        entity_id=r[4],
+        operation=r[5],
+        timestamp=r[6],
+        detail=json.loads(detail_raw) if detail_raw is not None else None,
+        signature=r[8],
     )
 
 
@@ -659,6 +680,32 @@ class _PgMemoryRepo(MemoryRepository):
             )
             return [_memory_entry(r) for r in rows]
 
+    async def save_embedding(self, entry_id: str, embedding: bytes) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE memory_entries SET embedding = $2 WHERE id = $1",
+                entry_id,
+                embedding,
+            )
+
+    async def vec_search(self, filter: MemoryVecSearchFilter) -> list[MemoryVecSearchResult]:
+        params: list[Any] = [filter.embedding]
+        n = 2
+        where = ""
+        if filter.scope is not None:
+            where = f"WHERE scope = ${n}"
+            params.append(filter.scope)
+            n += 1
+        params.append(filter.limit)
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT id, scope, key, value, created_at, updated_at,"
+                f" embedding <=> $1 AS distance"
+                f" FROM memory_entries {where} ORDER BY distance ASC LIMIT ${n}",
+                *params,
+            )
+            return [MemoryVecSearchResult(entry=_memory_entry(r), distance=r[6]) for r in rows]
+
 
 class _PgVaultRepo(VaultRepository):
     def __init__(self, pool: asyncpg.Pool) -> None:
@@ -882,6 +929,71 @@ class _PgWebhookRepo(WebhookRepository):
             return [_webhook(r) for r in rows]
 
 
+class _PgAuditLogEntryRepo(AuditLogEntryRepository):
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        self._pool = pool
+
+    async def append(self, entry: AuditLogEntryRecord) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO audit_log_entries
+                    (id, level, event, entity_type, entity_id, operation,
+                     timestamp, detail, signature)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                """,
+                entry.id,
+                entry.level,
+                entry.event,
+                entry.entity_type,
+                entry.entity_id,
+                entry.operation,
+                entry.timestamp,
+                json.dumps(entry.detail) if entry.detail is not None else None,
+                entry.signature,
+            )
+
+    async def list(self, filter: AuditLogEntryFilter) -> list[AuditLogEntryRecord]:
+        conditions: list[str] = []
+        params: list[Any] = []
+        n = 1
+        if filter.level is not None:
+            conditions.append(f"level = ${n}")
+            params.append(filter.level)
+            n += 1
+        if filter.event is not None:
+            conditions.append(f"event = ${n}")
+            params.append(filter.event)
+            n += 1
+        if filter.entity_type is not None:
+            conditions.append(f"entity_type = ${n}")
+            params.append(filter.entity_type)
+            n += 1
+        if filter.entity_id is not None:
+            conditions.append(f"entity_id = ${n}")
+            params.append(filter.entity_id)
+            n += 1
+        if filter.since is not None:
+            conditions.append(f"timestamp >= ${n}")
+            params.append(filter.since)
+            n += 1
+        if filter.until is not None:
+            conditions.append(f"timestamp <= ${n}")
+            params.append(filter.until)
+            n += 1
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.extend([filter.limit, filter.offset])
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT id, level, event, entity_type, entity_id, operation,"
+                f" timestamp, detail, signature"
+                f" FROM audit_log_entries {where}"
+                f" ORDER BY timestamp ASC LIMIT ${n} OFFSET ${n + 1}",
+                *params,
+            )
+            return [_audit_log_entry_record(r) for r in rows]
+
+
 # ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
@@ -913,6 +1025,7 @@ class PostgresRepositoryDriver(RepositoryDriver):
         self._user_profiles = _PgUserProfileRepo(pool)
         self._channels = _PgChannelRepo(pool)
         self._webhooks = _PgWebhookRepo(pool)
+        self._audit_log_entries = _PgAuditLogEntryRepo(pool)
 
     @classmethod
     async def open(cls, dsn: str, **pool_kwargs: Any) -> PostgresRepositoryDriver:
@@ -967,6 +1080,10 @@ class PostgresRepositoryDriver(RepositoryDriver):
     @property
     def webhooks(self) -> WebhookRepository:
         return self._webhooks
+
+    @property
+    def audit_log_entries(self) -> AuditLogEntryRepository:
+        return self._audit_log_entries
 
     async def migrate(self) -> None:
         """Execute all DDL migration statements idempotently."""

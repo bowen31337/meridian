@@ -27,3 +27,8 @@ def load_migration_files() -> list[tuple[int, str, str]]:
         sql = path.read_text(encoding="utf-8")
         result.append((version, path.name, sql))
     return result
+
+
+# Ordered DDL statements bundled with this release, ascending by version.
+# Consumed by the Postgres backend's migrate() to apply schema idempotently.
+MIGRATIONS: list[str] = [sql for _version, _name, sql in load_migration_files()]
