@@ -24,6 +24,89 @@ def pagination_now() -> str:
 # ---------------------------------------------------------------------------
 
 
+class TestHealthzReadyzMetricsErrors:
+    def test_healthz_error_http_status(self) -> None:
+        from meridiand._healthz import HealthzError
+
+        err = HealthzError(message="m", timestamp="t", cause=None)
+        assert err.http_status() == 500
+
+    def test_healthz_exception_path(self, tmp_path: Path) -> None:
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+        from meridiand._healthz import HealthzError
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(audit, storage_root=tmp_path)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        # Patch JSONResponse construction inside healthz to raise
+        with patch(
+            "meridiand._healthz.JSONResponse",
+            side_effect=RuntimeError("liveness boom"),
+        ):
+            resp = client.get("/healthz")
+        assert resp.status_code == 500
+
+    def test_readyz_error_http_status(self) -> None:
+        from meridiand._readyz import ReadyzError
+
+        err = ReadyzError(message="m", timestamp="t", cause=None)
+        assert err.http_status() == 500
+
+    def test_readyz_exception_path(self, tmp_path: Path) -> None:
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(audit, storage_root=tmp_path)
+        client = TestClient(app, raise_server_exceptions=False)
+        with patch(
+            "meridiand._readyz.JSONResponse",
+            side_effect=RuntimeError("readiness boom"),
+        ):
+            resp = client.get("/readyz")
+        assert resp.status_code == 500
+
+    def test_metrics_endpoint(self, tmp_path: Path) -> None:
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(audit, storage_root=tmp_path)
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.get("/metrics")
+        assert resp.status_code == 200
+
+    def test_metrics_error_http_status(self) -> None:
+        from meridiand._metrics import MetricsError
+
+        err = MetricsError(message="m", timestamp="t", cause=None)
+        assert err.http_status() == 500
+
+    def test_metrics_exception_path(self, tmp_path: Path) -> None:
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(audit, storage_root=tmp_path)
+        client = TestClient(app, raise_server_exceptions=False)
+        with patch(
+            "meridiand._metrics.generate_latest",
+            side_effect=RuntimeError("scrape boom"),
+        ):
+            resp = client.get("/metrics")
+        assert resp.status_code == 500
+
+
 class TestAcpComplianceResult:
     def test_failed_with_reason_includes_reason(self) -> None:
         from meridiand._acp_compliance import _result
