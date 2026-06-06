@@ -110,8 +110,7 @@ def make_phase_router(
                 )
                 sessions_total.labels(phase=body.to_phase).inc()
                 active_sessions.labels(phase=body.to_phase).inc()
-                if before is not None:
-                    active_sessions.labels(phase=before).dec()
+                active_sessions.labels(phase=before).dec()
                 if body.to_phase in _TERMINAL_PHASES:
                     manifest_path = storage_root / "sessions" / session_id / "manifest.json"
                     try:

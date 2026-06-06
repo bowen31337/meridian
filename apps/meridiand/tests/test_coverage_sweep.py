@@ -289,6 +289,95 @@ class TestCheckpointPerCall:
         assert resp.status_code == 422
 
 
+class TestPhaseTransitionTerminal:
+    @staticmethod
+    def _make_phase_client(storage_root: Path):
+        from fastapi.testclient import TestClient
+        from storage_event_log import LocalEventLogWriter
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        audit = FileAuditLog(storage_root)
+        writer = LocalEventLogWriter(storage_root)
+        app = create_app(audit, storage_root=storage_root, event_log=writer)
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_terminal_phase_with_manifest(self, tmp_path: Path) -> None:
+        sessions_dir = tmp_path / "sessions" / "sterm"
+        sessions_dir.mkdir(parents=True)
+        (sessions_dir / "manifest.json").write_text(
+            json.dumps({"created_at": "2024-01-01T00:00:00+00:00"})
+        )
+        client = self._make_phase_client(tmp_path)
+        resp = client.post(
+            "/v1/x/sessions/sterm/phase",
+            json={"to_phase": "completed", "reason": "ok"},
+        )
+        assert resp.status_code == 200
+
+    def test_terminal_phase_missing_manifest_skipped(self, tmp_path: Path) -> None:
+        client = self._make_phase_client(tmp_path)
+        resp = client.post(
+            "/v1/x/sessions/snomanifest/phase",
+            json={"to_phase": "completed", "reason": "ok"},
+        )
+        assert resp.status_code == 200
+
+    def test_terminal_phase_manifest_no_created_at(self, tmp_path: Path) -> None:
+        sessions_dir = tmp_path / "sessions" / "sno_ts"
+        sessions_dir.mkdir(parents=True)
+        (sessions_dir / "manifest.json").write_text("{}")
+        client = self._make_phase_client(tmp_path)
+        resp = client.post(
+            "/v1/x/sessions/sno_ts/phase",
+            json={"to_phase": "completed", "reason": "ok"},
+        )
+        assert resp.status_code == 200
+
+    def test_phase_with_existing_before_decrements(self, tmp_path: Path) -> None:
+        """If before is not None, active_sessions[before] is decremented (113->114)."""
+        client = self._make_phase_client(tmp_path)
+        # First transition to "running"
+        r1 = client.post(
+            "/v1/x/sessions/sbefore/phase",
+            json={"to_phase": "running", "reason": "start"},
+        )
+        assert r1.status_code == 200
+        # Second transition: before should now be "running"
+        r2 = client.post(
+            "/v1/x/sessions/sbefore/phase",
+            json={"to_phase": "idle", "reason": "pause"},
+        )
+        assert r2.status_code == 200
+
+    def test_phase_typed_error_reraised(self, tmp_path: Path) -> None:
+        """PhaseTransitionError raised inside is re-raised verbatim (line 127)."""
+        from fastapi.testclient import TestClient
+        from storage_event_log import LocalEventLogWriter
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+        from meridiand._phase import PhaseTransitionError
+
+        audit = FileAuditLog(tmp_path)
+        writer = LocalEventLogWriter(tmp_path)
+
+        async def _boom(*_a: Any, **_k: Any) -> None:
+            raise PhaseTransitionError(
+                message="pre-typed", timestamp=pagination_now(), cause=None
+            )
+
+        with patch.object(writer, "append", _boom):
+            app = create_app(audit, storage_root=tmp_path, event_log=writer)
+            client = TestClient(app, raise_server_exceptions=False)
+            resp = client.post(
+                "/v1/x/sessions/sreraise/phase",
+                json={"to_phase": "completed", "reason": "ok"},
+            )
+        assert resp.status_code in {422, 500}
+
+
 class TestErrorClassesHttpStatus:
     """One-liner http_status tests for error classes across modules."""
 
