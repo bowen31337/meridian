@@ -202,7 +202,12 @@ class AnthropicApiKeyProvider:
                 routing_rule=None,
             )
             try:
-                async for event in self._do_stream(opts, span):
+                stream = self._do_stream(opts, span)
+                while True:
+                    try:
+                        event = await stream.__anext__()
+                    except StopAsyncIteration:
+                        break
                     yield event
             except ProviderCallError as exc:
                 record_provider_failure(span, exc, provider_name=self.name, model=opts.model)

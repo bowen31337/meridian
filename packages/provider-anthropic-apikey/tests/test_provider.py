@@ -28,7 +28,10 @@ from meridian_sdk_provider.types import (
 )
 from opentelemetry.trace import StatusCode
 
-from meridian_provider_anthropic_apikey.provider import AnthropicApiKeyProvider
+from meridian_provider_anthropic_apikey.provider import (
+    AnthropicApiKeyProvider,
+    _convert_message,
+)
 
 _API_KEY = "sk-ant-test-key"
 _MOCK_REQUEST = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
@@ -1084,3 +1087,164 @@ class TestCacheMetrics:
         stop = next(e for e in events if isinstance(e, MessageStopEvent))
         assert stop.cache_creation_input_tokens == 0
         assert stop.cache_read_input_tokens == 0
+
+
+# ---------------------------------------------------------------------------
+# _convert_message — block conversion
+# ---------------------------------------------------------------------------
+
+
+def _blk(**kw: Any) -> Any:
+    return SimpleNamespace(**kw)
+
+
+class TestConvertMessageBlocks:
+    def test_string_content_passthrough(self) -> None:
+        msg = SimpleNamespace(role="user", content="plain")
+        assert _convert_message(msg) == {"role": "user", "content": "plain"}
+
+    def test_text_block_without_cache_control(self) -> None:
+        msg = SimpleNamespace(
+            role="assistant",
+            content=[_blk(type="text", text="hi", cache_control=None)],
+        )
+        out = _convert_message(msg)
+        assert out["content"] == [{"type": "text", "text": "hi"}]
+
+    def test_text_block_with_cache_control(self) -> None:
+        msg = SimpleNamespace(
+            role="assistant",
+            content=[_blk(type="text", text="hi", cache_control=object())],
+        )
+        out = _convert_message(msg)
+        assert out["content"][0]["cache_control"] == {"type": "ephemeral"}
+
+    def test_tool_use_block(self) -> None:
+        msg = SimpleNamespace(
+            role="assistant",
+            content=[_blk(type="tool_use", id="t1", name="fn", input={"a": 1})],
+        )
+        out = _convert_message(msg)
+        assert out["content"] == [{"type": "tool_use", "id": "t1", "name": "fn", "input": {"a": 1}}]
+
+    def test_tool_result_string_content(self) -> None:
+        msg = SimpleNamespace(
+            role="user",
+            content=[_blk(type="tool_result", tool_use_id="t1", content="done")],
+        )
+        out = _convert_message(msg)
+        assert out["content"] == [{"type": "tool_result", "tool_use_id": "t1", "content": "done"}]
+
+    def test_tool_result_list_content(self) -> None:
+        msg = SimpleNamespace(
+            role="user",
+            content=[_blk(type="tool_result", tool_use_id="t2", content=["a", "b"])],
+        )
+        out = _convert_message(msg)
+        assert out["content"][0]["content"] == [
+            {"type": "text", "text": "a"},
+            {"type": "text", "text": "b"},
+        ]
+
+    def test_thinking_block(self) -> None:
+        msg = SimpleNamespace(
+            role="assistant",
+            content=[_blk(type="thinking", thinking="reason", signature="sig")],
+        )
+        out = _convert_message(msg)
+        assert out["content"] == [{"type": "thinking", "thinking": "reason", "signature": "sig"}]
+
+    def test_unknown_block_type_skipped(self) -> None:
+        msg = SimpleNamespace(
+            role="user",
+            content=[_blk(type="image", source="x"), _blk(type="text", text="ok")],
+        )
+        out = _convert_message(msg)
+        assert out["content"] == [{"type": "text", "text": "ok"}]
+
+
+# ---------------------------------------------------------------------------
+# call() — stream-internal branches and generic-exception wrapping
+# ---------------------------------------------------------------------------
+
+
+class TestCallStreamBranches:
+    async def test_generic_exception_wrapped_as_provider_call_error(
+        self, mock_span: MockSpan
+    ) -> None:
+        audit = CollectingAuditLog()
+        provider = _make_provider(error=RuntimeError("kaboom"), audit_log=audit)
+        with pytest.raises(ProviderCallError) as exc_info:
+            [e async for e in provider.call(_make_opts())]
+        assert "kaboom" in str(exc_info.value)
+        assert exc_info.value.provider_name == "test-anthropic"
+        assert len(audit.entries) == 1
+        assert audit.entries[0].event == "anthropic.call.failed"
+
+    async def test_provider_call_error_from_stream_reraised(self, mock_span: MockSpan) -> None:
+        err = ProviderCallError("inner", provider_name="test-anthropic")
+        provider = _make_provider(error=err)
+        with pytest.raises(ProviderCallError) as exc_info:
+            [e async for e in provider.call(_make_opts())]
+        assert exc_info.value is err
+
+    async def test_input_json_delta_without_known_tool_id_skipped(
+        self, mock_span: MockSpan
+    ) -> None:
+        raw = [
+            _msg_start(),
+            _tool_delta(partial_json='{"x":1}', index=7),  # no block_start at index 7
+            _msg_delta(),
+            _msg_stop(),
+        ]
+        provider = _make_provider(events=raw)
+        events = [e async for e in provider.call(_make_opts())]
+        assert not any(isinstance(e, ToolInputDeltaEvent) for e in events)
+
+    async def test_unknown_content_block_delta_type_ignored(self, mock_span: MockSpan) -> None:
+        raw = [
+            _msg_start(),
+            SimpleNamespace(
+                type="content_block_delta",
+                index=0,
+                delta=SimpleNamespace(type="signature_delta", signature="sig"),
+            ),
+            _msg_delta(),
+            _msg_stop(),
+        ]
+        provider = _make_provider(events=raw)
+        events = [e async for e in provider.call(_make_opts())]
+        assert any(isinstance(e, MessageStopEvent) for e in events)
+
+
+# ---------------------------------------------------------------------------
+# count_tokens — error handling
+# ---------------------------------------------------------------------------
+
+
+def _make_count_provider(error: Exception) -> AnthropicApiKeyProvider:
+    async def _count(**_kwargs: Any) -> Any:
+        raise error
+
+    mock_messages: Any = MagicMock()
+    mock_messages.count_tokens = _count
+    mock_client: Any = MagicMock()
+    mock_client.messages = mock_messages
+    return AnthropicApiKeyProvider(_API_KEY, name="test-anthropic", _client=mock_client)
+
+
+class TestCountTokensErrors:
+    async def test_timeout_raises_provider_timeout_error(self) -> None:
+        provider = _make_count_provider(_timeout_error())
+        with pytest.raises(ProviderTimeoutError):
+            await provider.count_tokens(ModelCountReq(model="claude-sonnet-4-6", messages=[]))
+
+    async def test_connection_error_raises_provider_call_error(self) -> None:
+        provider = _make_count_provider(_connection_error())
+        with pytest.raises(ProviderCallError):
+            await provider.count_tokens(ModelCountReq(model="claude-sonnet-4-6", messages=[]))
+
+    async def test_status_error_raises_rate_limit_error(self) -> None:
+        provider = _make_count_provider(_rate_limit_error())
+        with pytest.raises(ProviderRateLimitError):
+            await provider.count_tokens(ModelCountReq(model="claude-sonnet-4-6", messages=[]))
