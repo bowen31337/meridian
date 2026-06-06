@@ -408,6 +408,16 @@ class TestSubprocessDispatcher:
         assert result.content["workspace"] == "/workspace"
         assert result.content["scratch_dir"] == "/tmp/scratch"
 
+    async def test_unexpected_spawn_error_propagates(self, mock_span: MockSpan) -> None:
+        # A non-FileNotFoundError before proc is assigned: proc stays None, so
+        # the cleanup guard is skipped and the exception re-raises.
+        d = SubprocessDispatcher()
+        with (
+            patch("asyncio.create_subprocess_exec", side_effect=RuntimeError("spawn boom")),
+            pytest.raises(RuntimeError, match="spawn boom"),
+        ):
+            await d.dispatch(_tool(SubprocessHandler(path=sys.executable)), {}, CTX)
+
 
 # ---------------------------------------------------------------------------
 # McpDispatcher — mocked httpx
@@ -891,3 +901,14 @@ class TestContainerDispatcher:
         assert result.content["session_id"] == "sess-disp"
         assert result.content["workspace"] == "/workspace"
         assert result.content["scratch_dir"] == "/tmp/scratch"
+
+    async def test_unexpected_spawn_error_propagates(self, mock_span: MockSpan) -> None:
+        # A non-FileNotFoundError before proc is assigned: proc stays None, so
+        # the cleanup guard is skipped and the exception re-raises.
+        with (
+            patch("asyncio.create_subprocess_exec", side_effect=RuntimeError("docker boom")),
+            pytest.raises(RuntimeError, match="docker boom"),
+        ):
+            await ContainerDispatcher().dispatch(
+                self._tool_with_handler("c1", "/entrypoint"), {}, CTX
+            )
