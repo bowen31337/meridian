@@ -376,7 +376,6 @@ def migrate(config_path: Path | None) -> None:
                 {"path": str(path), "errors": result.errors},
             )
             sys.exit(1)
-            return
 
         if not result.applied:
             click.echo(f"config is already at version {result.from_version}, nothing to migrate")

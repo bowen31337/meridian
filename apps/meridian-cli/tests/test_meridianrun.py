@@ -393,3 +393,297 @@ def test_renderer_seq_tracking_via_events_endpoint(mock_client: MagicMock) -> No
     assert result.exit_code == 0
     first_positional_args = mock_client.request.call_args_list[0].args
     assert any("since=-1" in str(a) for a in first_positional_args)
+
+
+# ---------------------------------------------------------------------------
+# Additional renderer branches
+# ---------------------------------------------------------------------------
+
+
+def test_renderer_message_added_user_role(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    renderer.render(
+        _make_event("message.added", {"role": "user", "content": "hi there"})
+    )
+    combined = " ".join(fake_console.lines)
+    assert "hi there" in combined
+    assert "User" in combined
+
+
+def test_renderer_message_added_non_user_silent(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    renderer.render(
+        _make_event("message.added", {"role": "assistant", "content": "X"})
+    )
+    assert fake_console.lines == []
+
+
+def test_renderer_tool_call_args_dict_truncated(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    renderer.render(
+        _make_event(
+            "tool_call.requested",
+            {
+                "tool_name": "fn",
+                "arguments": {"a": 1, "b": 2, "c": 3, "d": 4, "e": 5},
+            },
+        )
+    )
+    combined = " ".join(fake_console.lines)
+    assert "fn" in combined
+    assert "…" in combined  # truncation marker
+
+
+def test_renderer_tool_call_args_non_dict(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    renderer.render(
+        _make_event(
+            "tool_call.requested",
+            {"name": "fn2", "args": "raw-string-args"},
+        )
+    )
+    combined = " ".join(fake_console.lines)
+    assert "raw-string-args" in combined
+
+
+def test_renderer_tool_call_dispatched(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    renderer.render(_make_event("tool_call.dispatched", {}))
+    combined = " ".join(fake_console.lines)
+    assert "dispatching" in combined
+
+
+def test_renderer_tool_call_result_non_str(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    renderer.render(_make_event("tool_call.result", {"output": {"x": 1, "y": 2}}))
+    combined = " ".join(fake_console.lines)
+    assert "{" in combined and "x" in combined
+
+
+def test_renderer_model_call_started(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    renderer.render(_make_event("model_call.started", {}))
+    combined = " ".join(fake_console.lines)
+    assert "model call" in combined
+
+
+def test_renderer_usage_delta_with_tokens(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    renderer.render(_make_event("usage.delta", {"prompt_tokens": 10, "completion_tokens": 5}))
+    combined = " ".join(fake_console.lines)
+    assert "+10p" in combined and "+5c" in combined
+
+
+def test_renderer_usage_delta_zero_tokens_silent(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    renderer.render(_make_event("usage.delta", {"prompt_tokens": 0, "completion_tokens": 0}))
+    assert fake_console.lines == []
+
+
+def test_renderer_checkpoint_created(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    renderer.render(_make_event("checkpoint.created", {}))
+    combined = " ".join(fake_console.lines)
+    assert "checkpoint.created" in combined
+
+
+def test_renderer_render_delta_via_data_content(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    """delta is None but data.content has blocks."""
+    renderer.render(
+        _make_event(
+            "message.delta",
+            {"content": [{"type": "text", "text": "from-data-content"}]},
+        )
+    )
+    renderer.close()
+    combined = " ".join(fake_console.lines)
+    assert "from-data-content" in combined
+
+
+def test_renderer_render_delta_text_delta_block(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    renderer.render(
+        _make_event(
+            "message.delta",
+            {"delta": {"content": [{"type": "text_delta", "delta": "fragment"}]}},
+        )
+    )
+    renderer.close()
+    combined = " ".join(fake_console.lines)
+    assert "fragment" in combined
+
+
+def test_renderer_render_delta_thinking_already_in_thinking(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    """Two consecutive thinking blocks — the second doesn't re-emit the marker."""
+    renderer.render(
+        _make_event(
+            "message.delta",
+            {"content": [{"type": "thinking", "thinking": "first"}]},
+        )
+    )
+    renderer.render(
+        _make_event(
+            "message.delta",
+            {"content": [{"type": "thinking", "thinking": "second"}]},
+        )
+    )
+    combined = " ".join(fake_console.lines)
+    # Only one <thinking> marker even though two events
+    assert combined.count("<thinking>") == 1
+
+
+def test_renderer_render_delta_thinking_after_streaming(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    """thinking block after streaming text emits the newline-break path."""
+    renderer.render(
+        _make_event("message.delta", {"delta": {"type": "text_delta", "text": "hi"}})
+    )
+    renderer.render(
+        _make_event(
+            "message.delta",
+            {"content": [{"type": "thinking", "thinking": "x"}]},
+        )
+    )
+    renderer.close()
+    combined = " ".join(fake_console.lines)
+    assert "<thinking>" in combined
+
+
+def test_renderer_render_delta_flat_content_string(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    """Flat string content fallback path (no delta dict)."""
+    renderer.render(_make_event("message.delta", {"content": "literal"}))
+    renderer.close()
+    combined = " ".join(fake_console.lines)
+    assert "literal" in combined
+
+
+def test_renderer_seq_not_advanced_when_lower(mock_client: MagicMock) -> None:
+    """Events with seq <= last_seq don't advance last_seq."""
+    e_high = _make_event("session.created", {}, seq=10)
+    done = _make_event(
+        "session.phase_change", {"prev_phase": "running", "phase": "done"}, seq=11
+    )
+    e_low = _make_event("usage.delta", {"prompt_tokens": 1}, seq=5)
+    mock_client.request.return_value = [e_high, e_low, done]
+    with patch("meridian_cli.meridianrun.write_audit"):
+        result = _invoke(mock_client, ["--no-follow", "s"])
+    assert result.exit_code == 0
+
+
+def test_keyboard_interrupt_during_loop(mock_client: MagicMock) -> None:
+    """KeyboardInterrupt closes renderer gracefully."""
+    mock_client.request.side_effect = KeyboardInterrupt
+    with patch("meridian_cli.meridianrun.write_audit"):
+        result = _invoke(mock_client, ["sess-1"])
+    assert result.exit_code == 0
+
+
+def test_renderer_silent_event_falls_through(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    """Events not matched by any branch (e.g. hook.invoked) emit nothing."""
+    renderer.render(_make_event("hook.invoked", {}))
+    assert fake_console.lines == []
+
+
+def test_renderer_delta_text_empty_returns_early(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    """delta.type is text with empty text — emits nothing but returns."""
+    renderer.render(_make_event("message.delta", {"delta": {"type": "text", "text": ""}}))
+    assert fake_console.lines == []
+
+
+def test_renderer_delta_text_block_empty_loops(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    """content_blocks with text block of empty text — no emit but loop continues."""
+    renderer.render(
+        _make_event(
+            "message.delta",
+            {"content": [{"type": "text", "text": ""}, {"type": "text", "text": "real"}]},
+        )
+    )
+    renderer.close()
+    combined = " ".join(fake_console.lines)
+    assert "real" in combined
+
+
+def test_renderer_delta_flat_with_dict_text(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    """delta is dict, type not text — falls through to fallback which finds delta.text."""
+    renderer.render(
+        _make_event("message.delta", {"delta": {"type": "other", "text": "in-delta"}})
+    )
+    renderer.close()
+    combined = " ".join(fake_console.lines)
+    assert "in-delta" in combined
+
+
+def test_renderer_delta_no_text_anywhere_silent(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    """No text in delta or content — emit_text never called."""
+    renderer.render(_make_event("message.delta", {"delta": {"type": "other"}, "content": 123}))
+    assert fake_console.lines == []
+
+
+def test_renderer_unknown_block_type_silently_skipped(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    """A content block with unknown type (e.g. 'tool_use') is silently skipped."""
+    renderer.render(
+        _make_event(
+            "message.delta",
+            {"content": [{"type": "tool_use", "id": "x"}, {"type": "text", "text": "hi"}]},
+        )
+    )
+    renderer.close()
+    combined = " ".join(fake_console.lines)
+    assert "hi" in combined
+
+
+def test_renderer_two_text_blocks_both_with_text(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    """Two text content blocks both populated — loop iterates after first emit."""
+    renderer.render(
+        _make_event(
+            "message.delta",
+            {"content": [{"type": "text", "text": "one "}, {"type": "text", "text": "two"}]},
+        )
+    )
+    renderer.close()
+    combined = " ".join(fake_console.lines)
+    assert "one" in combined and "two" in combined
+
+
+def test_renderer_emit_text_while_already_streaming(
+    renderer: _Renderer, fake_console: _FakeConsole
+) -> None:
+    """Two consecutive text emissions — second skips the 'Assistant:' prelude."""
+    renderer.render(_make_event("message.delta", {"delta": {"type": "text_delta", "text": "a"}}))
+    renderer.render(_make_event("message.delta", {"delta": {"type": "text_delta", "text": "b"}}))
+    renderer.close()
+    combined = " ".join(fake_console.lines)
+    assert "a" in combined and "b" in combined
+    assert combined.count("Assistant") == 1
