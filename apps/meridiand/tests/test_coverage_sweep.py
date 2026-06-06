@@ -24,6 +24,38 @@ def pagination_now() -> str:
 # ---------------------------------------------------------------------------
 
 
+class TestErrorClassesHttpStatus:
+    """One-liner http_status tests for error classes across modules."""
+
+    def test_hook_create_error(self) -> None:
+        from meridiand._hooks import HookCreateError
+
+        assert HookCreateError(message="m", timestamp="t", cause=None).http_status() == 500
+
+    def test_hook_invalid_request_error(self) -> None:
+        from meridiand._hooks import HookInvalidRequestError
+
+        assert HookInvalidRequestError(message="m", timestamp="t").http_status() == 422
+
+    def test_checkpoint_error(self) -> None:
+        from meridiand._checkpoint import CheckpointError
+
+        assert CheckpointError(message="m", timestamp="t", cause=None).http_status() == 422
+
+    def test_kb_index_error(self) -> None:
+        from meridiand._kb import KbIndexError, KbQueryError, KbStatusError
+
+        assert KbIndexError(message="m", timestamp="t", cause=None).http_status() == 422
+        assert KbStatusError(message="m", timestamp="t", cause=None).http_status() == 422
+        assert KbQueryError(message="m", timestamp="t", cause=None).http_status() == 422
+
+    def test_skill_forge_errors(self) -> None:
+        from meridiand._skill_forge import SkillForgeProposalError, SkillForgeRunError
+
+        assert SkillForgeRunError(message="m", timestamp="t", cause=None).http_status() == 500
+        assert SkillForgeProposalError(message="m", timestamp="t", cause=None).http_status() == 500
+
+
 class TestVaultLeakSoakHelpers:
     def test_scan_skips_unreadable_files(self, tmp_path: Path) -> None:
         from meridiand._vault_leak_soak import _scan_storage_root
