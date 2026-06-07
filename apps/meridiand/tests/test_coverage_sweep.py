@@ -291,6 +291,210 @@ class TestCheckpointPerCall:
         assert resp.status_code == 422
 
 
+class TestFilesErrors:
+    def test_files_upload_error_http_status(self) -> None:
+        from meridiand._files import FilesUploadError
+
+        assert FilesUploadError(message="m", timestamp="t", cause=None).http_status() == 500
+
+    def test_files_not_found_error_http_status(self) -> None:
+        from meridiand._files import FilesNotFoundError
+
+        assert FilesNotFoundError(message="m", timestamp="t").http_status() == 404
+
+    def test_files_invalid_request_error_http_status(self) -> None:
+        from meridiand._files import FilesInvalidRequestError
+
+        assert FilesInvalidRequestError(message="m", timestamp="t").http_status() == 422
+
+    async def test_upload_multipart_with_no_file_field(self, tmp_path: Path) -> None:
+        """multipart/form-data without 'file' field raises FilesInvalidRequestError (108)."""
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(audit, storage_root=tmp_path)
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post(
+            "/v1/files",
+            files={"not_file": ("foo.txt", b"hi", "text/plain")},
+        )
+        assert resp.status_code == 422
+
+    async def test_upload_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        """A non-FilesUpload exception during upload is wrapped (168-184)."""
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(audit, storage_root=tmp_path)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        async def _boom(*_a: Any, **_k: Any) -> None:
+            raise RuntimeError("put boom")
+
+        import base64
+
+        with patch("meridiand._files.LocalBlobStore.put", _boom):
+            resp = client.post(
+                "/v1/files",
+                json={"name": "test", "content": base64.b64encode(b"data").decode()},
+            )
+        assert resp.status_code == 500
+
+    async def test_get_metadata_typed_error_reraised(self, tmp_path: Path) -> None:
+        """FilesNotFoundError raised inside is re-raised (226-241)."""
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(audit, storage_root=tmp_path)
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.get("/v1/files/nonexistent")
+        assert resp.status_code == 404
+
+    async def test_get_metadata_blob_failure_non_not_found(
+        self, tmp_path: Path
+    ) -> None:
+        """BlobFailure with code != BLOB_KEY_NOT_FOUND wraps in FilesUploadError (226-241)."""
+        from fastapi.testclient import TestClient
+        from storage_blob import BlobFailure
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(audit, storage_root=tmp_path)
+        client = TestClient(app, raise_server_exceptions=False)
+        import base64
+        upload = client.post(
+            "/v1/files",
+            json={"name": "test", "content": base64.b64encode(b"data").decode()},
+        )
+        file_id = upload.json()["id"]
+
+        async def _boom(*_a: Any, **_k: Any) -> Any:
+            raise BlobFailure(
+                code="BLOB_INTERNAL", message="boom", key="k", timestamp=pagination_now()
+            )
+
+        from storage_blob import LocalBlobStore as _LBS
+
+        with patch.object(_LBS, "get", _boom):
+            resp = client.get(f"/v1/files/{file_id}")
+        assert resp.status_code == 500
+
+    async def test_get_metadata_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        """Generic exception during metadata get is wrapped (242-258)."""
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(audit, storage_root=tmp_path)
+        client = TestClient(app, raise_server_exceptions=False)
+
+        # Create a file first
+        import base64
+        upload = client.post(
+            "/v1/files",
+            json={"name": "test", "content": base64.b64encode(b"data").decode()},
+        )
+        assert upload.status_code == 201
+        file_id = upload.json()["id"]
+
+        async def _boom(*_a: Any, **_k: Any) -> Any:
+            raise RuntimeError("get boom")
+
+        with patch("meridiand._files.LocalBlobStore.get", _boom):
+            resp = client.get(f"/v1/files/{file_id}")
+        assert resp.status_code == 500
+
+    async def test_get_content_typed_error(self, tmp_path: Path) -> None:
+        """Get content for nonexistent file raises FilesNotFoundError (line 292)."""
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(audit, storage_root=tmp_path)
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.get("/v1/files/nonexistent/content")
+        assert resp.status_code == 404
+
+    async def test_get_content_blob_failure_non_not_found(
+        self, tmp_path: Path
+    ) -> None:
+        """BlobFailure with code != BLOB_KEY_NOT_FOUND re-raises (line 292)."""
+        from fastapi.testclient import TestClient
+        from storage_blob import BlobFailure
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(audit, storage_root=tmp_path)
+        client = TestClient(app, raise_server_exceptions=False)
+        import base64
+        upload = client.post(
+            "/v1/files",
+            json={"name": "test", "content": base64.b64encode(b"data").decode()},
+        )
+        file_id = upload.json()["id"]
+
+        async def _boom(*_a: Any, **_k: Any) -> Any:
+            raise BlobFailure(
+                code="BLOB_INTERNAL", message="boom", key="k", timestamp=pagination_now()
+            )
+
+        from storage_blob import LocalBlobStore as _LBS
+
+        with patch.object(_LBS, "get", _boom):
+            resp = client.get(f"/v1/files/{file_id}/content")
+        assert resp.status_code >= 400
+
+    async def test_get_content_generic_exception(self, tmp_path: Path) -> None:
+        """Generic exception during content read is wrapped (309-325)."""
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(audit, storage_root=tmp_path)
+        client = TestClient(app, raise_server_exceptions=False)
+        import base64
+        upload = client.post(
+            "/v1/files",
+            json={"name": "test", "content": base64.b64encode(b"data").decode()},
+        )
+        file_id = upload.json()["id"]
+
+        from storage_blob import LocalBlobStore as _LBS
+
+        original_get = _LBS.get
+        call_count = [0]
+
+        async def _boom_blob(self: Any, key: str) -> Any:
+            call_count[0] += 1
+            # First get is metadata; second is blob — fail the blob get
+            if call_count[0] >= 2:
+                raise RuntimeError("blob boom")
+            return await original_get(self, key)
+
+        with patch.object(_LBS, "get", _boom_blob):
+            resp = client.get(f"/v1/files/{file_id}/content")
+        assert resp.status_code == 500
+
+
 class TestParallelRunsErrors:
     def test_parallel_runs_error_http_status(self) -> None:
         from meridiand._parallel_runs import ParallelRunsError
