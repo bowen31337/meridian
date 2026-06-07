@@ -2696,6 +2696,420 @@ class TestSkillsLoaders:
             with pytest.raises(SkillInstallSourceLoadError):
                 GitSkillLoader().load("https://github.com/x/y.git")
 
+    def test_file_skill_loader_oserror_on_read(self, tmp_path: Path) -> None:
+        """Covers 285-286 (FileSkillLoader OSError → SkillInstallSourceLoadError)."""
+        from meridiand._skills import FileSkillLoader, SkillInstallSourceLoadError
+
+        (tmp_path / "skill.json").write_text("{}")
+        with patch.object(Path, "read_text", side_effect=OSError("io boom")):
+            with pytest.raises(SkillInstallSourceLoadError):
+                FileSkillLoader().load(f"file://{tmp_path}")
+
+    def test_npm_skill_loader_tarball_download_failure(self) -> None:
+        """Covers 328-336 (tarball download failure)."""
+        from contextlib import contextmanager
+        from io import BytesIO
+
+        from meridiand._skills import NpmSkillLoader, SkillInstallSourceLoadError
+
+        calls = {"n": 0}
+
+        @contextmanager
+        def _fake_urlopen(*_a: Any, **_k: Any) -> Any:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                yield BytesIO(
+                    json.dumps({"dist": {"tarball": "http://e/x.tgz"}}).encode()
+                )
+            else:
+                raise RuntimeError("download boom")
+
+        with patch("meridiand._skills.urllib.request.urlopen", _fake_urlopen):
+            with pytest.raises(SkillInstallSourceLoadError, match="download"):
+                NpmSkillLoader().load("npm:pkg")
+
+    def test_npm_skill_loader_tarball_extract_failure(self) -> None:
+        """Covers 338-350 (tarball extract failure)."""
+        from contextlib import contextmanager
+        from io import BytesIO
+
+        from meridiand._skills import NpmSkillLoader, SkillInstallSourceLoadError
+
+        calls = {"n": 0}
+
+        @contextmanager
+        def _fake_urlopen(*_a: Any, **_k: Any) -> Any:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                yield BytesIO(
+                    json.dumps({"dist": {"tarball": "http://e/x.tgz"}}).encode()
+                )
+            else:
+                yield BytesIO(b"not a tarball")
+
+        with patch("meridiand._skills.urllib.request.urlopen", _fake_urlopen):
+            with pytest.raises(SkillInstallSourceLoadError):
+                NpmSkillLoader().load("npm:pkg")
+
+    def test_npm_skill_loader_returns_from_tarball(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 338-344 (skill.json extracted from tarball)."""
+        from contextlib import contextmanager
+        import gzip
+        import io
+        import tarfile
+
+        from meridiand._skills import NpmSkillLoader
+
+        # Build a tar.gz with skill.json
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+            data = json.dumps({"id": "from-tarball"}).encode()
+            info = tarfile.TarInfo("package/skill.json")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+        tarball_bytes = buf.getvalue()
+
+        calls = {"n": 0}
+
+        @contextmanager
+        def _fake_urlopen(*_a: Any, **_k: Any) -> Any:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                yield io.BytesIO(
+                    json.dumps({"dist": {"tarball": "http://e/x.tgz"}}).encode()
+                )
+            else:
+                yield io.BytesIO(tarball_bytes)
+
+        with patch("meridiand._skills.urllib.request.urlopen", _fake_urlopen):
+            result = NpmSkillLoader().load("npm:pkg")
+            assert result == {"id": "from-tarball"}
+
+    def test_registry_loader_agentskills_scheme(self) -> None:
+        """Covers 404-413 (agentskills:// scheme → API URL)."""
+        from contextlib import contextmanager
+        from io import BytesIO
+
+        from meridiand._skills import RegistrySkillLoader
+
+        @contextmanager
+        def _fake_urlopen(*_a: Any, **_k: Any) -> Any:
+            yield BytesIO(json.dumps({"id": "from-registry"}).encode())
+
+        with patch("meridiand._skills.urllib.request.urlopen", _fake_urlopen):
+            result = RegistrySkillLoader().load("agentskills://my-skill")
+            assert result == {"id": "from-registry"}
+
+    def test_registry_loader_direct_url(self) -> None:
+        from contextlib import contextmanager
+        from io import BytesIO
+
+        from meridiand._skills import RegistrySkillLoader
+
+        @contextmanager
+        def _fake_urlopen(*_a: Any, **_k: Any) -> Any:
+            yield BytesIO(json.dumps({"id": "direct"}).encode())
+
+        with patch("meridiand._skills.urllib.request.urlopen", _fake_urlopen):
+            result = RegistrySkillLoader().load("https://example.com/skill")
+            assert result == {"id": "direct"}
+
+    def test_registry_loader_network_error(self) -> None:
+        """Covers 414-419 (registry fetch failure)."""
+        from meridiand._skills import RegistrySkillLoader, SkillInstallSourceLoadError
+
+        with patch(
+            "meridiand._skills.urllib.request.urlopen",
+            side_effect=RuntimeError("net boom"),
+        ):
+            with pytest.raises(SkillInstallSourceLoadError):
+                RegistrySkillLoader().load("agentskills://x")
+
+
+class TestSkillsHandlers:
+    """Cover make_skills_router handler error paths."""
+
+    @staticmethod
+    def _make_router(tmp_path: Path):
+        from core_errors import NoopAuditLog
+
+        from meridiand._skills import make_skills_router
+
+        return make_skills_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+        )
+
+    async def test_create_skill_generic_exception(self, tmp_path: Path) -> None:
+        """Covers 531-551."""
+        from meridiand._skills import (
+            SkillCreateError,
+            SkillCreateRequest,
+        )
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/skills"
+            and "POST" in r.methods
+            and r.endpoint.__name__ == "create_skill"
+        )
+        from meridiand._skills import SkillTool
+
+        req = SkillCreateRequest(
+            name="s",
+            description="d",
+            instructions="i",
+            tools=[SkillTool(name="t1")],
+        )
+        with patch(
+            "meridiand._skills._content_version_id",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(SkillCreateError):
+                await handler(req)
+
+    async def test_install_skill_unknown_source_type(self, tmp_path: Path) -> None:
+        """Covers 582 (No loader configured)."""
+        from meridiand._skills import (
+            SkillInstallError,
+            SkillInstallRequest,
+        )
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/skills/install"
+        )
+        req = SkillInstallRequest(source="file:///tmp/x")
+        with patch(
+            "meridiand._skills._detect_source_type",
+            return_value="unknown-source",
+        ):
+            with pytest.raises(SkillInstallError):
+                await handler(req)
+
+    async def test_install_skill_loader_unexpected_exception(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 591-596."""
+        from meridiand._skills import (
+            SkillInstallError,
+            SkillInstallRequest,
+            make_skills_router,
+        )
+        from core_errors import NoopAuditLog
+
+        class _BoomLoader:
+            def load(self, source_url: str) -> dict[str, Any]:
+                raise RuntimeError("loader boom")
+
+        router = make_skills_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            source_loaders={"file": _BoomLoader()},
+        )
+        handler = next(
+            r.endpoint for r in router.routes if r.path == "/v1/skills/install"
+        )
+        req = SkillInstallRequest(source="file:///tmp/x")
+        with pytest.raises(SkillInstallError):
+            await handler(req)
+
+    async def test_install_skill_invalid_manifest(self, tmp_path: Path) -> None:
+        """Covers 600-605."""
+        from meridiand._skills import (
+            SkillInstallRequest,
+            SkillInstallSourceLoadError,
+            make_skills_router,
+        )
+        from core_errors import NoopAuditLog
+
+        class _BadLoader:
+            def load(self, source_url: str) -> dict[str, Any]:
+                # missing required fields → SkillCreateRequest construction fails
+                return {"name": ""}
+
+        router = make_skills_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            source_loaders={"file": _BadLoader()},
+        )
+        handler = next(
+            r.endpoint for r in router.routes if r.path == "/v1/skills/install"
+        )
+        req = SkillInstallRequest(source="file:///tmp/x")
+        with pytest.raises(SkillInstallSourceLoadError):
+            await handler(req)
+
+    async def test_install_skill_validation_fails(self, tmp_path: Path) -> None:
+        """Covers 607-609 (validation_err raise)."""
+        from meridiand._skills import (
+            SkillInstallRequest,
+            SkillInvalidRequestError,
+            make_skills_router,
+        )
+        from core_errors import NoopAuditLog
+
+        class _BlankLoader:
+            def load(self, source_url: str) -> dict[str, Any]:
+                # Valid SkillCreateRequest schema but blank name → validation_err
+                return {
+                    "name": "   ",
+                    "description": "d",
+                    "instructions": "i",
+                    "tools": [{"name": "t1"}],
+                }
+
+        router = make_skills_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            source_loaders={"file": _BlankLoader()},
+        )
+        handler = next(
+            r.endpoint for r in router.routes if r.path == "/v1/skills/install"
+        )
+        req = SkillInstallRequest(source="file:///tmp/x")
+        with pytest.raises(SkillInvalidRequestError):
+            await handler(req)
+
+    async def test_install_skill_generic_exception(self, tmp_path: Path) -> None:
+        """Covers 673-693 (generic exception wrap)."""
+        from meridiand._skills import (
+            SkillInstallError,
+            SkillInstallRequest,
+            make_skills_router,
+        )
+        from core_errors import NoopAuditLog
+
+        class _OkLoader:
+            def load(self, source_url: str) -> dict[str, Any]:
+                return {
+                    "name": "n",
+                    "description": "d",
+                    "instructions": "i",
+                    "tools": [{"name": "t1"}],
+                }
+
+        router = make_skills_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            source_loaders={"file": _OkLoader()},
+        )
+        handler = next(
+            r.endpoint for r in router.routes if r.path == "/v1/skills/install"
+        )
+        req = SkillInstallRequest(source="file:///tmp/x")
+        with patch(
+            "meridiand._skills._content_version_id",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(SkillInstallError):
+                await handler(req)
+
+    async def test_get_skill_version_generic_exception(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 751-771."""
+        from meridiand._skills import SkillCreateError
+
+        vd = tmp_path / "skill_versions"
+        vd.mkdir(parents=True)
+        (vd / "v1.json").write_text(
+            json.dumps({"id": "v1", "skill_id": "s1"})
+        )
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/versions/{ver}" in r.path
+            and r.endpoint.__name__ == "get_skill_version"
+        )
+        with patch(
+            "meridiand._skills.json.loads",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(SkillCreateError):
+                await handler("s1", "v1")
+
+    async def test_list_skills_generic_exception(self, tmp_path: Path) -> None:
+        """Covers 823-839."""
+        from meridiand._skills import SkillListError
+
+        sd = tmp_path / "skills"
+        sd.mkdir(parents=True)
+        (sd / "s1.json").write_text(json.dumps({"id": "s1", "name": "x"}))
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/skills"
+            and "GET" in r.methods
+            and r.endpoint.__name__ == "list_skills"
+        )
+        with patch(
+            "meridiand._skills.json.loads",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(SkillListError):
+                await handler(None, 10)
+
+    async def test_list_skill_versions_cursor_decode_error(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 892-903 (CursorDecodeError on versions list)."""
+        from meridiand._skills import make_skills_router
+        from core_errors import NoopAuditLog
+        from meridiand._pagination import CursorDecodeError
+
+        vd = tmp_path / "skill_versions"
+        vd.mkdir(parents=True)
+
+        router = make_skills_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+        )
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/versions" in r.path
+            and r.endpoint.__name__ == "list_skill_versions"
+        )
+        with pytest.raises(CursorDecodeError):
+            await handler("s1", "bad-cursor", 10)
+
+    async def test_list_skill_versions_generic_exception(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 905-921 (generic exception wrap)."""
+        from meridiand._skills import SkillVersionsListError
+
+        vd = tmp_path / "skill_versions"
+        vd.mkdir(parents=True)
+        (vd / "v1.json").write_text(
+            json.dumps({"id": "v1", "skill_id": "s1"})
+        )
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/versions" in r.path
+            and r.endpoint.__name__ == "list_skill_versions"
+        )
+        with patch(
+            "meridiand._skills.json.loads",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(SkillVersionsListError):
+                await handler("s1", None, 10)
+
 
 class TestMessagesHelper:
     async def test_collect_handles_all_event_types(self) -> None:
