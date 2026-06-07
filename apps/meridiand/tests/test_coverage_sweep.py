@@ -289,6 +289,210 @@ class TestCheckpointPerCall:
         assert resp.status_code == 422
 
 
+class TestKbStoreSearchHelpers:
+    def test_has_key_returns_false_when_missing(self, tmp_path: Path) -> None:
+        from meridiand._kb import KbStore
+
+        store = KbStore(tmp_path / "kb.db")
+        assert store.has_key("/none/such") is False
+
+    def test_glob_search_with_scope(self, tmp_path: Path) -> None:
+        from meridian_kb_indexer import Chunk
+
+        from meridiand._kb import KbStore
+
+        store = KbStore(tmp_path / "kb.db")
+        store.upsert_chunks(
+            "/docs/a.md",
+            "world-doc",
+            [
+                Chunk(
+                    file_path="/docs/a.md",
+                    kind="text",
+                    content="hello",
+                    start_line=1,
+                    end_line=1,
+                ),
+            ],
+        )
+        rows = store.glob_search("*.md", "world-doc", limit=10)
+        assert rows
+        # Scope filter
+        rows2 = store.glob_search("*.txt", "world-doc", limit=10)
+        assert rows2 == []
+
+    def test_bm25_search_empty_query(self, tmp_path: Path) -> None:
+        from meridiand._kb import KbStore
+
+        store = KbStore(tmp_path / "kb.db")
+        assert store.bm25_search("!!!  ", None, limit=10) == []
+
+    def test_bm25_search_no_scope_path(self, tmp_path: Path) -> None:
+        """bm25_search with scope=None exercises the else branch (lines 318-324)."""
+        from meridian_kb_indexer import Chunk
+
+        from meridiand._kb import KbStore
+
+        store = KbStore(tmp_path / "kb.db")
+        store.upsert_chunks(
+            "/x.md",
+            "any",
+            [Chunk(file_path="/x.md", kind="text", content="hello world", start_line=1, end_line=1)],
+        )
+        # Empty result is OK — point is to exercise the no-scope branch
+        store.bm25_search("hello", None, limit=10)
+
+    def test_glob_search_truncates_at_limit(self, tmp_path: Path) -> None:
+        """glob_search breaks early after `limit` results (line 302)."""
+        from meridian_kb_indexer import Chunk
+
+        from meridiand._kb import KbStore
+
+        store = KbStore(tmp_path / "kb.db")
+        # Add 3 chunks
+        for i in range(3):
+            store.upsert_chunks(
+                f"/file{i}.md",
+                "scope",
+                [
+                    Chunk(
+                        file_path=f"/file{i}.md",
+                        kind="text",
+                        content="x",
+                        start_line=1,
+                        end_line=1,
+                    )
+                ],
+            )
+        # Request limit=1 — should break after first match
+        rows = store.glob_search("*.md", "scope", limit=1)
+        assert len(rows) == 1
+
+    def test_vector_search_no_scope(self, tmp_path: Path) -> None:
+        """vector_search with scope=None exercises the else branch (line 335 -> alternative)."""
+        from meridian_kb_indexer import Chunk
+
+        from meridiand._kb import KbStore
+
+        store = KbStore(tmp_path / "kb.db")
+        store.upsert_chunks(
+            "/v.md",
+            "s",
+            [Chunk(file_path="/v.md", kind="text", content="hi", start_line=1, end_line=1)],
+        )
+        # scope=None
+        store.vector_search("hi", None, limit=5)
+
+    async def test_kb_index_skips_failed_file(self, tmp_path: Path) -> None:
+        """Per-file index failure is silently skipped (lines 415-416)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._kb import KbIndexRequest, make_kb_router
+
+        router = make_kb_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/x/kb/index"
+            and ("POST" in r.methods or "POST" in (r.methods or []))
+        )
+        # Make workspace point to tmp_path with one file
+        (tmp_path / "fail.md").write_text("content")
+        import os as _os
+
+        old_env = _os.environ.get("MERIDIAN_KB_WORKSPACE")
+        _os.environ["MERIDIAN_KB_WORKSPACE"] = str(tmp_path)
+        try:
+            # Patch indexer.index_file to raise so the per-file except triggers
+            with patch(
+                "meridiand._kb.WorkspaceIndexer.index_file",
+                side_effect=RuntimeError("file fail"),
+            ):
+                req = KbIndexRequest(scope="global")  # no path → workspace scan
+                resp = await handler(req)
+            assert resp is not None
+        finally:
+            if old_env is None:
+                _os.environ.pop("MERIDIAN_KB_WORKSPACE", None)
+            else:
+                _os.environ["MERIDIAN_KB_WORKSPACE"] = old_env
+
+    async def test_kb_index_typed_error_reraised(self, tmp_path: Path) -> None:
+        """KbIndexError raised inside is re-raised verbatim (line 427)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._kb import KbIndexError, KbIndexRequest, make_kb_router
+
+        router = make_kb_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/x/kb/index"
+            and ("POST" in r.methods or "POST" in (r.methods or []))
+        )
+        # Use target_path mode to take the simpler branch
+        (tmp_path / "x.md").write_text("hello")
+        req = KbIndexRequest(scope="global", path=str(tmp_path / "x.md"))
+        with patch(
+            "meridiand._kb._load_status",
+            side_effect=KbIndexError(message="pre", timestamp=pagination_now(), cause=None),
+        ):
+            with pytest.raises(KbIndexError):
+                await handler(req)
+
+    async def test_kb_query_typed_error_reraised(self, tmp_path: Path) -> None:
+        """KbQueryError raised inside is re-raised verbatim (line 525)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._kb import KbQueryError, KbQueryRequest, make_kb_router
+
+        router = make_kb_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/x/kb/query"
+            and ("POST" in r.methods or "POST" in (r.methods or []))
+        )
+        req = KbQueryRequest(query="q", scope="global", limit=5)
+        # Patch _rrf_fuse to raise typed error
+        with patch(
+            "meridiand._kb._rrf_fuse",
+            side_effect=KbQueryError(message="pre", timestamp=pagination_now(), cause=None),
+        ):
+            with pytest.raises(KbQueryError):
+                await handler(req)
+
+
+class TestHookCreateGeneric:
+    async def test_generic_exception_wrapped_to_hook_create_error(self, tmp_path: Path) -> None:
+        """A non-HookInvalidRequestError exception is wrapped (lines 189-210)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._hooks import (
+            FailureMode,
+            HandlerType,
+            HookCreateError,
+            HookCreateRequest,
+            make_hooks_router,
+        )
+
+        # Build the router and extract the inner handler function
+        router = make_hooks_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint for r in router.routes if r.path == "/v1/x/hooks" and "POST" in r.methods
+        )
+        req = HookCreateRequest(
+            event="on_checkpoint",
+            name="test",
+            handler=HandlerType.in_process,
+            timeout_ms=1000,
+            failure_mode=FailureMode.ignore,
+        )
+        with patch("meridiand._hooks.json.dumps", side_effect=RuntimeError("dump boom")):
+            with pytest.raises(HookCreateError):
+                await handler(req)
+
+
 class TestPhaseTransitionTerminal:
     @staticmethod
     def _make_phase_client(storage_root: Path):
