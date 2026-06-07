@@ -1134,6 +1134,136 @@ class TestImportsHandlerWriteErrors:
             with pytest.raises(ImportWriteError):
                 await handler(body)
 
+    def test_hermes_env_translator_metadata_branch(self) -> None:
+        """Covers 738-740 (hermes_env metadata)."""
+        from meridiand._imports import HermesEnvRecord, _translate_hermes_env
+
+        rec = HermesEnvRecord(
+            id="e1",
+            name="env",
+            backend="docker",
+            metadata={"key1": "v1"},
+        )
+        translated, lossy = _translate_hermes_env(rec, now=pagination_now())
+        assert "hermes_meta_key1" in translated["metadata"]
+        assert "metadata" in lossy
+
+    def test_hermes_env_translator_empty_backend(self) -> None:
+        """Covers 731."""
+        from meridiand._imports import HermesEnvRecord, _translate_hermes_env
+
+        rec = HermesEnvRecord(id="e1", name="env", backend="   ")
+        with pytest.raises(ValueError, match="backend"):
+            _translate_hermes_env(rec, now=pagination_now())
+
+    def test_hermes_provider_translator_metadata_branch(self) -> None:
+        """Covers 773, 777, 779-781."""
+        from meridiand._imports import (
+            HermesProviderRecord,
+            _translate_hermes_provider,
+        )
+
+        rec = HermesProviderRecord(
+            id="p1",
+            name="prov",
+            kind="anthropic",
+            model_ids=["claude-opus-4"],
+            metadata={"k": "v"},
+        )
+        translated, lossy = _translate_hermes_provider(rec, now=pagination_now())
+        assert "hermes_meta_k" in translated["metadata"]
+        assert "hermes_model_ids" in translated["metadata"]
+        assert "model_ids_advisory" in lossy
+        assert "metadata" in lossy
+
+    def test_hermes_provider_translator_empty_kind(self) -> None:
+        """Covers 768."""
+        from meridiand._imports import (
+            HermesProviderRecord,
+            _translate_hermes_provider,
+        )
+
+        rec = HermesProviderRecord(id="p1", name="prov", kind="   ")
+        with pytest.raises(ValueError, match="kind"):
+            _translate_hermes_provider(rec, now=pagination_now())
+
+    def test_hermes_session_translator_metadata_and_user_profile(self) -> None:
+        """Covers 807-808, 810-812."""
+        from meridiand._imports import (
+            HermesSessionRecord,
+            _translate_hermes_session,
+        )
+
+        rec = HermesSessionRecord(
+            id="s1",
+            agent_id="a1",
+            created_at="2026-01-01T00:00:00Z",
+            user_profile_id="up_legacy",
+            metadata={"k": "v"},
+        )
+        translated, lossy = _translate_hermes_session(rec, now=pagination_now())
+        assert translated["manifest"]["metadata"]["hermes_meta_k"] == "v"
+        assert "user_profile_id" in lossy
+        assert "metadata" in lossy
+
+    def test_hermes_user_profile_metadata_branch(self) -> None:
+        """Covers 860-862."""
+        from meridiand._imports import (
+            HermesUserProfileRecord,
+            _translate_hermes_user_profile,
+        )
+
+        rec = HermesUserProfileRecord(
+            id="u1",
+            username="user",
+            metadata={"k": "v"},
+        )
+        translated, lossy = _translate_hermes_user_profile(
+            rec, now=pagination_now()
+        )
+        assert "hermes_meta_k" in translated["metadata"]
+        assert "metadata" in lossy
+
+    def test_hermes_cron_translator_metadata_and_invalid_policy(self) -> None:
+        """Covers 894-896, 900-901."""
+        from meridiand._imports import HermesCronRecord, _translate_hermes_cron
+
+        rec = HermesCronRecord(
+            id="c1",
+            session_id="s1",
+            trigger_type="timestamp",
+            timestamp="2026-01-01T00:00:00Z",
+            missed_fires_policy="invalid",
+            metadata={"k": "v"},
+        )
+        translated, lossy = _translate_hermes_cron(rec, now=pagination_now())
+        assert "hermes_meta_k" in translated["metadata"]
+        assert "metadata" in lossy
+        assert "missed_fires_policy_reset" in lossy
+        assert translated["missed_fires_policy"] == "skip"
+
+    def test_hermes_acp_translator_metadata_branch(self) -> None:
+        """Covers 940-942."""
+        from meridiand._imports import HermesAcpRecord, _translate_hermes_acp
+
+        rec = HermesAcpRecord(
+            id="a1",
+            peer_id="p1",
+            base_url="http://e",
+            metadata={"k": "v"},
+        )
+        translated, lossy = _translate_hermes_acp(rec, now=pagination_now())
+        assert "hermes_meta_k" in translated["metadata"]
+        assert "metadata" in lossy
+
+    def test_hermes_acp_translator_empty_base_url(self) -> None:
+        """Covers 936."""
+        from meridiand._imports import HermesAcpRecord, _translate_hermes_acp
+
+        rec = HermesAcpRecord(id="a1", peer_id="p1", base_url="   ")
+        with pytest.raises(ValueError, match="base_url"):
+            _translate_hermes_acp(rec, now=pagination_now())
+
     async def test_hermes_install_write_failure(
         self, tmp_path: Path
     ) -> None:
