@@ -375,6 +375,92 @@ class TestSkillForgePrecisionErrors:
         assert metric is not None
 
 
+class TestSessionsHandlersGenericExceptions:
+    """Cover generic-exception wrapping in _sessions handlers."""
+
+    @staticmethod
+    def _make_router_with_writer(tmp_path: Path):
+        from core_errors import NoopAuditLog
+        from storage_event_log import LocalEventLogWriter
+
+        from meridiand._sessions import make_sessions_router
+
+        writer = LocalEventLogWriter(tmp_path)
+        router = make_sessions_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            event_log=writer,
+        )
+        return router
+
+    async def test_create_session_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        from meridiand._sessions import SessionCreateError, SessionCreateRequest
+
+        router = self._make_router_with_writer(tmp_path)
+        handler = next(
+            r.endpoint for r in router.routes if r.path == "/v1/sessions" and "POST" in r.methods
+        )
+        req = SessionCreateRequest(agent_id="a1")
+        with patch("meridiand._sessions.json.dumps", side_effect=RuntimeError("boom")):
+            with pytest.raises(SessionCreateError):
+                await handler(req)
+
+    async def test_get_session_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        from meridiand._sessions import SessionGetError
+
+        # Pre-create session manifest
+        sd = tmp_path / "sessions" / "s1"
+        sd.mkdir(parents=True)
+        (sd / "manifest.json").write_text(json.dumps({"session_id": "s1"}))
+
+        router = self._make_router_with_writer(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/sessions/{session_id}" and "GET" in r.methods
+        )
+        with patch("meridiand._sessions.json.loads", side_effect=RuntimeError("boom")):
+            with pytest.raises(SessionGetError):
+                await handler("s1")
+
+    async def test_list_threads_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        from meridiand._sessions import ThreadListError
+
+        # Pre-create threads
+        td = tmp_path / "sessions" / "s2" / "threads"
+        td.mkdir(parents=True)
+        (td / "t1.json").write_text(json.dumps({"thread_id": "t1"}))
+
+        router = self._make_router_with_writer(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/threads" in r.path and "GET" in r.methods
+        )
+        with patch("meridiand._sessions.json.loads", side_effect=RuntimeError("boom")):
+            with pytest.raises(ThreadListError):
+                await handler("s2", cursor=None, limit=10)
+
+    async def test_list_messages_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        from meridiand._sessions import MessageListError
+
+        router = self._make_router_with_writer(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/sessions/{session_id}/messages" and "GET" in r.methods
+        )
+        # Patch make_cursor_page since it's called after the JSON parse
+        with patch(
+            "meridiand._sessions.make_cursor_page",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(MessageListError):
+                await handler(
+                    "s3", thread_id=None, role=None, cursor=None, limit=10
+                )
+
+
 class TestManyErrorClassesHttpStatuses:
     """Sweep test for error class http_status across many remaining modules."""
 
