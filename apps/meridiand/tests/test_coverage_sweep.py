@@ -791,6 +791,62 @@ class TestCompactionRouters:
                 await handler()
 
 
+class TestEventsHandlers:
+    """Cover the events.py handler error paths."""
+
+    @staticmethod
+    def _make_router(tmp_path: Path):
+        from core_errors import NoopAuditLog
+
+        from meridiand._events import make_events_router
+
+        return make_events_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+        )
+
+    async def test_session_events_typed_error_reraise(self, tmp_path: Path) -> None:
+        """SessionEventsError raised inside is re-raised (line 299)."""
+        from unittest.mock import MagicMock as _Mm
+
+        from meridiand._events import SessionEventsError
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/sessions/{session_id}/events" and "GET" in r.methods
+        )
+
+        pre = SessionEventsError(message="pre", timestamp=pagination_now(), cause=None)
+        with patch(
+            "meridiand._events.LocalEventLogReader.read_after",
+            side_effect=pre,
+        ):
+            mock_request = _Mm()
+            with pytest.raises(SessionEventsError):
+                await handler("s1", mock_request, since=-1, type=None, stream=False)
+
+    async def test_sdk_events_typed_error_reraise(self, tmp_path: Path) -> None:
+        """SessionEventsError raised inside SDK events is re-raised (line 379)."""
+        from meridiand._events import SessionEventsError
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/sessions/{session_id}/events" and "GET" in r.methods
+        )
+
+        pre = SessionEventsError(message="pre", timestamp=pagination_now(), cause=None)
+        with patch(
+            "meridiand._events.LocalEventLogReader.read_after",
+            side_effect=pre,
+        ):
+            with pytest.raises(SessionEventsError):
+                await handler("s1", limit=10, offset=0)
+
+
 class TestSystemChannelHandlers:
     """Cover generic-exception wrapping in _system_channel endpoints."""
 
