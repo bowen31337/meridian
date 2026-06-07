@@ -791,6 +791,183 @@ class TestCompactionRouters:
                 await handler()
 
 
+class TestAgentsHandlers:
+    """Cover generic-exception wrapping in _agents handlers."""
+
+    @staticmethod
+    def _build_router(tmp_path: Path):
+        from core_errors import NoopAuditLog
+
+        from meridiand._agents import make_agents_router
+
+        return make_agents_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+
+    async def test_create_generic_exception(self, tmp_path: Path) -> None:
+        from meridiand._agents import AgentCreateError, AgentCreateRequest
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/agents" and "POST" in r.methods
+        )
+        req = AgentCreateRequest(name="a", kind="chat", capabilities=["fs.read"])
+        with patch("meridiand._agents.json.dumps", side_effect=RuntimeError("boom")):
+            with pytest.raises(AgentCreateError):
+                await handler(req)
+
+    async def test_list_generic_exception(self, tmp_path: Path) -> None:
+        from meridiand._agents import AgentListError
+
+        d = tmp_path / "agents"
+        d.mkdir()
+        (d / "a1.json").write_text(json.dumps({"id": "a1"}))
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/agents" and "GET" in r.methods
+        )
+        with patch.object(Path, "glob", side_effect=RuntimeError("boom")):
+            with pytest.raises(AgentListError):
+                await handler()
+
+    async def test_get_generic_exception(self, tmp_path: Path) -> None:
+        from meridiand._agents import AgentGetError
+
+        d = tmp_path / "agents"
+        d.mkdir()
+        (d / "a1.json").write_text(json.dumps({"id": "a1"}))
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/agents/{agent_id}" and "GET" in r.methods
+        )
+        with patch("meridiand._agents.json.loads", side_effect=RuntimeError("boom")):
+            with pytest.raises(AgentGetError):
+                await handler("a1")
+
+    async def test_delete_generic_exception(self, tmp_path: Path) -> None:
+        from meridiand._agents import AgentDeleteError
+
+        d = tmp_path / "agents"
+        d.mkdir()
+        (d / "a1.json").write_text(json.dumps({"id": "a1"}))
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/agents/{agent_id}" and "DELETE" in r.methods
+        )
+        with patch("meridiand._agents.json.dumps", side_effect=RuntimeError("boom")):
+            with pytest.raises(AgentDeleteError):
+                await handler("a1")
+
+    async def test_version_create_generic_exception(self, tmp_path: Path) -> None:
+        from meridiand._agents import AgentVersionCreateError, AgentVersionCreateRequest
+
+        d = tmp_path / "agents"
+        d.mkdir()
+        (d / "a1.json").write_text(json.dumps({"id": "a1", "name": "a", "kind": "chat"}))
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/agents/{agent_id}/versions" and "POST" in r.methods
+        )
+        req = AgentVersionCreateRequest(name="v1", kind="chat", capabilities=["fs.read"])
+        with patch("meridiand._agents.json.dumps", side_effect=RuntimeError("boom")):
+            with pytest.raises(AgentVersionCreateError):
+                await handler("a1", req)
+
+    async def test_versions_list_generic_exception(self, tmp_path: Path) -> None:
+        from meridiand._agents import AgentVersionsListError
+
+        d = tmp_path / "agents"
+        d.mkdir()
+        (d / "a1.json").write_text(json.dumps({"id": "a1"}))
+        vd = tmp_path / "agent_versions"
+        vd.mkdir(parents=True)
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/agents/{agent_id}/versions" and "GET" in r.methods
+        )
+        # Patch make_cursor_page (called outside the inner loop)
+        with patch("meridiand._agents.make_cursor_page", side_effect=RuntimeError("boom")):
+            with pytest.raises(AgentVersionsListError):
+                await handler("a1", cursor=None, limit=10)
+
+    def test_extract_validation_message_no_ctx_error(self) -> None:
+        """ValidationError without ctx.error returns err['msg'] (line 98)."""
+        from pydantic import BaseModel, ValidationError
+
+        from meridiand._agents import _extract_validation_message
+
+        class _M(BaseModel):
+            x: int
+
+        with pytest.raises(ValidationError) as ei:
+            _M(x="not an int")  # type: ignore[arg-type]
+        msg = _extract_validation_message(ei.value)
+        assert isinstance(msg, str)
+
+    async def test_version_create_skips_malformed_existing(self, tmp_path: Path) -> None:
+        """A malformed version JSON file is silently skipped during create (786-787)."""
+        from meridiand._agents import AgentVersionCreateRequest
+
+        d = tmp_path / "agents"
+        d.mkdir()
+        (d / "a1.json").write_text(json.dumps({"id": "a1", "name": "a", "kind": "chat"}))
+        vd = tmp_path / "agent_versions"
+        vd.mkdir(parents=True)
+        (vd / "bad.json").write_text("not json {{{")
+        (vd / "v1.json").write_text(
+            json.dumps({"id": "v1", "agent_id": "a1", "version_number": 1})
+        )
+        # Version for DIFFERENT agent — branch 784->781 (agent_id != a1)
+        (vd / "v_other.json").write_text(
+            json.dumps({"id": "v_other", "agent_id": "different_agent", "version_number": 5})
+        )
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/agents/{agent_id}/versions" and "POST" in r.methods
+        )
+        req = AgentVersionCreateRequest(name="v2", kind="chat", capabilities=["fs.read"])
+        resp = await handler("a1", req)
+        assert resp is not None
+
+    async def test_version_get_generic_exception(self, tmp_path: Path) -> None:
+        from meridiand._agents import AgentVersionGetError
+
+        d = tmp_path / "agents"
+        d.mkdir()
+        (d / "a1.json").write_text(json.dumps({"id": "a1"}))
+        vd = tmp_path / "agent_versions"
+        vd.mkdir(parents=True)
+        (vd / "v1.json").write_text(json.dumps({"id": "v1", "agent_id": "a1"}))
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/agents/{agent_id}/versions/{version_id}" and "GET" in r.methods
+        )
+        with patch("meridiand._agents.json.loads", side_effect=RuntimeError("boom")):
+            with pytest.raises(AgentVersionGetError):
+                await handler("a1", "v1")
+
+
 class TestEnvironmentsHelpers:
     def test_referenced_by_agent_skips_malformed(self, tmp_path: Path) -> None:
         from meridiand._environments import _referenced_by_agent
