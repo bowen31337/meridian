@@ -375,6 +375,41 @@ class TestSkillForgePrecisionErrors:
         assert metric is not None
 
 
+class TestAgentsErrors:
+    def test_all_http_statuses(self) -> None:
+        from meridiand._agents import (
+            AgentCreateError,
+            AgentDeleteError,
+            AgentGetError,
+            AgentInvalidRequestError,
+            AgentListError,
+            AgentNotFoundError,
+            AgentVersionCreateError,
+            AgentVersionGetError,
+            AgentVersionNotFoundError,
+            AgentVersionsListError,
+        )
+
+        ts = pagination_now()
+        assert AgentCreateError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert AgentInvalidRequestError(message="m", timestamp=ts).http_status() == 422
+        assert AgentNotFoundError(agent_id="x", timestamp=ts).http_status() == 404
+        assert AgentGetError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert AgentDeleteError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert AgentVersionCreateError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert (
+            AgentVersionNotFoundError(
+                agent_id="a", version_id="v", timestamp=ts
+            ).http_status()
+            == 404
+        )
+        assert AgentVersionGetError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert (
+            AgentVersionsListError(message="m", timestamp=ts, cause=None).http_status() == 500
+        )
+        assert AgentListError(message="m", timestamp=ts, cause=None).http_status() == 500
+
+
 class TestVaultsErrors:
     def test_all_http_statuses(self) -> None:
         from meridiand._vaults import (
