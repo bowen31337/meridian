@@ -291,6 +291,175 @@ class TestCheckpointPerCall:
         assert resp.status_code == 422
 
 
+class TestCursorMiddlewareEdgeCases:
+    async def test_non_http_scope_passthrough(self) -> None:
+        """websocket scope is passed straight through (lines 35-36)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._cursor_middleware import CursorPaginationMiddleware
+
+        called: list[str] = []
+
+        async def _inner(scope: Any, receive: Any, send: Any) -> None:
+            called.append(scope["type"])
+
+        mw = CursorPaginationMiddleware(_inner, audit_log=NoopAuditLog())
+        await mw({"type": "websocket"}, lambda: None, lambda _m: None)
+        assert called == ["websocket"]
+
+    async def test_request_url_skips_non_host_headers(self) -> None:
+        """Headers before 'host' (e.g. 'x-other') are skipped in the loop (76->75)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._cursor_middleware import CursorPaginationMiddleware
+
+        async def _inner(scope: Any, receive: Any, send: Any) -> None:
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"{}", "more_body": False})
+
+        mw = CursorPaginationMiddleware(_inner, audit_log=NoopAuditLog())
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/v1/agents",
+            "query_string": b"",
+            "headers": [
+                (b"x-other", b"first"),  # not host
+                (b"x-second", b"second"),  # not host
+                (b"host", b"api.example.com"),
+            ],
+            "scheme": "http",
+            "server": ("api.example.com", 80),
+        }
+
+        async def _receive() -> dict[str, Any]:
+            return {"type": "http.request"}
+
+        async def _send(_m: Any) -> None:
+            pass
+
+        await mw(scope, _receive, _send)
+
+    async def test_request_url_with_host_header(self) -> None:
+        """A request with Host header builds URL from header (line ~80)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._cursor_middleware import CursorPaginationMiddleware
+
+        async def _inner(scope: Any, receive: Any, send: Any) -> None:
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await send({"type": "http.response.body", "body": b"{}", "more_body": False})
+
+        mw = CursorPaginationMiddleware(_inner, audit_log=NoopAuditLog())
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/v1/agents",
+            "query_string": b"limit=10",
+            "headers": [
+                (b"host", b"api.example.com"),
+                (b"x-other", b"yes"),
+            ],
+            "scheme": "https",
+            "server": ("api.example.com", 443),
+        }
+
+        async def _receive() -> dict[str, Any]:
+            return {"type": "http.request"}
+
+        sent: list[dict[str, Any]] = []
+
+        async def _send(m: Any) -> None:
+            sent.append(m)
+
+        await mw(scope, _receive, _send)
+        assert any(s["type"] == "http.response.start" for s in sent)
+
+    async def test_request_url_without_host_header_falls_back_to_server(self) -> None:
+        """No Host header → URL built from scope server (lines 83-85)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._cursor_middleware import CursorPaginationMiddleware
+
+        async def _inner(scope: Any, receive: Any, send: Any) -> None:
+            await send({"type": "http.response.start", "status": 200, "headers": [
+                (b"x-next-cursor", b"abc"),
+            ]})
+            await send({"type": "http.response.body", "body": b"{}", "more_body": False})
+
+        mw = CursorPaginationMiddleware(_inner, audit_log=NoopAuditLog())
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/v1/agents",
+            "query_string": b"",
+            "headers": [],  # no host
+            "scheme": "http",
+            "server": ("10.0.0.1", 8888),
+        }
+
+        async def _receive() -> dict[str, Any]:
+            return {"type": "http.request"}
+
+        sent: list[dict[str, Any]] = []
+
+        async def _send(m: Any) -> None:
+            sent.append(m)
+
+        await mw(scope, _receive, _send)
+        # Link header should be present
+        start = next(s for s in sent if s["type"] == "http.response.start")
+        header_names = [h[0].decode().lower() for h in start.get("headers", [])]
+        assert "link" in header_names
+
+    async def test_build_link_header_failure_writes_audit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """build_link_header raising writes an audit entry (lines 97-98)."""
+        from core_errors import AuditLog, AuditLogEntry
+
+        from meridiand._cursor_middleware import CursorPaginationMiddleware
+
+        captured: list[AuditLogEntry] = []
+
+        class _Capture(AuditLog):
+            def write(self, e: AuditLogEntry) -> None:
+                captured.append(e)
+
+        async def _inner(scope: Any, receive: Any, send: Any) -> None:
+            await send({"type": "http.response.start", "status": 200, "headers": [
+                (b"x-next-cursor", b"abc"),
+            ]})
+            await send({"type": "http.response.body", "body": b"{}", "more_body": False})
+
+        mw = CursorPaginationMiddleware(_inner, audit_log=_Capture())
+        monkeypatch.setattr(
+            "meridiand._cursor_middleware.build_link_header",
+            lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("link boom")),
+        )
+
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/v1/agents",
+            "query_string": b"",
+            "headers": [(b"host", b"api.example.com")],
+            "scheme": "http",
+            "server": ("api.example.com", 80),
+        }
+
+        async def _receive() -> dict[str, Any]:
+            return {"type": "http.request"}
+
+        async def _send(_m: Any) -> None:
+            pass
+
+        await mw(scope, _receive, _send)
+        assert any(e.event == "cursor.pagination.link.failed" for e in captured), [
+            e.event for e in captured
+        ]
+
+
 class TestSpawnTraceparent:
     async def test_spawn_with_malformed_manifest_json(
         self, tmp_path: Path
