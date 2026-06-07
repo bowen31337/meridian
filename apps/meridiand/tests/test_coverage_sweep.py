@@ -3532,6 +3532,83 @@ class TestSessionsErrors:
         assert SessionGetError(message="m", timestamp=ts, cause=None).http_status() == 500
 
 
+class TestMemoryStoresHelpers:
+    """Cover _weighted_rrf_fuse + _classify_memory helpers."""
+
+    def test_weighted_rrf_fuse(self) -> None:
+        from meridiand._memory_stores import _weighted_rrf_fuse
+
+        chunk1 = {"file_path": "k1", "start_line": 1, "end_line": 2, "content": "c1"}
+        chunk2 = {"file_path": "k2", "start_line": 1, "end_line": 2, "content": "c2"}
+        result = _weighted_rrf_fuse(
+            [([chunk1, chunk2], 1.0), ([chunk2, chunk1], 1.0)],
+            limit=10,
+        )
+        assert len(result) == 2
+
+    async def test_classify_memory_no_candidates(self) -> None:
+        from meridiand._memory_stores import _classify_memory
+
+        result = await _classify_memory(MagicMock(), "k1", "content", candidates=[])
+        assert result.label == "net-new"
+
+    async def test_classify_memory_valid_response(self) -> None:
+        from meridian_sdk_provider.types import TextDeltaEvent
+
+        from meridiand._memory_stores import _classify_memory
+
+        async def _stream(*_a: Any, **_k: Any) -> Any:
+            yield TextDeltaEvent(
+                text=json.dumps({"label": "net-new", "explanation": "ok"})
+            )
+
+        mock_router = MagicMock()
+        mock_router.call = _stream
+        result = await _classify_memory(
+            mock_router,
+            "k1",
+            "content",
+            candidates=[{"file_path": "x", "content": "y"}],
+        )
+        assert result.label == "net-new"
+
+    async def test_classify_memory_invalid_label(self) -> None:
+        from meridian_sdk_provider.types import TextDeltaEvent
+
+        from meridiand._memory_stores import _classify_memory
+
+        async def _stream(*_a: Any, **_k: Any) -> Any:
+            yield TextDeltaEvent(text=json.dumps({"label": "unknown_label"}))
+
+        mock_router = MagicMock()
+        mock_router.call = _stream
+        with pytest.raises(ValueError):
+            await _classify_memory(
+                mock_router,
+                "k1",
+                "content",
+                candidates=[{"file_path": "x", "content": "y"}],
+            )
+
+    async def test_classify_memory_invalid_json(self) -> None:
+        from meridian_sdk_provider.types import TextDeltaEvent
+
+        from meridiand._memory_stores import _classify_memory
+
+        async def _stream(*_a: Any, **_k: Any) -> Any:
+            yield TextDeltaEvent(text="not json")
+
+        mock_router = MagicMock()
+        mock_router.call = _stream
+        with pytest.raises(ValueError):
+            await _classify_memory(
+                mock_router,
+                "k1",
+                "content",
+                candidates=[{"file_path": "x", "content": "y"}],
+            )
+
+
 class TestMemoryStoresQueryWriteHandlers:
     """Cover query_memory_store + write_memory handlers."""
 
