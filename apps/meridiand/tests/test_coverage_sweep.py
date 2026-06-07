@@ -687,6 +687,122 @@ class TestProviderFactory:
         assert router is not None
 
 
+class TestCanvasInteractions:
+    """Cover make_canvas_interactions_router POST endpoint."""
+
+    @staticmethod
+    def _build_router(tmp_path: Path):
+        from core_errors import NoopAuditLog
+        from storage_event_log import LocalEventLogWriter
+
+        from meridiand._canvas_interactions import make_canvas_interactions_router
+
+        writer = LocalEventLogWriter(tmp_path)
+        return make_canvas_interactions_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            event_log=writer,
+        )
+
+    async def test_success_path(self, tmp_path: Path) -> None:
+        from meridiand._canvas_interactions import CanvasInteractionRequest
+
+        sd = tmp_path / "sessions" / "s1"
+        sd.mkdir(parents=True)
+        (sd / "manifest.json").write_text(json.dumps({"session_id": "s1", "thread_id": "t1"}))
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/canvas_interactions" in r.path and "POST" in r.methods
+        )
+        req = CanvasInteractionRequest(
+            kind="form.submit",
+            widget_id="w1",
+            widget_kind="form",
+            payload={"field1": "value1"},
+        )
+        resp = await handler("s1", req)
+        assert resp is not None
+
+    async def test_session_not_found_raises_typed_error(self, tmp_path: Path) -> None:
+        from meridiand._canvas_interactions import (
+            CanvasInteractionRequest,
+            CanvasInteractionSessionNotFoundError,
+        )
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/canvas_interactions" in r.path and "POST" in r.methods
+        )
+        req = CanvasInteractionRequest(
+            kind="form.submit",
+            widget_id="w1",
+            widget_kind="form",
+            payload={},
+        )
+        with pytest.raises(CanvasInteractionSessionNotFoundError):
+            await handler("nonexistent", req)
+
+    async def test_with_existing_thread_manifest(self, tmp_path: Path) -> None:
+        from meridiand._canvas_interactions import CanvasInteractionRequest
+
+        sd = tmp_path / "sessions" / "s2"
+        sd.mkdir(parents=True)
+        (sd / "manifest.json").write_text(json.dumps({"session_id": "s2", "thread_id": "t1"}))
+
+        # Pre-create thread manifest (skips the if-False branch at 187)
+        td = tmp_path / "threads" / "s2" / "t1"
+        td.mkdir(parents=True)
+        (td / "manifest.json").write_text(
+            json.dumps({"id": "t1", "thread_id": "t1", "session_id": "s2", "created_at": "t"})
+        )
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/canvas_interactions" in r.path and "POST" in r.methods
+        )
+        req = CanvasInteractionRequest(
+            kind="button.click",
+            widget_id="w1",
+            widget_kind="button",
+            payload={"value": "click"},
+        )
+        resp = await handler("s2", req)
+        assert resp is not None
+
+    async def test_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        from meridiand._canvas_interactions import (
+            CanvasInteractionError,
+            CanvasInteractionRequest,
+        )
+
+        sd = tmp_path / "sessions" / "s3"
+        sd.mkdir(parents=True)
+        (sd / "manifest.json").write_text(json.dumps({"session_id": "s3", "thread_id": "t1"}))
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/canvas_interactions" in r.path and "POST" in r.methods
+        )
+        req = CanvasInteractionRequest(
+            kind="form.submit",
+            widget_id="w1",
+            widget_kind="form",
+            payload={},
+        )
+        with patch("meridiand._canvas_interactions.json.dumps", side_effect=RuntimeError("boom")):
+            with pytest.raises(CanvasInteractionError):
+                await handler("s3", req)
+
+
 class TestBudgetOverrunDiscipline:
     """Cover _build_soft_overrun_stats, _build_hard_transition_stats, and the router."""
 
