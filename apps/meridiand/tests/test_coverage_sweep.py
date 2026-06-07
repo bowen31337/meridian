@@ -291,6 +291,396 @@ class TestCheckpointPerCall:
         assert resp.status_code == 422
 
 
+class TestChannelDriverProtocolImpls:
+    """Cover NoopSecretResolver + NoopSocketModeClient + small protocol impls."""
+
+    def test_slack_noop_secret_resolver(self) -> None:
+        from meridiand._slack_channel_driver import NoopSecretResolver
+
+        assert NoopSecretResolver().resolve("any") is None
+
+    async def test_slack_noop_socket_mode_client(self) -> None:
+        from meridiand._slack_channel_driver import NoopSocketModeClient
+
+        c = NoopSocketModeClient()
+        await c.connect("app", "bot")
+        await c.disconnect()
+
+    def test_discord_noop_secret_resolver(self) -> None:
+        from meridiand._discord_channel_driver import NoopSecretResolver
+
+        assert NoopSecretResolver().resolve("x") is None
+
+    async def test_discord_noop_gateway_client(self) -> None:
+        from meridiand._discord_channel_driver import NoopGatewayClient
+
+        c = NoopGatewayClient()
+        await c.connect("tok", 0)
+        await c.disconnect()
+
+    def test_telegram_noop_secret_resolver(self) -> None:
+        from meridiand._telegram_channel_driver import NoopSecretResolver
+
+        assert NoopSecretResolver().resolve("y") is None
+
+    async def test_telegram_noop_long_poll_client(self) -> None:
+        from meridiand._telegram_channel_driver import NoopLongPollClient
+
+        c = NoopLongPollClient()
+        await c.poll("tok", 30)
+        await c.stop()
+
+    def test_webhook_noop_secret_resolver(self) -> None:
+        from meridiand._webhook_channel_driver import NoopSecretResolver
+
+        assert NoopSecretResolver().resolve("z") is None
+
+    async def test_slack_default_http_client_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When http_client=None, _slack_post creates AsyncClient (202-203)."""
+        import httpx
+
+        from meridiand._slack_channel_driver import (
+            NoopSecretResolver,
+            NoopSocketModeClient,
+            SlackChannelDriver,
+        )
+
+        # Patch httpx.AsyncClient to return a mock that records the call
+        called: list[str] = []
+
+        class _MockClient:
+            def __init__(self, *a: Any, **kw: Any) -> None:
+                pass
+
+            async def __aenter__(self) -> Any:
+                return self
+
+            async def __aexit__(self, *_a: Any) -> None:
+                return None
+
+            async def post(self, url: str, *, content: bytes, headers: dict[str, str]) -> httpx.Response:
+                called.append(url)
+                return httpx.Response(200, json={"ok": True, "ts": "1.0"})
+
+        monkeypatch.setattr("meridiand._slack_channel_driver.httpx.AsyncClient", _MockClient)
+        driver = SlackChannelDriver(
+            storage_root=tmp_path,
+            secret_resolver=NoopSecretResolver(),
+            socket_mode_client=NoopSocketModeClient(),
+        )
+        resp = await driver._slack_post("chat.postMessage", {"x": 1}, "token")
+        assert resp.status_code == 200
+        assert called
+
+    async def test_discord_default_http_client_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When http_client=None, _discord_post creates AsyncClient (212-213)."""
+        import httpx
+
+        from meridiand._discord_channel_driver import (
+            DiscordChannelDriver,
+            NoopGatewayClient,
+            NoopSecretResolver,
+        )
+
+        class _MockClient:
+            def __init__(self, *a: Any, **kw: Any) -> None:
+                pass
+
+            async def __aenter__(self) -> Any:
+                return self
+
+            async def __aexit__(self, *_a: Any) -> None:
+                return None
+
+            async def post(self, url: str, *, content: bytes, headers: dict[str, str]) -> httpx.Response:
+                return httpx.Response(200, json={"id": "msg-1"})
+
+        monkeypatch.setattr("meridiand._discord_channel_driver.httpx.AsyncClient", _MockClient)
+        driver = DiscordChannelDriver(
+            storage_root=tmp_path,
+            secret_resolver=NoopSecretResolver(),
+            gateway_client=NoopGatewayClient(),
+        )
+        resp = await driver._discord_post("http://example.com/x", {"a": 1}, "token")
+        assert resp.status_code == 200
+
+    async def test_telegram_default_http_client_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import httpx
+
+        from meridiand._telegram_channel_driver import (
+            NoopLongPollClient,
+            NoopSecretResolver,
+            TelegramChannelDriver,
+        )
+
+        class _MockClient:
+            def __init__(self, *a: Any, **kw: Any) -> None:
+                pass
+
+            async def __aenter__(self) -> Any:
+                return self
+
+            async def __aexit__(self, *_a: Any) -> None:
+                return None
+
+            async def post(self, url: str, *, content: bytes, headers: dict[str, str]) -> httpx.Response:
+                return httpx.Response(200, json={"ok": True, "result": {"message_id": 1}})
+
+        monkeypatch.setattr("meridiand._telegram_channel_driver.httpx.AsyncClient", _MockClient)
+        driver = TelegramChannelDriver(
+            storage_root=tmp_path,
+            secret_resolver=NoopSecretResolver(),
+            long_poll_client=NoopLongPollClient(),
+        )
+        resp = await driver._telegram_post("http://example.com/x", {"a": 1}, "token")
+        assert resp.status_code == 200
+
+    def test_telegram_payload_thread_id_invalid_int(self, tmp_path: Path) -> None:
+        """thread_id can't be parsed as int → kept as string (lines 224-225)."""
+        from sdk_channel import SendRequest
+
+        from meridiand._telegram_channel_driver import (
+            NoopLongPollClient,
+            NoopSecretResolver,
+            TelegramChannelDriver,
+        )
+
+        driver = TelegramChannelDriver(
+            storage_root=tmp_path,
+            secret_resolver=NoopSecretResolver(),
+            long_poll_client=NoopLongPollClient(),
+        )
+        req = SendRequest(
+            channel_id="c1",
+            channel_kind="meridian.telegram",
+            session_id="s1",
+            recipient="user",
+            content="hi",
+            content_type="text",
+            thread_id="not-int",
+        )
+        payload = driver._build_send_message_payload(req, "chat-1")
+        assert payload["reply_to_message_id"] == "not-int"
+
+    async def test_telegram_channel_failure_reraised(self, tmp_path: Path) -> None:
+        from sdk_channel import ChannelFailure, SendRequest
+
+        from meridiand._telegram_channel_driver import (
+            NoopLongPollClient,
+            NoopSecretResolver,
+            TelegramChannelDriver,
+        )
+
+        driver = TelegramChannelDriver(
+            storage_root=tmp_path,
+            secret_resolver=NoopSecretResolver(),
+            long_poll_client=NoopLongPollClient(),
+        )
+        chan_dir = tmp_path / "channels"
+        chan_dir.mkdir(parents=True)
+        (chan_dir / "c1.json").write_text(
+            json.dumps({"config": {"telegram_chat_id": "C1"}})
+        )
+
+        original = ChannelFailure(
+            code="X", message="m", channel_id="c1", channel_kind="meridian.telegram",
+            session_id="s1", timestamp=pagination_now(),
+        )
+
+        async def _boom(*_a: Any, **_k: Any) -> None:
+            raise original
+
+        driver._telegram_post = _boom  # type: ignore[method-assign]
+        driver._resolve_bot_token = lambda *a, **k: "tok"  # type: ignore[method-assign]
+        req = SendRequest(
+            channel_id="c1", channel_kind="meridian.telegram", session_id="s1",
+            recipient="user", content="hi", content_type="text",
+        )
+        with pytest.raises(ChannelFailure):
+            await driver.send(req)
+
+    async def test_webhook_channel_default_http_client_path_with_thread_id(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No http_client + thread_id set → payload['thread_id'] (144) + else branch (183-184)."""
+        import httpx
+
+        from sdk_channel import SendRequest
+
+        from meridiand._webhook_channel_driver import (
+            NoopSecretResolver,
+            WebhookChannelDriver,
+        )
+
+        class _MockClient:
+            def __init__(self, *a: Any, **kw: Any) -> None:
+                pass
+
+            async def __aenter__(self) -> Any:
+                return self
+
+            async def __aexit__(self, *_a: Any) -> None:
+                return None
+
+            async def post(self, url: str, *, content: bytes, headers: dict[str, str]) -> httpx.Response:
+                return httpx.Response(200)
+
+        monkeypatch.setattr(
+            "meridiand._webhook_channel_driver.httpx.AsyncClient", _MockClient
+        )
+        driver = WebhookChannelDriver(
+            storage_root=tmp_path,
+            secret_resolver=NoopSecretResolver(),
+        )
+        chan_dir = tmp_path / "channels"
+        chan_dir.mkdir(parents=True)
+        (chan_dir / "c1.json").write_text(
+            json.dumps({"config": {"outbound_url": "http://example.com/hook"}})
+        )
+
+        req = SendRequest(
+            channel_id="c1", channel_kind="meridian.webhook", session_id="s1",
+            recipient="r", content="hi", content_type="text",
+            thread_id="thread-1",
+        )
+        resp = await driver.send(req)
+        assert resp is not None
+
+    async def test_webhook_channel_failure_reraised(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ChannelFailure raised inside send is re-raised (line 192)."""
+        from sdk_channel import ChannelFailure, SendRequest
+
+        from meridiand._webhook_channel_driver import (
+            NoopSecretResolver,
+            WebhookChannelDriver,
+        )
+
+        # Patch httpx.AsyncClient to raise ChannelFailure
+        original = ChannelFailure(
+            code="X", message="m", channel_id="c1", channel_kind="meridian.webhook",
+            session_id="s1", timestamp=pagination_now(),
+        )
+
+        class _BoomClient:
+            def __init__(self, *a: Any, **kw: Any) -> None:
+                pass
+
+            async def __aenter__(self) -> Any:
+                return self
+
+            async def __aexit__(self, *_a: Any) -> None:
+                return None
+
+            async def post(self, *_a: Any, **_k: Any) -> Any:
+                raise original
+
+        monkeypatch.setattr(
+            "meridiand._webhook_channel_driver.httpx.AsyncClient", _BoomClient
+        )
+
+        driver = WebhookChannelDriver(
+            storage_root=tmp_path,
+            secret_resolver=NoopSecretResolver(),
+        )
+        chan_dir = tmp_path / "channels"
+        chan_dir.mkdir(parents=True)
+        (chan_dir / "c1.json").write_text(
+            json.dumps({"config": {"outbound_url": "http://example.com/hook"}})
+        )
+
+        req = SendRequest(
+            channel_id="c1", channel_kind="meridian.webhook", session_id="s1",
+            recipient="r", content="hi", content_type="text",
+        )
+        with pytest.raises(ChannelFailure):
+            await driver.send(req)
+
+    async def test_slack_channel_failure_reraised(self, tmp_path: Path) -> None:
+        from sdk_channel import ChannelFailure, SendRequest
+
+        from meridiand._slack_channel_driver import (
+            NoopSecretResolver,
+            NoopSocketModeClient,
+            SlackChannelDriver,
+        )
+
+        driver = SlackChannelDriver(
+            storage_root=tmp_path,
+            secret_resolver=NoopSecretResolver(),
+            socket_mode_client=NoopSocketModeClient(),
+        )
+        chan_dir = tmp_path / "channels"
+        chan_dir.mkdir(parents=True)
+        (chan_dir / "c1.json").write_text(
+            json.dumps({"config": {"slack_channel_id": "C1"}})
+        )
+
+        original = ChannelFailure(
+            code="X", message="m", channel_id="c1", channel_kind="meridian.slack",
+            session_id="s1", timestamp=pagination_now(),
+        )
+
+        async def _boom(*_a: Any, **_k: Any) -> None:
+            raise original
+
+        driver._slack_post = _boom  # type: ignore[method-assign]
+        driver._resolve_bot_token = lambda *a, **k: "tok"  # type: ignore[method-assign]
+        req = SendRequest(
+            channel_id="c1", channel_kind="meridian.slack", session_id="s1",
+            recipient="user", content="hi", content_type="text",
+        )
+        with pytest.raises(ChannelFailure):
+            await driver.send(req)
+
+    async def test_discord_channel_failure_reraised(self, tmp_path: Path) -> None:
+        """ChannelFailure raised inside send is re-raised verbatim (line 359)."""
+        from sdk_channel import ChannelFailure, SendRequest
+
+        from meridiand._discord_channel_driver import (
+            DiscordChannelDriver,
+            NoopGatewayClient,
+            NoopSecretResolver,
+        )
+
+        driver = DiscordChannelDriver(
+            storage_root=tmp_path,
+            secret_resolver=NoopSecretResolver(),
+            gateway_client=NoopGatewayClient(),
+        )
+        # Pre-create channel config so _load_driver_config doesn't fail
+        chan_dir = tmp_path / "channels"
+        chan_dir.mkdir(parents=True)
+        (chan_dir / "c1.json").write_text(
+            json.dumps({"config": {"discord_channel_id": "C1"}})
+        )
+
+        original = ChannelFailure(
+            code="X", message="m", channel_id="c1", channel_kind="meridian.discord",
+            session_id="s1", timestamp=pagination_now(),
+        )
+
+        async def _boom(*_a: Any, **_k: Any) -> None:
+            raise original
+
+        driver._discord_post = _boom  # type: ignore[method-assign]
+        # Also stub token resolution to bypass secret lookup
+        driver._resolve_bot_token = lambda *a, **k: "tok"  # type: ignore[method-assign]
+        req = SendRequest(
+            channel_id="c1", channel_kind="meridian.discord", session_id="s1",
+            recipient="user", content="hi", content_type="text",
+        )
+        with pytest.raises(ChannelFailure):
+            await driver.send(req)
+
+
 class TestWakeHelpers:
     def test_load_active_skills_skips_malformed(self, tmp_path: Path) -> None:
         """Malformed activation JSON is silently skipped (lines 86-87)."""
