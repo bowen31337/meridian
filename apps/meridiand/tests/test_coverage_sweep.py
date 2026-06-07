@@ -291,6 +291,43 @@ class TestCheckpointPerCall:
         assert resp.status_code == 422
 
 
+class TestParallelRunsErrors:
+    def test_parallel_runs_error_http_status(self) -> None:
+        from meridiand._parallel_runs import ParallelRunsError
+
+        assert ParallelRunsError(message="m", timestamp="t", cause=None).http_status() == 422
+
+    def test_budget_exceeded_error_http_status(self) -> None:
+        from meridiand._parallel_runs import BudgetExceededError
+
+        assert BudgetExceededError(message="m", timestamp="t").http_status() == 422
+
+    async def test_parallel_runs_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        """Generic exception inside parallel runs is wrapped (282-302)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._parallel_runs import (
+            ParallelRunsError,
+            ParallelRunsRequest,
+            make_parallel_runs_router,
+        )
+
+        router = make_parallel_runs_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+        )
+        handler = next(
+            r.endpoint for r in router.routes if "/parallel_runs" in r.path and "POST" in r.methods
+        )
+        req = ParallelRunsRequest(children=[])
+        with patch(
+            "meridiand._parallel_runs._run_children_parallel",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(ParallelRunsError):
+                await handler("s1", req)
+
+
 class TestRecoverySoakHelpers:
     def test_crash_recovery_attempt_success(self, tmp_path: Path) -> None:
         """_attempt_recovery success path returns True when phase not in stop phases (110)."""
