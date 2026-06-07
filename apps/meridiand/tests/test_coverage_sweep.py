@@ -291,6 +291,143 @@ class TestCheckpointPerCall:
         assert resp.status_code == 422
 
 
+class TestCronSchedulerErrors:
+    def test_cron_fire_error_http_status(self) -> None:
+        from meridiand._cron_scheduler import CronFireError
+
+        assert CronFireError(message="m", timestamp="t", cause=None).http_status() == 500
+
+    async def test_scheduler_with_no_cron_dir(self, tmp_path: Path) -> None:
+        """No cron_dir → if-False branch (209->277)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._cron_scheduler import run_cron_scheduler_loop
+
+        # tmp_path has no cron/ subdir
+        task = asyncio.create_task(
+            run_cron_scheduler_loop(
+                storage_root=tmp_path,
+                audit_log=NoopAuditLog(),
+                check_interval_seconds=0.01,
+                missed_fires_policy="catch_up",
+            )
+        )
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    async def test_scheduler_fires_timestamp_trigger(self, tmp_path: Path) -> None:
+        """timestamp trigger took if branch, fall back to loop (247->212)."""
+        from datetime import UTC, datetime, timedelta
+
+        from core_errors import NoopAuditLog
+
+        from meridiand._cron_scheduler import run_cron_scheduler_loop
+
+        cron_dir = tmp_path / "cron"
+        cron_dir.mkdir()
+        past = (datetime.now(UTC) - timedelta(seconds=60)).isoformat()
+        (cron_dir / "cron_ts.json").write_text(
+            json.dumps(
+                {
+                    "id": "ts",
+                    "status": "active",
+                    "trigger_type": "timestamp",
+                    "next_fire_at": past,
+                    "session_id": "s",
+                    "task": {},
+                }
+            )
+        )
+
+        task = asyncio.create_task(
+            run_cron_scheduler_loop(
+                storage_root=tmp_path,
+                audit_log=NoopAuditLog(),
+                check_interval_seconds=0.01,
+                missed_fires_policy="catch_up",
+            )
+        )
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    async def test_scheduler_skips_malformed_next_fire_at(self, tmp_path: Path) -> None:
+        """Cron with malformed next_fire_at is skipped (lines 229-230)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._cron_scheduler import run_cron_scheduler_loop
+
+        cron_dir = tmp_path / "cron"
+        cron_dir.mkdir(parents=True)
+        (cron_dir / "cron_bad_ts.json").write_text(
+            json.dumps(
+                {
+                    "id": "bad_ts",
+                    "status": "active",
+                    "trigger_type": "interval",
+                    "next_fire_at": "not-a-timestamp",
+                    "interval": "1s",
+                    "session_id": "s",
+                    "task": {},
+                }
+            )
+        )
+
+        task = asyncio.create_task(
+            run_cron_scheduler_loop(
+                storage_root=tmp_path,
+                audit_log=NoopAuditLog(),
+                check_interval_seconds=0.01,
+                missed_fires_policy="catch_up",
+            )
+        )
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    async def test_scheduler_skips_malformed_interval(self, tmp_path: Path) -> None:
+        """Cron with malformed interval string is skipped (lines 251-252)."""
+        from datetime import UTC, datetime, timedelta
+
+        from core_errors import NoopAuditLog
+
+        from meridiand._cron_scheduler import run_cron_scheduler_loop
+
+        cron_dir = tmp_path / "cron"
+        cron_dir.mkdir(parents=True)
+        past = (datetime.now(UTC) - timedelta(seconds=60)).isoformat()
+        (cron_dir / "cron_bad_int.json").write_text(
+            json.dumps(
+                {
+                    "id": "bad_int",
+                    "status": "active",
+                    "trigger_type": "interval",
+                    "next_fire_at": past,
+                    "interval": "not-a-duration",
+                    "session_id": "s",
+                    "task": {},
+                }
+            )
+        )
+
+        task = asyncio.create_task(
+            run_cron_scheduler_loop(
+                storage_root=tmp_path,
+                audit_log=NoopAuditLog(),
+                check_interval_seconds=0.01,
+                missed_fires_policy="catch_up",
+            )
+        )
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
 class TestResumeGenericException:
     async def test_resume_zero_model_calls_keeps_phase(self, tmp_path: Path) -> None:
         """_run_harness returning (0, _) skips the phase='idle' assignment (123->149)."""

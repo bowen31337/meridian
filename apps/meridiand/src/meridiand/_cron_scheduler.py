@@ -244,7 +244,8 @@ async def run_cron_scheduler_loop(
                     resource["next_fire_at"] = None
                     cron_file.write_text(json.dumps(resource))
 
-                elif trigger_type == "interval":
+                else:
+                    # trigger_type == "interval" (guaranteed by the guard above)
                     interval_str = resource.get("interval", "")
                     try:
                         delta = _parse_duration(interval_str)
