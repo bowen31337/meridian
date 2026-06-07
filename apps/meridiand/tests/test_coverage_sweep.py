@@ -2185,6 +2185,60 @@ class TestVaultsHandlers:
             with pytest.raises(VaultDeleteError):
                 await handler("v1")
 
+    async def test_store_secret_encrypted_file_no_backend(self, tmp_path: Path) -> None:
+        """encrypted_file vault but no vault_backend configured (569-579)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._vaults import (
+            VaultSecretStoreError,
+            VaultSecretStoreRequest,
+            make_vaults_router,
+        )
+
+        vd = tmp_path / "vaults"
+        vd.mkdir(parents=True)
+        (vd / "v_enc.json").write_text(
+            json.dumps({"id": "v_enc", "name": "v", "backend": "encrypted_file"})
+        )
+
+        # No backend
+        router = make_vaults_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            vault_backend=None,
+            os_keychain_backend=None,
+        )
+        handler = next(
+            r.endpoint for r in router.routes if "/secrets" in r.path and "POST" in r.methods
+        )
+        req = VaultSecretStoreRequest(key="k", value="v")
+        with pytest.raises(VaultSecretStoreError):
+            await handler("v_enc", req)
+
+    async def test_store_secret_conflict(self, tmp_path: Path) -> None:
+        """Secret already exists raises VaultSecretConflictError."""
+        from meridiand._vaults import (
+            VaultSecretConflictError,
+            VaultSecretStoreRequest,
+        )
+
+        vd = tmp_path / "vaults"
+        vd.mkdir(parents=True)
+        (vd / "v1.json").write_text(
+            json.dumps({"id": "v1", "name": "v", "backend": "os_keychain"})
+        )
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint for r in router.routes if "/secrets" in r.path and "POST" in r.methods
+        )
+        req = VaultSecretStoreRequest(key="k1", value="v1")
+        # First store succeeds
+        await handler("v1", req)
+        # Second store conflicts
+        with pytest.raises(VaultSecretConflictError):
+            await handler("v1", req)
+
 
 class TestVaultsErrors:
     def test_all_http_statuses(self) -> None:
