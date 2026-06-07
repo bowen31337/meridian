@@ -375,6 +375,77 @@ class TestSkillForgePrecisionErrors:
         assert metric is not None
 
 
+class TestUserProfilesErrors:
+    """http_status for all user_profile error classes."""
+
+    def test_all_http_statuses(self) -> None:
+        from meridiand._user_profiles import (
+            UserProfileCreateError,
+            UserProfileDeleteError,
+            UserProfileGetError,
+            UserProfileHasActiveSessionsError,
+            UserProfileInvalidRequestError,
+            UserProfileIsPrimaryError,
+            UserProfileNotFoundError,
+            UserProfileUpdateError,
+        )
+
+        ts = pagination_now()
+        assert UserProfileCreateError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert UserProfileInvalidRequestError(message="m", timestamp=ts).http_status() == 422
+        assert UserProfileNotFoundError(user_profile_id="x", timestamp=ts).http_status() == 404
+        assert UserProfileIsPrimaryError(user_profile_id="x", timestamp=ts).http_status() == 409
+        assert (
+            UserProfileHasActiveSessionsError(
+                user_profile_id="x", timestamp=ts
+            ).http_status()
+            == 409
+        )
+        assert UserProfileDeleteError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert UserProfileUpdateError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert UserProfileGetError(message="m", timestamp=ts, cause=None).http_status() == 500
+
+
+class TestSkillActivationsErrors:
+    def test_all_http_statuses(self) -> None:
+        from meridiand._skill_activations import (
+            SkillActivationApproveError,
+            SkillActivationConflictError,
+            SkillActivationError,
+            SkillActivationListError,
+            SkillActivationNotFoundError,
+            SkillActivationRequestError,
+            SkillActivationRevokeError,
+            SkillNotFoundError,
+        )
+
+        ts = pagination_now()
+        assert SkillActivationRequestError(message="m", timestamp=ts).http_status() == 422
+        assert SkillNotFoundError(message="m", timestamp=ts).http_status() == 404
+        assert SkillActivationNotFoundError(message="m", timestamp=ts).http_status() == 404
+        assert SkillActivationConflictError(message="m", timestamp=ts).http_status() == 409
+        assert SkillActivationError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert SkillActivationApproveError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert SkillActivationRevokeError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert SkillActivationListError(message="m", timestamp=ts, cause=None).http_status() == 500
+
+
+class TestMemoryStoresErrors:
+    def test_all_http_statuses(self) -> None:
+        from meridiand._memory_stores import (
+            MemoryStoreCreateError,
+            MemoryStoreInvalidRequestError,
+            MemoryStoreNotFoundError,
+            MemoryStoreQueryError,
+        )
+
+        ts = pagination_now()
+        assert MemoryStoreCreateError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert MemoryStoreInvalidRequestError(message="m", timestamp=ts).http_status() == 422
+        assert MemoryStoreNotFoundError(message="m", timestamp=ts).http_status() == 404
+        assert MemoryStoreQueryError(message="m", timestamp=ts, cause=None).http_status() == 500
+
+
 class TestMemoryAnniversaryErrors:
     def test_today_helper(self) -> None:
         from meridiand._memory_anniversary import _today
