@@ -291,6 +291,93 @@ class TestCheckpointPerCall:
         assert resp.status_code == 422
 
 
+class TestVaultBackendEncryptedFile:
+    def test_unlock_error_http_status(self) -> None:
+        from meridiand._vault_backend_encrypted_file import VaultBackendUnlockError
+
+        assert (
+            VaultBackendUnlockError(message="m", timestamp="t", cause=None).http_status() == 500
+        )
+
+    def test_unlock_with_passphrase_failure_wraps(self, tmp_path: Path) -> None:
+        from meridiand._vault_backend_encrypted_file import (
+            EncryptedFileVaultBackend,
+            VaultBackendUnlockError,
+        )
+
+        backend = EncryptedFileVaultBackend(storage_root=tmp_path)
+        with patch(
+            "pyrage.passphrase.encrypt",
+            side_effect=RuntimeError("encrypt boom"),
+        ):
+            with pytest.raises(VaultBackendUnlockError):
+                backend.unlock_with_passphrase("secret-passphrase")
+
+    def test_unlock_with_key_file_failure_wraps(self, tmp_path: Path) -> None:
+        from meridiand._vault_backend_encrypted_file import (
+            EncryptedFileVaultBackend,
+            VaultBackendUnlockError,
+        )
+
+        key_file = tmp_path / "bad.key"
+        key_file.write_text("not a key")
+        backend = EncryptedFileVaultBackend(storage_root=tmp_path)
+        with pytest.raises(VaultBackendUnlockError):
+            backend.unlock_with_key_file(key_file)
+
+    def test_is_unlocked_property(self, tmp_path: Path) -> None:
+        from meridiand._vault_backend_encrypted_file import EncryptedFileVaultBackend
+
+        backend = EncryptedFileVaultBackend(storage_root=tmp_path)
+        assert backend.is_unlocked is False
+        backend.unlock_with_passphrase("xx")
+        assert backend.is_unlocked is True
+
+    def test_update_secret(self, tmp_path: Path) -> None:
+        from meridiand._vault_backend_encrypted_file import EncryptedFileVaultBackend
+
+        backend = EncryptedFileVaultBackend(storage_root=tmp_path)
+        backend.unlock_with_passphrase("xx")
+        backend.store_secret("v1", "k1", "old", "2024-01-01T00:00:00Z")
+        backend.update_secret("v1", "k1", {"value": "new", "key": "k1", "vault_id": "v1"})
+        assert backend.get_secret("v1", "k1")["value"] == "new"
+
+    def test_full_round_trip_passphrase(self, tmp_path: Path) -> None:
+        """End-to-end store/list/delete with passphrase mode exercises _encrypt/_decrypt."""
+        from meridiand._vault_backend_encrypted_file import EncryptedFileVaultBackend
+
+        backend = EncryptedFileVaultBackend(storage_root=tmp_path)
+        backend.unlock_with_passphrase("test-passphrase")
+        backend.store_secret("v1", "k1", "val1", "2024-01-01T00:00:00Z")
+        assert backend.secret_exists("v1", "k1") is True
+        listed = backend.list_secrets("v1")
+        assert any(r["key"] == "k1" for r in listed)
+        rec = backend.get_secret("v1", "k1")
+        assert rec is not None
+        assert rec["value"] == "val1"
+        assert backend.delete_secret("v1", "k1") is True
+        assert backend.delete_secret("v1", "k1") is False  # already gone
+        assert backend.secret_exists("v1", "k1") is False
+
+    def test_unlock_with_key_file_success_and_round_trip(self, tmp_path: Path) -> None:
+        """Generate a real age key and exercise the key_file mode encrypt/decrypt path."""
+        import pyrage  # type: ignore[import-untyped]
+
+        from meridiand._vault_backend_encrypted_file import EncryptedFileVaultBackend
+
+        # Generate a fresh age identity
+        identity = pyrage.x25519.Identity.generate()
+        key_file = tmp_path / "age.key"
+        key_file.write_text(str(identity))
+
+        backend = EncryptedFileVaultBackend(storage_root=tmp_path)
+        backend.unlock_with_key_file(key_file)
+        backend.store_secret("v2", "k2", "val2", "2024-01-01T00:00:00Z")
+        rec = backend.get_secret("v2", "k2")
+        assert rec is not None
+        assert rec["value"] == "val2"
+
+
 class TestHarnessPoolHelpers:
     def test_harness_pool_error_http_status(self) -> None:
         from meridiand._harness_pool import HarnessPoolError
