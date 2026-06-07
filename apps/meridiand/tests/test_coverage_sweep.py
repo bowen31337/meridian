@@ -291,6 +291,176 @@ class TestCheckpointPerCall:
         assert resp.status_code == 422
 
 
+class TestSpawnTraceparent:
+    async def test_spawn_with_malformed_manifest_json(
+        self, tmp_path: Path
+    ) -> None:
+        """Manifest is invalid JSON → except swallows, _child_links empty (186-187)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._spawn import make_spawn_router, SpawnRequest
+
+        sessions = tmp_path / "sessions" / "parent"
+        sessions.mkdir(parents=True)
+        (sessions / "manifest.json").write_text("not json {{{")
+
+        router = make_spawn_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/x/sessions/{session_id}/spawn" and "POST" in r.methods
+        )
+        req = SpawnRequest(parent_capabilities=["agent.spawn", "fs.read"], child_capabilities=["fs.read"])
+        resp = await handler("parent", req)
+        assert resp is not None
+
+    async def test_spawn_manifest_without_traceparent(
+        self, tmp_path: Path
+    ) -> None:
+        """Manifest exists but has no traceparent → if False, skip (176->190)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._spawn import make_spawn_router, SpawnRequest
+
+        sessions = tmp_path / "sessions" / "no_tp"
+        sessions.mkdir(parents=True)
+        (sessions / "manifest.json").write_text(json.dumps({"other_field": "x"}))
+
+        router = make_spawn_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/x/sessions/{session_id}/spawn" and "POST" in r.methods
+        )
+        req = SpawnRequest(
+            parent_capabilities=["agent.spawn", "fs.read"],
+            child_capabilities=["fs.read"],
+        )
+        resp = await handler("no_tp", req)
+        assert resp is not None
+
+    async def test_spawn_without_parent_manifest(
+        self, tmp_path: Path
+    ) -> None:
+        """No parent manifest → if-False branch (176->190)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._spawn import make_spawn_router, SpawnRequest
+
+        # No sessions dir at all
+        router = make_spawn_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/x/sessions/{session_id}/spawn" and "POST" in r.methods
+        )
+        req = SpawnRequest(
+            parent_capabilities=["agent.spawn", "fs.read"],
+            child_capabilities=["fs.read"],
+        )
+        resp = await handler("no_manifest", req)
+        assert resp is not None
+
+    async def test_spawn_with_valid_but_invalid_context_traceparent(
+        self, tmp_path: Path
+    ) -> None:
+        """Parent has well-formed but invalid traceparent → is_valid False (179->190)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._spawn import make_spawn_router, SpawnRequest
+
+        sessions = tmp_path / "sessions" / "parent2"
+        sessions.mkdir(parents=True)
+        # All zeros — well-formed but `is_valid` returns False
+        (sessions / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "traceparent": "00-00000000000000000000000000000000-0000000000000000-00"
+                }
+            )
+        )
+
+        router = make_spawn_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/x/sessions/{session_id}/spawn" and "POST" in r.methods
+        )
+        req = SpawnRequest(parent_capabilities=["agent.spawn", "fs.read"], child_capabilities=["fs.read"])
+        resp = await handler("parent2", req)
+        assert resp is not None
+
+
+class TestSystemAuditMiddlewareReraise:
+    async def test_no_status_captured_returns_early(self, tmp_path: Path) -> None:
+        """If inner app completes without sending response.start, return early (line 207)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._system_audit_middleware import SystemAuditMiddleware
+
+        async def _silent(scope: Any, receive: Any, send: Any) -> None:
+            return  # never sends
+
+        mw = SystemAuditMiddleware(_silent, audit_log=NoopAuditLog())
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/skills",
+            "query_string": b"",
+            "headers": [],
+            "client": ("127.0.0.1", 1),
+            "server": ("127.0.0.1", 8888),
+        }
+
+        async def _receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        async def _send(_m: Any) -> None:
+            pass
+
+        # Should complete without raising
+        await mw(scope, _receive, _send)
+
+    async def test_audit_swallowed_when_status_already_sent_then_reraise(
+        self, tmp_path: Path
+    ) -> None:
+        """When status was captured and audit write fails, exception still re-raises (line 207)."""
+        from core_errors import AuditLog, AuditLogEntry
+
+        from meridiand._system_audit_middleware import SystemAuditMiddleware
+
+        class _BoomAudit(AuditLog):
+            def write(self, entry: AuditLogEntry) -> None:
+                raise RuntimeError("audit boom")
+
+        async def _inner(scope: Any, receive: Any, send: Any) -> None:
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            raise RuntimeError("handler boom")
+
+        mw = SystemAuditMiddleware(_inner, audit_log=_BoomAudit())
+
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/skills",  # monitored route
+            "query_string": b"",
+            "headers": [],
+            "client": ("127.0.0.1", 1),
+            "server": ("127.0.0.1", 8888),
+        }
+
+        async def _receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b"", "more_body": False}
+
+        sent: list[dict[str, Any]] = []
+
+        async def _send(m: Any) -> None:
+            sent.append(m)
+
+        with pytest.raises(RuntimeError):
+            await mw(scope, _receive, _send)
+
+
 class TestBudgetsReportsLookupAndTool:
     def test_lookup_agent_cached_after_first_call(self, tmp_path: Path) -> None:
         """Second call uses cache (158->164 False branch)."""
