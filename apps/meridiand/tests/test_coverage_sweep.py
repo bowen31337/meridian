@@ -8185,3 +8185,265 @@ class TestCredentialProxyDefaultClient:
         # The forward will fail with a connect error, but the else branch is exercised.
         resp = client.get("/v1/credential-proxy/p1/anything")
         assert resp.status_code == 502
+
+
+# ---------------------------------------------------------------------------
+# _webhook_sender — gap closure
+# ---------------------------------------------------------------------------
+
+
+class TestWebhookSenderHelpers:
+    def test_delivery_error_http_status(self) -> None:
+        """Covers line 84."""
+        from meridiand._webhook_sender import WebhookDeliveryError
+
+        assert (
+            WebhookDeliveryError(message="m", timestamp="t", cause=None).http_status() == 500
+        )
+
+    def test_discover_session_ids_no_events_dir(self, tmp_path: Path) -> None:
+        """Covers line 123."""
+        from meridiand._webhook_sender import _discover_session_ids
+
+        assert _discover_session_ids(tmp_path) == []
+
+    def test_discover_session_ids_with_events(self, tmp_path: Path) -> None:
+        from meridiand._webhook_sender import _discover_session_ids
+
+        events_dir = tmp_path / "events"
+        events_dir.mkdir()
+        (events_dir / "s1.ndjson").write_text("")
+        result = _discover_session_ids(tmp_path)
+        assert "s1" in result
+
+    def test_load_watermarks_no_file(self, tmp_path: Path) -> None:
+        from meridiand._webhook_sender import _load_watermarks
+
+        assert _load_watermarks(tmp_path / "nope.json") == {}
+
+    def test_load_watermarks_corrupt(self, tmp_path: Path) -> None:
+        """Covers lines 137-138."""
+        from meridiand._webhook_sender import _load_watermarks
+
+        f = tmp_path / "wm.json"
+        f.write_text("not json")
+        assert _load_watermarks(f) == {}
+
+    def test_save_load_watermarks_roundtrip(self, tmp_path: Path) -> None:
+        from meridiand._webhook_sender import _load_watermarks, _save_watermarks
+
+        f = tmp_path / "wm.json"
+        _save_watermarks(f, {"s1": 7})
+        assert _load_watermarks(f) == {"s1": 7}
+
+    async def test_deliver_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        """Covers lines 311-334 (generic Exception → WebhookDeliveryError wrap)."""
+        from unittest.mock import AsyncMock
+
+        from core_errors import NoopAuditLog
+        from storage_event_log import SessionEvent
+
+        from meridiand._webhook_sender import (
+            WebhookDeliveryError,
+            deliver_webhook_event,
+        )
+
+        webhook = {
+            "id": "w1",
+            "url": "http://localhost:1/",
+            "max_retries": 0,
+            "backoff": "exponential",
+        }
+
+        event = SessionEvent(seq=1, ts="t", type="test", data={})
+
+        class _Resolver:
+            def resolve(self, ref: str) -> str | None:
+                return "tok"
+
+        client = MagicMock()
+        client.post = AsyncMock(side_effect=RuntimeError("boom"))
+
+        with pytest.raises(WebhookDeliveryError):
+            await deliver_webhook_event(
+                webhook,
+                event,
+                "s1",
+                client=client,
+                secret_resolver=_Resolver(),
+                audit_log=NoopAuditLog(),
+                dlq_dir=tmp_path / "dlq",
+            )
+
+    async def test_sender_loop_no_webhooks_dir(self, tmp_path: Path) -> None:
+        """Loop sleeps when webhooks_dir doesn't exist (covers 373->426)."""
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        from core_errors import NoopAuditLog
+
+        from meridiand._webhook_sender import run_webhook_sender_loop
+
+        client = MagicMock()
+        client.post = AsyncMock()
+        task = asyncio.create_task(
+            run_webhook_sender_loop(
+                tmp_path,
+                NoopAuditLog(),
+                check_interval_seconds=0.01,
+                _http_client=client,
+            )
+        )
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with contextlib.suppress(BaseException):
+            await task
+
+    async def test_sender_loop_handles_bad_json_webhook(self, tmp_path: Path) -> None:
+        """Covers lines 377-378 (bad json webhook file → continue)."""
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        from core_errors import NoopAuditLog
+
+        from meridiand._webhook_sender import run_webhook_sender_loop
+
+        webhooks_dir = tmp_path / "webhooks"
+        webhooks_dir.mkdir()
+        (webhooks_dir / "webhook_bad.json").write_text("not json")
+
+        client = MagicMock()
+        client.post = AsyncMock()
+        task = asyncio.create_task(
+            run_webhook_sender_loop(
+                tmp_path,
+                NoopAuditLog(),
+                check_interval_seconds=0.01,
+                _http_client=client,
+            )
+        )
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with contextlib.suppress(BaseException):
+            await task
+
+    async def test_sender_loop_default_http_client(self, tmp_path: Path) -> None:
+        """Covers lines 431-432 (default async httpx client)."""
+        import asyncio
+
+        from core_errors import NoopAuditLog
+
+        from meridiand._webhook_sender import run_webhook_sender_loop
+
+        task = asyncio.create_task(
+            run_webhook_sender_loop(
+                tmp_path,
+                NoopAuditLog(),
+                check_interval_seconds=0.01,
+            )
+        )
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with contextlib.suppress(BaseException):
+            await task
+
+    async def test_sender_loop_reader_read_after_raises(self, tmp_path: Path) -> None:
+        """Covers 401-402 (reader.read_after raises → continue)."""
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        from core_errors import NoopAuditLog
+
+        from meridiand._webhook_sender import run_webhook_sender_loop
+
+        webhooks_dir = tmp_path / "webhooks"
+        webhooks_dir.mkdir()
+        (webhooks_dir / "webhook_w1.json").write_text(
+            json.dumps(
+                {
+                    "id": "w1",
+                    "status": "active",
+                    "url": "http://localhost:1/",
+                    "event_filter": {"types": ["test"], "session_id": "s1"},
+                    "max_retries": 0,
+                    "backoff": "exponential",
+                }
+            )
+        )
+
+        client = MagicMock()
+        client.post = AsyncMock()
+
+        with patch(
+            "meridiand._webhook_sender.LocalEventLogReader"
+        ) as mock_reader_cls:
+            mock_reader = MagicMock()
+            mock_reader.read_after.side_effect = RuntimeError("boom")
+            mock_reader_cls.return_value = mock_reader
+            task = asyncio.create_task(
+                run_webhook_sender_loop(
+                    tmp_path,
+                    NoopAuditLog(),
+                    check_interval_seconds=0.01,
+                    _http_client=client,
+                )
+            )
+            await asyncio.sleep(0.05)
+            task.cancel()
+            with contextlib.suppress(BaseException):
+                await task
+
+    async def test_sender_loop_deliver_unexpected_exception(self, tmp_path: Path) -> None:
+        """Covers 419-420 (non-WebhookDeliveryError raises out of deliver → break)."""
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        from core_errors import NoopAuditLog
+        from storage_event_log import SessionEvent
+
+        from meridiand._webhook_sender import run_webhook_sender_loop
+
+        webhooks_dir = tmp_path / "webhooks"
+        webhooks_dir.mkdir()
+        (webhooks_dir / "webhook_w1.json").write_text(
+            json.dumps(
+                {
+                    "id": "w1",
+                    "status": "active",
+                    "url": "http://localhost:1/",
+                    "event_filter": {"types": ["test"], "session_id": "s1"},
+                    "max_retries": 0,
+                    "backoff": "exponential",
+                }
+            )
+        )
+
+        client = MagicMock()
+        client.post = AsyncMock()
+
+        events = [SessionEvent(seq=1, ts="t", type="test", data={})]
+
+        with (
+            patch(
+                "meridiand._webhook_sender.LocalEventLogReader"
+            ) as mock_reader_cls,
+            patch(
+                "meridiand._webhook_sender.deliver_webhook_event",
+                new=AsyncMock(side_effect=RuntimeError("boom")),
+            ),
+        ):
+            mock_reader = MagicMock()
+            mock_reader.read_after.return_value = events
+            mock_reader_cls.return_value = mock_reader
+            task = asyncio.create_task(
+                run_webhook_sender_loop(
+                    tmp_path,
+                    NoopAuditLog(),
+                    check_interval_seconds=0.01,
+                    _http_client=client,
+                )
+            )
+            await asyncio.sleep(0.05)
+            task.cancel()
+            with contextlib.suppress(BaseException):
+                await task
