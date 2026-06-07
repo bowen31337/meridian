@@ -291,6 +291,117 @@ class TestCheckpointPerCall:
         assert resp.status_code == 422
 
 
+class TestConfigErrors:
+    def test_parse_config_yaml_not_mapping(self) -> None:
+        """YAML content is a sequence, not a mapping → ValueError → wrapped (line 317)."""
+        from meridiand._config import ConfigLoadError, parse_config
+
+        with pytest.raises(ConfigLoadError):
+            parse_config("- a\n- b\n")  # YAML list, not mapping
+
+    def test_parse_config_success_round_trip(self) -> None:
+        """Successful parse returns MeridianConfig (lines 327-328)."""
+        import yaml
+
+        from meridiand._config import MERIDIAN_CONFIG_VERSION, parse_config
+
+        cfg = parse_config(
+            yaml.dump({"version": MERIDIAN_CONFIG_VERSION, "storage_root": "/tmp/m"})
+        )
+        assert cfg.storage_root == Path("/tmp/m")
+
+    def test_parse_config_version_mismatch(self) -> None:
+        """Config version != binary version raises ValueError → wrapped (line 322)."""
+        import yaml
+
+        from meridiand._config import ConfigLoadError, parse_config
+
+        # version=1 != binary version=2
+        with pytest.raises(ConfigLoadError):
+            parse_config(yaml.dump({"version": 1, "storage_root": "/tmp/m"}))
+
+    def test_parse_config_pretyped_error_reraise(self) -> None:
+        """A pre-raised ConfigLoadError inside parse_config is re-raised (line 331)."""
+        from meridiand._config import ConfigLoadError, parse_config
+
+        pre = ConfigLoadError(message="pre", timestamp=pagination_now(), cause=None)
+        with patch("meridiand._config.yaml.safe_load", side_effect=pre):
+            with pytest.raises(ConfigLoadError):
+                parse_config("anything")
+
+    def test_load_config_pretyped_error_reraise(self, tmp_path: Path) -> None:
+        """A pre-raised ConfigLoadError inside load_config is re-raised (line 386)."""
+        from meridiand._config import ConfigLoadError, load_config
+
+        path = tmp_path / "c.yml"
+        path.write_text("version: 2\nstorage_root: /tmp/m\n")
+        pre = ConfigLoadError(message="pre", timestamp=pagination_now(), cause=None)
+        with patch("meridiand._config.yaml.safe_load", side_effect=pre):
+            with pytest.raises(ConfigLoadError):
+                load_config(path)
+
+    def test_resolve_location_pretyped_error_reraise(self) -> None:
+        """A pre-raised ConfigResolveError inside resolve_config_location re-raises (460)."""
+        from meridiand._config import ConfigResolveError, resolve_config_location
+
+        pre = ConfigResolveError(message="pre", timestamp=pagination_now(), cause=None)
+
+        # Patch _USER_CONFIG_PATH.exists to raise ConfigResolveError
+        with patch("meridiand._config.os.environ.get", side_effect=pre):
+            with pytest.raises(ConfigResolveError):
+                resolve_config_location()
+
+    def test_load_config_typed_error_reraise(self, tmp_path: Path) -> None:
+        """load_config: typed ConfigLoadError raised → re-raises (line 386)."""
+        from meridiand._config import ConfigLoadError, load_config
+
+        path = tmp_path / "bad.yml"
+        path.write_text("version: 99\nstorage_root: /tmp/m\n")
+        with pytest.raises(ConfigLoadError):
+            load_config(path)
+
+    def test_resolve_location_no_config_anywhere(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """No env var, no ~/.meridian/config.yml, no /etc/meridian/config.yml → FileNotFoundError (457)."""
+        from meridiand._config import resolve_config_location
+
+        monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
+        monkeypatch.setattr(
+            "meridiand._config._USER_CONFIG_PATH", tmp_path / "no" / "user.yml"
+        )
+        monkeypatch.setattr(
+            "meridiand._config.SYSTEM_CONFIG_PATH", tmp_path / "no" / "system.yml"
+        )
+        from meridiand._config import ConfigResolveError
+
+        with pytest.raises(ConfigResolveError):
+            resolve_config_location()
+
+    def test_validate_invalid_port_emits_error(self) -> None:
+        """daemon.bind.port out of range emits validation error (line 614)."""
+        from meridiand._config import (
+            MERIDIAN_CONFIG_VERSION,
+            ConfigValidateError,
+            MeridianConfig,
+            validate_config,
+        )
+
+        config = MeridianConfig.model_validate(
+            {
+                "version": MERIDIAN_CONFIG_VERSION,
+                "storage_root": "/tmp/m",
+                "daemon": {
+                    "log_level": "info",
+                    "bind": {"host": "127.0.0.1", "port": 70000},
+                },
+            }
+        )
+        with pytest.raises(ConfigValidateError) as ei:
+            validate_config(config)
+        assert "not in range" in ei.value.message
+
+
 class TestFilesErrors:
     def test_files_upload_error_http_status(self) -> None:
         from meridiand._files import FilesUploadError
