@@ -985,6 +985,196 @@ class TestImportsTranslators:
         assert "metadata" in lossy
 
 
+class TestImportsHandlerWriteErrors:
+    """Cover write-phase ImportWriteError wraps for each import endpoint."""
+
+    @staticmethod
+    def _make_router(tmp_path: Path):
+        from core_errors import NoopAuditLog
+
+        from meridiand._imports import make_imports_router
+
+        return make_imports_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+        )
+
+    async def test_openclaw_write_failure(self, tmp_path: Path) -> None:
+        """Covers 1120-1143."""
+        from meridiand._imports import (
+            ImportWriteError,
+            OpenClawImportRequest,
+            OpenClawRecord,
+        )
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/imports/openclaw" in r.path and r.path.endswith("/openclaw")
+        )
+
+        body = OpenClawImportRequest(
+            records=[
+                OpenClawRecord(id="c1", kind="channel", name="ch")
+            ]
+        )
+
+        # Patch Path.write_text to raise on the channel JSON write.
+        original = Path.write_text
+
+        def _raise(self: Path, *args: Any, **kwargs: Any) -> int:
+            if str(self).endswith(".json") and "channels" in str(self):
+                raise RuntimeError("write boom")
+            return original(self, *args, **kwargs)
+
+        with patch.object(Path, "write_text", _raise):
+            with pytest.raises(ImportWriteError):
+                await handler(body)
+
+    async def test_hermes_write_failure(self, tmp_path: Path) -> None:
+        """Covers 1540-1563."""
+        from meridiand._imports import (
+            HermesImportRequest,
+            HermesRecord,
+            ImportWriteError,
+        )
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/imports/hermes" in r.path and r.path.endswith("/hermes")
+        )
+
+        body = HermesImportRequest(
+            records=[
+                HermesRecord(
+                    id="h1",
+                    name="skill",
+                    description="d",
+                    instructions="i",
+                    tools=[{"name": "t1"}],
+                )
+            ]
+        )
+
+        original = Path.write_text
+
+        def _raise(self: Path, *args: Any, **kwargs: Any) -> int:
+            if "skills" in str(self) and str(self).endswith(".json"):
+                raise RuntimeError("write boom")
+            return original(self, *args, **kwargs)
+
+        with patch.object(Path, "write_text", _raise):
+            with pytest.raises(ImportWriteError):
+                await handler(body)
+
+    async def test_openclaw_install_memory_translate_failure(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 1289-1296 (memory translate failure)."""
+        from meridiand._imports import (
+            ImportRecordInvalidError,
+            OpenClawInstallImportRequest,
+            OpenClawMemoryRecord,
+        )
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/imports/openclaw/install" in r.path
+        )
+
+        body = OpenClawInstallImportRequest(
+            memory=[
+                OpenClawMemoryRecord(
+                    key="k1", content="v1", scope="agent"
+                )
+            ],
+        )
+
+        with patch(
+            "meridiand._imports._translate_openclaw_memory_store",
+            side_effect=RuntimeError("xlate boom"),
+        ):
+            with pytest.raises(ImportRecordInvalidError):
+                await handler(body)
+
+    async def test_openclaw_install_write_failure(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 1396-1406."""
+        from meridiand._imports import (
+            ImportWriteError,
+            OpenClawInstallImportRequest,
+            OpenClawRecord,
+        )
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/imports/openclaw/install" in r.path
+        )
+
+        body = OpenClawInstallImportRequest(
+            channels=[OpenClawRecord(id="c1", kind="channel", name="ch")]
+        )
+
+        original = Path.write_text
+
+        def _raise(self: Path, *args: Any, **kwargs: Any) -> int:
+            if "channels" in str(self) and str(self).endswith(".json"):
+                raise RuntimeError("write boom")
+            return original(self, *args, **kwargs)
+
+        with patch.object(Path, "write_text", _raise):
+            with pytest.raises(ImportWriteError):
+                await handler(body)
+
+    async def test_hermes_install_write_failure(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 1961-1971."""
+        from meridiand._imports import (
+            HermesInstallImportRequest,
+            HermesRecord,
+            ImportWriteError,
+        )
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/imports/hermes/install" in r.path
+        )
+
+        body = HermesInstallImportRequest(
+            skills=[
+                HermesRecord(
+                    id="h1",
+                    name="skill",
+                    description="d",
+                    instructions="i",
+                    tools=[{"name": "t1"}],
+                )
+            ]
+        )
+
+        original = Path.write_text
+
+        def _raise(self: Path, *args: Any, **kwargs: Any) -> int:
+            if "skills" in str(self) and str(self).endswith(".json"):
+                raise RuntimeError("write boom")
+            return original(self, *args, **kwargs)
+
+        with patch.object(Path, "write_text", _raise):
+            with pytest.raises(ImportWriteError):
+                await handler(body)
+
+
 class TestSystemChannelHelpers:
     """Cover helpers in _system_channel."""
 
