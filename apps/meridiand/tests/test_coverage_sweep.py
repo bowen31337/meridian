@@ -291,6 +291,136 @@ class TestCheckpointPerCall:
         assert resp.status_code == 422
 
 
+class TestWakeHelpers:
+    def test_load_active_skills_skips_malformed(self, tmp_path: Path) -> None:
+        """Malformed activation JSON is silently skipped (lines 86-87)."""
+        from meridiand._wake import _load_active_skills
+
+        d = tmp_path / "skill_activations"
+        d.mkdir()
+        (d / "bad.json").write_text("not json {{{")
+        (d / "good.json").write_text(
+            json.dumps({"agent_id": "a1", "status": "active", "skill_version_id": "v1"})
+        )
+        result = _load_active_skills(tmp_path, "a1")
+        assert len(result) == 1
+
+    def test_load_most_recent_thread_skips_malformed_manifest(self, tmp_path: Path) -> None:
+        """Malformed manifest JSON skipped (113-114)."""
+        from meridiand._wake import _load_most_recent_thread
+
+        threads_dir = tmp_path / "threads" / "s1"
+        (threads_dir / "t1").mkdir(parents=True)
+        (threads_dir / "t1" / "manifest.json").write_text("not json {{{")
+        (threads_dir / "t2").mkdir(parents=True)
+        (threads_dir / "t2" / "manifest.json").write_text(
+            json.dumps({"id": "t2", "created_at": "2024-01-01"})
+        )
+        # message file
+        (threads_dir / "t2" / "messages.ndjson").write_text(
+            json.dumps({"role": "user", "content": "hi", "sequence": 1}) + "\n"
+        )
+        tid, msgs = _load_most_recent_thread(tmp_path, "s1")
+        assert tid == "t2"
+        assert len(msgs) == 1
+
+    def test_load_most_recent_thread_no_best(self, tmp_path: Path) -> None:
+        """No valid manifests → best_thread_id stays None (line 117)."""
+        from meridiand._wake import _load_most_recent_thread
+
+        threads_dir = tmp_path / "threads" / "s2"
+        (threads_dir / "t1").mkdir(parents=True)
+        (threads_dir / "t1" / "manifest.json").write_text("not json")
+        tid, msgs = _load_most_recent_thread(tmp_path, "s2")
+        assert tid is None
+        assert msgs == []
+
+    def test_load_most_recent_thread_no_messages_file(self, tmp_path: Path) -> None:
+        """Best thread has no messages.ndjson → return (tid, []) (line 121)."""
+        from meridiand._wake import _load_most_recent_thread
+
+        threads_dir = tmp_path / "threads" / "s3"
+        (threads_dir / "t1").mkdir(parents=True)
+        (threads_dir / "t1" / "manifest.json").write_text(
+            json.dumps({"id": "t1", "created_at": "2024-01-01"})
+        )
+        # No messages.ndjson written
+        tid, msgs = _load_most_recent_thread(tmp_path, "s3")
+        assert tid == "t1"
+        assert msgs == []
+
+    async def test_wake_with_non_dict_config(self, tmp_path: Path) -> None:
+        """Agent's config field is non-dict → if-False branch (207->217)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._wake import make_wake_router
+
+        sessions_dir = tmp_path / "sessions" / "s1"
+        sessions_dir.mkdir(parents=True)
+        (sessions_dir / "manifest.json").write_text(
+            json.dumps({"session_id": "s1", "agent_id": "a1"})
+        )
+        # Agent record where config is a non-dict (string)
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "a1.json").write_text(
+            json.dumps({"id": "a1", "version": {"config": "not-a-dict"}})
+        )
+        router = make_wake_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/wake" in r.path and "POST" in r.methods
+        )
+        resp = await handler("s1")
+        assert resp is not None
+
+    async def test_wake_with_skill_no_version_id(self, tmp_path: Path) -> None:
+        """An active skill without skill_version_id is skipped (line 221)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._wake import make_wake_router
+
+        sessions_dir = tmp_path / "sessions" / "s2"
+        sessions_dir.mkdir(parents=True)
+        (sessions_dir / "manifest.json").write_text(
+            json.dumps({"session_id": "s2", "agent_id": "a2"})
+        )
+        activations_dir = tmp_path / "skill_activations"
+        activations_dir.mkdir()
+        # Active skill with NO skill_version_id
+        (activations_dir / "act1.json").write_text(
+            json.dumps({"agent_id": "a2", "status": "active"})
+        )
+        router = make_wake_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/wake" in r.path and "POST" in r.methods
+        )
+        resp = await handler("s2")
+        assert resp is not None
+
+    def test_load_most_recent_thread_skips_blank_and_invalid_lines(self, tmp_path: Path) -> None:
+        """Blank lines and invalid JSON in messages skipped (lines 127, 130-131)."""
+        from meridiand._wake import _load_most_recent_thread
+
+        threads_dir = tmp_path / "threads" / "s4"
+        (threads_dir / "t1").mkdir(parents=True)
+        (threads_dir / "t1" / "manifest.json").write_text(
+            json.dumps({"id": "t1", "created_at": "2024-01-01"})
+        )
+        (threads_dir / "t1" / "messages.ndjson").write_text(
+            "\n"  # blank
+            "not json {{{\n"  # invalid
+            + json.dumps({"role": "user", "content": "hi", "sequence": 1})
+            + "\n"
+        )
+        tid, msgs = _load_most_recent_thread(tmp_path, "s4")
+        assert tid == "t1"
+        assert len(msgs) == 1
+
+
 class TestCronSchedulerErrors:
     def test_cron_fire_error_http_status(self) -> None:
         from meridiand._cron_scheduler import CronFireError
