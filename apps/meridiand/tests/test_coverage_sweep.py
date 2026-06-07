@@ -375,6 +375,430 @@ class TestSkillForgePrecisionErrors:
         assert metric is not None
 
 
+class TestBudgetOverrunDiscipline:
+    """Cover _build_soft_overrun_stats, _build_hard_transition_stats, and the router."""
+
+    def test_scan_events_no_events_root(self, tmp_path: Path) -> None:
+        from meridiand._budget_overrun_discipline import _scan_events
+
+        results = _scan_events(tmp_path / "nope", frozenset({"x"}), None, None)
+        assert results == []
+
+    def test_scan_events_skips_unreadable_blank_invalid(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from meridiand._budget_overrun_discipline import _scan_events
+
+        events_dir = tmp_path / "events"
+        events_dir.mkdir()
+        (events_dir / "broken.ndjson").write_text("ignored")
+        (events_dir / "good.ndjson").write_text(
+            "\n"  # blank
+            "not json {{{\n"  # invalid
+            + json.dumps(
+                {
+                    "type": "budget.warning",
+                    "ts": "2024-01-01T00:00:00Z",
+                    "data": {"limit": 100, "actual": 150, "dimension": "tokens"},
+                }
+            )
+            + "\n"
+            + json.dumps(
+                {"type": "other_type", "ts": "2024-01-01T00:00:00Z"}
+            )
+            + "\n"
+            + json.dumps(
+                {
+                    "type": "budget.warning",
+                    "ts": "1999-01-01T00:00:00Z",
+                    "data": {"limit": 100, "actual": 150},
+                }
+            )
+            + "\n"
+        )
+
+        real_read = Path.read_text
+
+        def _selective(self: Path, *a: Any, **k: Any) -> str:
+            if self.name == "broken.ndjson":
+                raise OSError("denied")
+            return real_read(self, *a, **k)
+
+        monkeypatch.setattr(Path, "read_text", _selective)
+        results = _scan_events(
+            events_dir,
+            frozenset({"budget.warning"}),
+            since="2023-01-01T00:00:00Z",
+            until=None,
+        )
+        assert len(results) == 1
+
+    def test_scan_events_until_filter(self, tmp_path: Path) -> None:
+        from meridiand._budget_overrun_discipline import _scan_events
+
+        events_dir = tmp_path / "events"
+        events_dir.mkdir()
+        (events_dir / "s1.ndjson").write_text(
+            json.dumps({"type": "budget.warning", "ts": "2030-01-01T00:00:00Z"}) + "\n"
+        )
+        results = _scan_events(
+            events_dir,
+            frozenset({"budget.warning"}),
+            since=None,
+            until="2024-01-01T00:00:00Z",
+        )
+        assert results == []
+
+    def test_build_soft_overrun_stats_skips_invalid(self, tmp_path: Path) -> None:
+        from core_errors import NoopAuditLog
+        from sdk_budget import BudgetOverrunDiscipline, BudgetOverrunDisciplineOptions
+
+        from meridiand._budget_overrun_discipline import _build_soft_overrun_stats
+
+        events_dir = tmp_path / "events"
+        events_dir.mkdir()
+        (events_dir / "s1.ndjson").write_text(
+            json.dumps(
+                {
+                    "type": "budget.warning",
+                    "ts": "2024-01-01T00:00:00Z",
+                    "data": {"limit": 0, "actual": 100},
+                }
+            )
+            + "\n"
+            + json.dumps(
+                {
+                    "type": "budget.warning",
+                    "ts": "2024-01-01T00:00:00Z",
+                    "data": {"limit": 100, "actual": 80},
+                }
+            )
+            + "\n"
+            + json.dumps(
+                {
+                    "type": "budget.warning",
+                    "ts": "2024-01-01T00:00:00Z",
+                    "data": {
+                        "limit": 100,
+                        "actual": 150,
+                        "dimension": "tokens",
+                        "session_id": "s1",
+                    },
+                }
+            )
+            + "\n"
+        )
+        discipline = BudgetOverrunDiscipline(
+            BudgetOverrunDisciplineOptions(audit_log=NoopAuditLog())
+        )
+        result = _build_soft_overrun_stats(events_dir, None, None, discipline)
+        assert result["count"] == 1
+
+    def test_build_hard_transition_stats(self, tmp_path: Path) -> None:
+        from core_errors import NoopAuditLog
+        from sdk_budget import BudgetOverrunDiscipline, BudgetOverrunDisciplineOptions
+
+        from meridiand._budget_overrun_discipline import _build_hard_transition_stats
+
+        events_dir = tmp_path / "events"
+        events_dir.mkdir()
+        (events_dir / "s1.ndjson").write_text(
+            json.dumps(
+                {
+                    "type": "budget.exceeded",
+                    "ts": "2024-01-01T00:00:00Z",
+                    "data": {"dimension": "tokens"},
+                }
+            )
+            + "\n"
+            + json.dumps(
+                {
+                    "type": "session.phase_change",
+                    "ts": "2024-01-01T00:00:01Z",
+                    "data": {"after": "terminated", "reason": "budget_exceeded_tokens"},
+                }
+            )
+            + "\n"
+            + json.dumps(
+                {
+                    "type": "session.phase_change",
+                    "ts": "2024-01-01T00:00:01Z",
+                    "data": {"after": "done"},
+                }
+            )
+            + "\n"
+        )
+        discipline = BudgetOverrunDiscipline(
+            BudgetOverrunDisciplineOptions(audit_log=NoopAuditLog())
+        )
+        result = _build_hard_transition_stats(events_dir, None, None, discipline)
+        assert "compliant" in result
+
+    async def test_router_endpoint_success(self, tmp_path: Path) -> None:
+        from core_errors import NoopAuditLog
+
+        from meridiand._budget_overrun_discipline import make_budget_overrun_discipline_router
+
+        router = make_budget_overrun_discipline_router(
+            audit_log=NoopAuditLog(), storage_root=tmp_path
+        )
+        handler = next(
+            r.endpoint for r in router.routes if r.path == "/v1/x/budgets/discipline"
+        )
+        resp = await handler(since=None, until=None)
+        assert resp is not None
+
+    async def test_router_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        from core_errors import NoopAuditLog
+
+        from meridiand._budget_overrun_discipline import (
+            BudgetDisciplineReportError,
+            make_budget_overrun_discipline_router,
+        )
+
+        router = make_budget_overrun_discipline_router(
+            audit_log=NoopAuditLog(), storage_root=tmp_path
+        )
+        handler = next(
+            r.endpoint for r in router.routes if r.path == "/v1/x/budgets/discipline"
+        )
+        with patch(
+            "meridiand._budget_overrun_discipline._build_soft_overrun_stats",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(BudgetDisciplineReportError):
+                await handler(since=None, until=None)
+
+    async def test_router_typed_error_reraised(self, tmp_path: Path) -> None:
+        """A pre-typed BudgetDisciplineReportError is re-raised (line 253)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._budget_overrun_discipline import (
+            BudgetDisciplineReportError,
+            make_budget_overrun_discipline_router,
+        )
+
+        router = make_budget_overrun_discipline_router(
+            audit_log=NoopAuditLog(), storage_root=tmp_path
+        )
+        handler = next(
+            r.endpoint for r in router.routes if r.path == "/v1/x/budgets/discipline"
+        )
+        pre = BudgetDisciplineReportError(message="pre", timestamp=pagination_now(), cause=None)
+        with patch(
+            "meridiand._budget_overrun_discipline._build_soft_overrun_stats",
+            side_effect=pre,
+        ):
+            with pytest.raises(BudgetDisciplineReportError):
+                await handler(since=None, until=None)
+
+    def test_build_soft_overrun_catches_discipline_error(self, tmp_path: Path) -> None:
+        """Test that BudgetOverrunDisciplineError raised inside the loop is silently passed (140-141)."""
+        from core_errors import NoopAuditLog
+        from sdk_budget import (
+            BudgetOverrunDiscipline,
+            BudgetOverrunDisciplineError,
+            BudgetOverrunDisciplineOptions,
+        )
+
+        from meridiand._budget_overrun_discipline import _build_soft_overrun_stats
+
+        events_dir = tmp_path / "events"
+        events_dir.mkdir()
+        (events_dir / "s1.ndjson").write_text(
+            json.dumps(
+                {
+                    "type": "budget.warning",
+                    "ts": "2024-01-01T00:00:00Z",
+                    "data": {
+                        "limit": 100,
+                        "actual": 150,
+                        "dimension": "tokens",
+                        "session_id": "s1",
+                    },
+                }
+            )
+            + "\n"
+        )
+
+        class _RaisingDiscipline:
+            def record_soft_overrun(self, *_a: Any, **_k: Any) -> float:
+                raise BudgetOverrunDisciplineError(
+                    message="forced", timestamp=pagination_now(), cause=None
+                )
+
+        result = _build_soft_overrun_stats(
+            events_dir, None, None, _RaisingDiscipline()
+        )
+        assert result["count"] == 0
+
+    def test_build_hard_transition_skips_non_terminated(self, tmp_path: Path) -> None:
+        """phase_change with after != 'terminated' is skipped (line 181 -> back to loop top)."""
+        from core_errors import NoopAuditLog
+        from sdk_budget import BudgetOverrunDiscipline, BudgetOverrunDisciplineOptions
+
+        from meridiand._budget_overrun_discipline import _build_hard_transition_stats
+
+        events_dir = tmp_path / "events"
+        events_dir.mkdir()
+        (events_dir / "s1.ndjson").write_text(
+            json.dumps(
+                {
+                    "type": "budget.exceeded",
+                    "ts": "2024-01-01T00:00:00Z",
+                    "data": {"dimension": "tokens"},
+                }
+            )
+            + "\n"
+            + json.dumps(
+                {
+                    "type": "session.phase_change",
+                    "ts": "2024-01-01T00:00:01Z",
+                    "data": {"after": "idle"},  # not 'terminated'
+                }
+            )
+            + "\n"
+        )
+        discipline = BudgetOverrunDiscipline(
+            BudgetOverrunDisciplineOptions(audit_log=NoopAuditLog())
+        )
+        result = _build_hard_transition_stats(events_dir, None, None, discipline)
+        assert result["compliant"] is True
+
+    def test_build_hard_transition_skips_non_exceeded_sessions(self, tmp_path: Path) -> None:
+        """phase_change for session_id NOT in exceeded_sessions → continue (line 181)."""
+        from core_errors import NoopAuditLog
+        from sdk_budget import BudgetOverrunDiscipline, BudgetOverrunDisciplineOptions
+
+        from meridiand._budget_overrun_discipline import _build_hard_transition_stats
+
+        events_dir = tmp_path / "events"
+        events_dir.mkdir()
+        # Two sessions: s1 has budget.exceeded, s2 only has phase_change (no exceeded)
+        (events_dir / "s1.ndjson").write_text(
+            json.dumps(
+                {"type": "budget.exceeded", "ts": "t1", "data": {"dimension": "tokens"}}
+            )
+            + "\n"
+        )
+        (events_dir / "s2.ndjson").write_text(
+            json.dumps(
+                {
+                    "type": "session.phase_change",
+                    "ts": "t1",
+                    "data": {"after": "terminated"},
+                }
+            )
+            + "\n"
+        )
+        discipline = BudgetOverrunDiscipline(
+            BudgetOverrunDisciplineOptions(audit_log=NoopAuditLog())
+        )
+        result = _build_hard_transition_stats(events_dir, None, None, discipline)
+        # s2 was skipped because not in exceeded_sessions
+        assert result["total"] == 0
+
+    def test_build_hard_transition_tagged_correctly(self, tmp_path: Path) -> None:
+        """Successful validate_hard_transition_reason → tagged_correctly += 1 (line 194)."""
+        from core_errors import NoopAuditLog
+        from sdk_budget import BudgetOverrunDiscipline, BudgetOverrunDisciplineOptions
+
+        from meridiand._budget_overrun_discipline import _build_hard_transition_stats
+
+        events_dir = tmp_path / "events"
+        events_dir.mkdir()
+        (events_dir / "s1.ndjson").write_text(
+            json.dumps(
+                {"type": "budget.exceeded", "ts": "t1", "data": {"dimension": "tokens"}}
+            )
+            + "\n"
+            + json.dumps(
+                {
+                    "type": "session.phase_change",
+                    "ts": "t2",
+                    "data": {"after": "terminated", "reason": "budget_exceeded_tokens"},
+                }
+            )
+            + "\n"
+        )
+
+        class _AcceptingDiscipline:
+            def validate_hard_transition_reason(self, *_a: Any, **_k: Any) -> None:
+                pass
+
+        result = _build_hard_transition_stats(
+            events_dir, None, None, _AcceptingDiscipline()
+        )
+        assert result["tagged_correctly"] == 1
+
+    def test_build_hard_transition_dedupes_exceeded_session(self, tmp_path: Path) -> None:
+        """Two budget.exceeded events for the same session: second skipped (171->168)."""
+        from core_errors import NoopAuditLog
+        from sdk_budget import BudgetOverrunDiscipline, BudgetOverrunDisciplineOptions
+
+        from meridiand._budget_overrun_discipline import _build_hard_transition_stats
+
+        events_dir = tmp_path / "events"
+        events_dir.mkdir()
+        (events_dir / "s1.ndjson").write_text(
+            json.dumps(
+                {"type": "budget.exceeded", "ts": "t1", "data": {"dimension": "tokens"}}
+            )
+            + "\n"
+            + json.dumps(
+                {
+                    "type": "budget.exceeded",
+                    "ts": "t2",
+                    "data": {"dimension": "dollars"},  # different dimension, dedup keeps first
+                }
+            )
+            + "\n"
+        )
+        discipline = BudgetOverrunDiscipline(
+            BudgetOverrunDisciplineOptions(audit_log=NoopAuditLog())
+        )
+        # Just exercises the dedup branch
+        _build_hard_transition_stats(events_dir, None, None, discipline)
+
+    def test_build_hard_transition_catches_discipline_error(self, tmp_path: Path) -> None:
+        """When validate_hard_transition_reason raises generic BudgetOverrunDisciplineError, skip (197-198)."""
+        from sdk_budget import BudgetOverrunDisciplineError
+
+        from meridiand._budget_overrun_discipline import _build_hard_transition_stats
+
+        events_dir = tmp_path / "events"
+        events_dir.mkdir()
+        (events_dir / "s1.ndjson").write_text(
+            json.dumps(
+                {
+                    "type": "budget.exceeded",
+                    "ts": "2024-01-01T00:00:00Z",
+                    "data": {"dimension": "tokens"},
+                }
+            )
+            + "\n"
+            + json.dumps(
+                {
+                    "type": "session.phase_change",
+                    "ts": "2024-01-01T00:00:01Z",
+                    "data": {"after": "terminated", "reason": "any"},
+                }
+            )
+            + "\n"
+        )
+
+        class _RaisingDiscipline:
+            def validate_hard_transition_reason(self, *_a: Any, **_k: Any) -> None:
+                raise BudgetOverrunDisciplineError(
+                    message="forced", timestamp=pagination_now(), cause=None
+                )
+
+        result = _build_hard_transition_stats(
+            events_dir, None, None, _RaisingDiscipline()
+        )
+        assert result["total"] == 0
+
+
 class TestSessionsHandlersGenericExceptions:
     """Cover generic-exception wrapping in _sessions handlers."""
 
