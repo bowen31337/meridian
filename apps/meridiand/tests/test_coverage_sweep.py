@@ -1992,6 +1992,126 @@ class TestSessionsHandlersGenericExceptions:
                     "s3", thread_id=None, role=None, cursor=None, limit=10
                 )
 
+    async def test_create_session_session_create_error_reraised(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers line 302 (typed SessionCreateError re-raise)."""
+        from meridiand._sessions import SessionCreateError, SessionCreateRequest
+
+        router = self._make_router_with_writer(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/sessions" and "POST" in r.methods
+        )
+        req = SessionCreateRequest(agent_id="a1")
+        err = SessionCreateError(
+            message="precooked", timestamp=pagination_now(), cause=None
+        )
+
+        # Patch a function called inside the try block to raise the typed
+        # error → exercises the `except SessionCreateError: raise` branch.
+        with patch(
+            "meridiand._sessions.json.dumps",
+            side_effect=err,
+        ):
+            with pytest.raises(SessionCreateError):
+                await handler(req)
+
+    async def test_list_threads_branch_missing_id(self, tmp_path: Path) -> None:
+        """Covers 580->582 branch (id already in record, skip injection)."""
+        td = tmp_path / "sessions" / "s_ti" / "threads"
+        td.mkdir(parents=True)
+        (td / "t1.json").write_text(
+            json.dumps({"id": "preset", "thread_id": "t1"})
+        )
+
+        router = self._make_router_with_writer(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/threads" in r.path and "GET" in r.methods
+        )
+        resp = await handler("s_ti", cursor=None, limit=10)
+        assert resp is not None
+
+    async def test_list_messages_skips_blank_lines_and_injects_id(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 697 (blank line continue) + 700 (id injection)."""
+        td = tmp_path / "sessions" / "s_ml" / "threads" / "t1"
+        td.mkdir(parents=True)
+        (td / "messages.ndjson").write_text(
+            "\n"  # blank line covers 697
+            + json.dumps(
+                {"message_id": "m1", "role": "user", "created_at": "t"}
+            )
+            + "\n"
+        )
+
+        router = self._make_router_with_writer(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/sessions/{session_id}/messages" and "GET" in r.methods
+        )
+        resp = await handler(
+            "s_ml", thread_id=None, role=None, cursor=None, limit=10
+        )
+        assert resp is not None
+
+    async def test_create_thread_generic_exception(self, tmp_path: Path) -> None:
+        """Covers 862-882."""
+        from meridiand._sessions import (
+            ThreadCreateError,
+            ThreadCreateRequest,
+        )
+
+        # Pre-create the session
+        sd = tmp_path / "sessions" / "s_tg"
+        sd.mkdir(parents=True)
+        (sd / "manifest.json").write_text(json.dumps({"session_id": "s_tg"}))
+
+        router = self._make_router_with_writer(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/threads" in r.path and "POST" in r.methods
+        )
+        req = ThreadCreateRequest(branch_of_event_seq=0)
+        with patch(
+            "meridiand._sessions.json.dumps",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(ThreadCreateError):
+                await handler("s_tg", req)
+
+    async def test_append_message_generic_exception(self, tmp_path: Path) -> None:
+        """Covers 1031-1051 (generic exception wrap on message append)."""
+        from meridiand._sessions import (
+            MessageAppendError,
+            MessageAppendRequest,
+        )
+
+        # Pre-create the session
+        sd = tmp_path / "sessions" / "s_ag"
+        sd.mkdir(parents=True)
+        (sd / "manifest.json").write_text(json.dumps({"session_id": "s_ag"}))
+
+        router = self._make_router_with_writer(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/sessions/{session_id}/messages" and "POST" in r.methods
+        )
+        req = MessageAppendRequest(role="user", content="hi")
+        with patch(
+            "meridiand._sessions.json.dumps",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(MessageAppendError):
+                await handler("s_ag", req)
+
 
 class TestManyErrorClassesHttpStatuses:
     """Sweep test for error class http_status across many remaining modules."""
