@@ -375,6 +375,129 @@ class TestSkillForgePrecisionErrors:
         assert metric is not None
 
 
+class TestSkillActivationsGenericExceptions:
+    """Cover generic-exception wrapping in skill_activations handlers."""
+
+    async def test_request_handler_direct_generic_exception(self, tmp_path: Path) -> None:
+        from core_errors import NoopAuditLog
+
+        from meridiand._skill_activations import (
+            SkillActivationError,
+            SkillActivationRequest,
+            make_skill_activations_router,
+        )
+
+        # Pre-create skill and agent so the validation guards pass
+        skills_dir = tmp_path / "skills"
+        skills_dir.mkdir(parents=True)
+        (skills_dir / "s1.json").write_text(json.dumps({"id": "s1"}))
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "a1.json").write_text(json.dumps({"id": "a1"}))
+
+        router = make_skill_activations_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/agents/{agent_id}/skills" and "POST" in r.methods
+        )
+        req = SkillActivationRequest(skill_id="s1")
+        with patch("meridiand._skill_activations.json.dumps", side_effect=RuntimeError("boom")):
+            with pytest.raises(SkillActivationError):
+                await handler("a1", req)
+
+    async def test_approve_handler_direct_generic_exception(self, tmp_path: Path) -> None:
+        from core_errors import NoopAuditLog
+
+        from meridiand._skill_activations import (
+            SkillActivationApproveError,
+            make_skill_activations_router,
+        )
+
+        # Pre-create activation so the lookup passes
+        act_dir = tmp_path / "skill_activations"
+        act_dir.mkdir(parents=True)
+        (act_dir / "a1_s1.json").write_text(
+            json.dumps(
+                {
+                    "id": "a1_s1",
+                    "agent_id": "a1",
+                    "skill_id": "s1",
+                    "status": "pending",
+                }
+            )
+        )
+
+        router = make_skill_activations_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/approve" in r.path and "POST" in r.methods
+        )
+        with patch("meridiand._skill_activations.json.dumps", side_effect=RuntimeError("boom")):
+            with pytest.raises(SkillActivationApproveError):
+                await handler("a1", "s1")
+
+    async def test_revoke_handler_direct_generic_exception(self, tmp_path: Path) -> None:
+        from core_errors import NoopAuditLog
+
+        from meridiand._skill_activations import (
+            SkillActivationRevokeError,
+            make_skill_activations_router,
+        )
+
+        act_dir = tmp_path / "skill_activations"
+        act_dir.mkdir(parents=True)
+        (act_dir / "a1_s1.json").write_text(
+            json.dumps(
+                {
+                    "id": "a1_s1",
+                    "agent_id": "a1",
+                    "skill_id": "s1",
+                    "status": "active",
+                }
+            )
+        )
+
+        router = make_skill_activations_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/agents/{agent_id}/skills/{skill_id}"
+            and "DELETE" in r.methods
+        )
+        with patch("meridiand._skill_activations.json.dumps", side_effect=RuntimeError("boom")):
+            with pytest.raises(SkillActivationRevokeError):
+                await handler("a1", "s1")
+
+    async def test_list_handler_direct_generic_exception(self, tmp_path: Path) -> None:
+        from core_errors import NoopAuditLog
+
+        from meridiand._skill_activations import (
+            SkillActivationListError,
+            make_skill_activations_router,
+        )
+
+        act_dir = tmp_path / "skill_activations"
+        act_dir.mkdir(parents=True)
+        (act_dir / "a1_s1.json").write_text(
+            json.dumps({"id": "a1_s1", "agent_id": "a1", "skill_id": "s1"})
+        )
+
+        router = make_skill_activations_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/agents/{agent_id}/skills" and "GET" in r.methods
+        )
+        with patch(
+            "meridiand._skill_activations.json.loads",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(SkillActivationListError):
+                await handler("a1")
+
+
 class TestUserProfilesGenericExceptions:
     """Cover generic-exception wrapping in all 4 user_profile handlers."""
 
