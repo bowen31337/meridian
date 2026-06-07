@@ -2219,6 +2219,35 @@ class TestSkillForgeProposalsErrors:
             with pytest.raises(SkillForgeProposalRejectError):
                 await handler("p1", req)
 
+    async def test_approve_skips_version_for_different_skill(self, tmp_path: Path) -> None:
+        """A version with mismatched skill_id is skipped (354->351)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._skill_forge_proposals import make_skill_forge_proposals_router
+
+        proposals_dir = tmp_path / "skill_forge" / "proposals"
+        proposals_dir.mkdir(parents=True)
+        (proposals_dir / "p2.json").write_text(
+            json.dumps(
+                {"id": "p2", "skill_id": "s_match", "instructions": "x", "status": "PROPOSAL"}
+            )
+        )
+        # Seed an existing version for a DIFFERENT skill_id
+        versions_dir = tmp_path / "skill_versions"
+        versions_dir.mkdir(parents=True)
+        (versions_dir / "v_other.json").write_text(
+            json.dumps({"id": "v_other", "skill_id": "different_skill", "version_number": 5})
+        )
+
+        router = make_skill_forge_proposals_router(
+            audit_log=NoopAuditLog(), storage_root=tmp_path
+        )
+        handler = next(
+            r.endpoint for r in router.routes if "/approve" in r.path and "POST" in r.methods
+        )
+        resp = await handler("p2")
+        assert resp is not None
+
     async def test_approve_skips_malformed_version_json(self, tmp_path: Path) -> None:
         """A malformed skill_versions JSON file is silently skipped during approve (356-357)."""
         from core_errors import NoopAuditLog
