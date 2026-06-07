@@ -2103,6 +2103,121 @@ class TestAgentsErrors:
         assert AgentListError(message="m", timestamp=ts, cause=None).http_status() == 500
 
 
+class TestAppLifespan:
+    """Cover create_app's lifespan async function with background tasks."""
+
+    def test_lifespan_with_compaction_enabled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Exercise lifespan with compaction + cron + webhook + skill_forge."""
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+        from meridiand._config import (
+            CompactionConfig,
+            CronSchedulerConfig,
+            SkillForgeConfig,
+            WebhookSenderConfig,
+        )
+
+        # Patch the long-running background loops to no-ops so the lifespan
+        # exercises the create_task branches without actually running them.
+        async def _noop(*_a: Any, **_k: Any) -> None:
+            return None
+
+        monkeypatch.setattr("meridiand._app.run_compaction_loop", _noop)
+        monkeypatch.setattr("meridiand._app.run_cron_scheduler_loop", _noop)
+        monkeypatch.setattr("meridiand._app.run_webhook_sender_loop", _noop)
+        monkeypatch.setattr("meridiand._app.run_skill_forge_loop", _noop)
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(
+            audit,
+            storage_root=tmp_path,
+            compaction=CompactionConfig(enabled=True),
+            cron_scheduler=CronSchedulerConfig(),
+            webhook_sender=WebhookSenderConfig(),
+            skill_forge=SkillForgeConfig(enabled=True),
+        )
+
+        # Use TestClient as context manager — triggers lifespan
+        with TestClient(app) as client:
+            resp = client.get("/healthz")
+            assert resp.status_code == 200
+
+    def test_lifespan_with_plugin_loader(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Lifespan that loads plugins and logs results."""
+        from unittest.mock import MagicMock
+
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        async def _noop(*_a: Any, **_k: Any) -> None:
+            return None
+
+        monkeypatch.setattr("meridiand._app.run_cron_scheduler_loop", _noop)
+        monkeypatch.setattr("meridiand._app.run_webhook_sender_loop", _noop)
+
+        # Mock plugin loader with errors and successes
+        plugin_loader = MagicMock()
+        load_result = MagicMock()
+        load_result.manifests = ["plugin1"]
+        load_result.errors = [
+            MagicMock(message="plugin err 1", plugin_name="p1", code="E1"),
+        ]
+        plugin_loader.load_all.return_value = load_result
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(
+            audit,
+            storage_root=tmp_path,
+            plugin_loader=plugin_loader,
+        )
+
+        with TestClient(app) as client:
+            resp = client.get("/healthz")
+            assert resp.status_code == 200
+
+    def test_lifespan_with_sighup_handler(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Lifespan that installs + removes SIGHUP handler when config_path + model_router set."""
+        from fastapi.testclient import TestClient
+        from meridian_sdk_provider import ModelRouter, ModelRoutingPolicy
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        async def _noop(*_a: Any, **_k: Any) -> None:
+            return None
+
+        monkeypatch.setattr("meridiand._app.run_cron_scheduler_loop", _noop)
+        monkeypatch.setattr("meridiand._app.run_webhook_sender_loop", _noop)
+        monkeypatch.setattr("meridiand._app.install_sighup_handler", lambda **_k: None)
+        monkeypatch.setattr("meridiand._app.remove_sighup_handler", lambda: None)
+
+        cfg_path = tmp_path / "config.yml"
+        cfg_path.touch()
+        audit = FileAuditLog(tmp_path)
+
+        router = ModelRouter(registry=None, policy=ModelRoutingPolicy(rules=[], fallbacks=[]))
+        app = create_app(
+            audit,
+            storage_root=tmp_path,
+            config_path=cfg_path,
+            model_router=router,
+        )
+
+        with TestClient(app) as client:
+            resp = client.get("/healthz")
+            assert resp.status_code == 200
+
+
 class TestReplayHandler:
     """Cover the replay endpoint generic-exception wrap."""
 
