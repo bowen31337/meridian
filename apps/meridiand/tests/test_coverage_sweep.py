@@ -2103,6 +2103,115 @@ class TestAgentsErrors:
         assert AgentListError(message="m", timestamp=ts, cause=None).http_status() == 500
 
 
+class TestSkillsLoaders:
+    """Cover NpmSkillLoader + GitSkillLoader + FileSkillLoader paths."""
+
+    def test_local_skill_loader_invalid_json(self, tmp_path: Path) -> None:
+        from meridiand._skills import FileSkillLoader, SkillInstallSourceLoadError
+
+        (tmp_path / "skill.json").write_text("not json {{{")
+        with pytest.raises(SkillInstallSourceLoadError):
+            FileSkillLoader().load(f"file://{tmp_path}")
+
+    def test_local_skill_loader_os_error(self, tmp_path: Path) -> None:
+        from meridiand._skills import FileSkillLoader, SkillInstallSourceLoadError
+
+        with pytest.raises(SkillInstallSourceLoadError):
+            FileSkillLoader().load(f"file://{tmp_path}/nonexistent")
+
+    def test_npm_skill_loader_parses_versioned_spec(self) -> None:
+        from meridiand._skills import NpmSkillLoader, SkillInstallSourceLoadError
+
+        with patch(
+            "meridiand._skills.urllib.request.urlopen",
+            side_effect=RuntimeError("network boom"),
+        ):
+            for spec in (
+                "npm:@scope/pkg@1.0.0",
+                "npm:plain-pkg@1.0.0",
+                "npm:plain-pkg",
+                "npm:@scope/pkg",
+            ):
+                with pytest.raises(SkillInstallSourceLoadError):
+                    NpmSkillLoader().load(spec)
+
+    def test_npm_skill_loader_returns_meridian_skill_inline(self) -> None:
+        from contextlib import contextmanager
+        from io import BytesIO
+
+        from meridiand._skills import NpmSkillLoader
+
+        @contextmanager
+        def _fake_urlopen(*_a: Any, **_k: Any) -> Any:
+            yield BytesIO(json.dumps({"meridian-skill": {"id": "s1"}}).encode())
+
+        with patch("meridiand._skills.urllib.request.urlopen", _fake_urlopen):
+            result = NpmSkillLoader().load("npm:pkg")
+            assert result == {"id": "s1"}
+
+    def test_npm_skill_loader_no_tarball(self) -> None:
+        from contextlib import contextmanager
+        from io import BytesIO
+
+        from meridiand._skills import NpmSkillLoader, SkillInstallSourceLoadError
+
+        @contextmanager
+        def _fake_urlopen(*_a: Any, **_k: Any) -> Any:
+            yield BytesIO(json.dumps({"dist": {}}).encode())
+
+        with patch("meridiand._skills.urllib.request.urlopen", _fake_urlopen):
+            with pytest.raises(SkillInstallSourceLoadError, match="No tarball"):
+                NpmSkillLoader().load("npm:pkg")
+
+    def test_git_skill_loader_clone_failure(self) -> None:
+        import subprocess
+
+        from meridiand._skills import GitSkillLoader, SkillInstallSourceLoadError
+
+        with patch(
+            "meridiand._skills.subprocess.run",
+            side_effect=subprocess.CalledProcessError(
+                returncode=1, cmd=["git", "clone"], stderr=b"clone failed"
+            ),
+        ):
+            with pytest.raises(SkillInstallSourceLoadError):
+                GitSkillLoader().load("https://github.com/x/y.git")
+
+    def test_git_skill_loader_generic_exception(self) -> None:
+        from meridiand._skills import GitSkillLoader, SkillInstallSourceLoadError
+
+        with patch(
+            "meridiand._skills.subprocess.run",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(SkillInstallSourceLoadError):
+                GitSkillLoader().load("git+https://github.com/x/y.git#main")
+
+    def test_git_skill_loader_no_manifest(self) -> None:
+        from meridiand._skills import GitSkillLoader, SkillInstallSourceLoadError
+
+        with patch("meridiand._skills.subprocess.run"):
+            with pytest.raises(SkillInstallSourceLoadError):
+                GitSkillLoader().load("https://github.com/x/y.git")
+
+    def test_git_skill_loader_manifest_parse_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from contextlib import contextmanager
+
+        from meridiand._skills import GitSkillLoader, SkillInstallSourceLoadError
+
+        @contextmanager
+        def _fake_tmp(*_a: Any, **_k: Any) -> Any:
+            (tmp_path / "skill.json").write_text("not json {{{")
+            yield str(tmp_path)
+
+        monkeypatch.setattr("meridiand._skills.tempfile.TemporaryDirectory", _fake_tmp)
+        with patch("meridiand._skills.subprocess.run"):
+            with pytest.raises(SkillInstallSourceLoadError):
+                GitSkillLoader().load("https://github.com/x/y.git")
+
+
 class TestMessagesHelper:
     async def test_collect_handles_all_event_types(self) -> None:
         """_collect handles MessageStart/TextDelta/ToolUseStart/ToolInputDelta/MessageDelta/MessageStop."""
