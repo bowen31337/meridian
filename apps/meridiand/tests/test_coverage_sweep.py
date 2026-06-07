@@ -847,6 +847,25 @@ class TestEventsHandlers:
                 await handler("s1", limit=10, offset=0)
 
 
+class TestImportsTranslators:
+    """Cover metadata branches in OpenClaw/Hermes translators."""
+
+    def test_translate_openclaw_with_description(self) -> None:
+        from meridiand._imports import OpenClawRecord, _translate_openclaw
+
+        rec = OpenClawRecord(
+            id="x1",
+            kind="channel",
+            name="test_channel",
+            description="A test description",
+            metadata={"key1": "val1"},
+        )
+        translated, lossy = _translate_openclaw(rec, now=pagination_now())
+        assert "openclaw_description" in translated["metadata"]
+        assert "openclaw_meta_key1" in translated["metadata"]
+        assert "metadata" in lossy
+
+
 class TestSystemChannelHelpers:
     """Cover helpers in _system_channel."""
 
