@@ -985,6 +985,191 @@ class TestImportsTranslators:
         assert "metadata" in lossy
 
 
+class TestSmallGapsSweep:
+    """Cover small scattered gaps in multiple modules."""
+
+    # ---- _channels.py ----
+    def test_channels_error_http_statuses(self) -> None:
+        from meridiand._channels import (
+            ChannelCreateError,
+            ChannelInvalidRequestError,
+            ChannelPairError,
+        )
+
+        assert (
+            ChannelCreateError(message="m", timestamp="t", cause=None).http_status() == 500
+        )
+        assert (
+            ChannelInvalidRequestError(message="m", timestamp="t").http_status() == 422
+        )
+        assert (
+            ChannelPairError(message="m", timestamp="t", cause=None).http_status() == 500
+        )
+
+    async def test_channels_create_generic_exception_wrap(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 196-216."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._channels import (
+            ChannelCreateError,
+            ChannelCreateRequest,
+            make_channels_router,
+        )
+
+        router = make_channels_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/channels" and "POST" in r.methods
+        )
+        req = ChannelCreateRequest(
+            name="c",
+            kind="slack",
+            config={"token_vault_ref": "v1/k1"},
+        )
+        with patch("meridiand._channels.json.dumps", side_effect=RuntimeError("boom")):
+            with pytest.raises(ChannelCreateError):
+                await handler(req)
+
+    async def test_channels_pair_generic_exception_wrap(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 272-291."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._channels import (
+            ChannelPairError,
+            ChannelPairRequest,
+            make_channels_router,
+        )
+
+        chd = tmp_path / "channels"
+        chd.mkdir()
+        (chd / "c1.json").write_text(json.dumps({"id": "c1"}))
+
+        router = make_channels_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/channels/{channel_id}/pair" and "POST" in r.methods
+        )
+        req = ChannelPairRequest(user_profile_id="u1")
+        with patch("meridiand._channels.json.dumps", side_effect=RuntimeError("boom")):
+            with pytest.raises(ChannelPairError):
+                await handler("c1", req)
+
+    # ---- _secret_ref.py ----
+    async def test_secret_ref_resolve_encrypted_file_no_backend(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 140-148."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._secret_ref import SecretRefResolveError, SecretRefResolver
+
+        vd = tmp_path / "vaults"
+        vd.mkdir()
+        (vd / "v1.json").write_text(
+            json.dumps({"id": "v1", "backend": "encrypted_file"})
+        )
+
+        resolver = SecretRefResolver(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            vault_backend=None,
+        )
+        with pytest.raises(SecretRefResolveError):
+            await resolver.resolve("secret_ref://vault/v1/k")
+
+    async def test_secret_ref_resolve_generic_exception(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 197-218."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._secret_ref import SecretRefResolveError, SecretRefResolver
+
+        vd = tmp_path / "vaults"
+        vd.mkdir()
+        (vd / "v1.json").write_text(
+            json.dumps({"id": "v1", "backend": "os_keychain"})
+        )
+
+        resolver = SecretRefResolver(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+        )
+        with patch(
+            "meridiand._secret_ref.json.loads",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(SecretRefResolveError):
+                await resolver.resolve("secret_ref://vault/v1/k")
+
+    # ---- _skill_forge.py ----
+    async def test_skill_forge_build_proposal_generic_exception(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 451-473."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._skill_forge import (
+            SkillForgeProposalError,
+            build_skill_version_proposal,
+        )
+
+        # Patch _proposal_version_id (runs early) to raise a generic exception.
+        with patch(
+            "meridiand._skill_forge._proposal_version_id",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(SkillForgeProposalError):
+                await build_skill_version_proposal(
+                    result_text=json.dumps(
+                        {"instructions": "i", "tools": [], "tests": []}
+                    ),
+                    job={"id": "j1", "skill_id": "s1"},
+                    run_id="r1",
+                    proposals_dir=tmp_path / "proposals",
+                    user_profiles_dir=tmp_path / "users",
+                    notifications_dir=tmp_path / "notifs",
+                    audit_log=NoopAuditLog(),
+                )
+
+    # ---- _session_cancel.py ----
+    def test_walk_descendants_empty_sessions_dir(self, tmp_path: Path) -> None:
+        """Covers 75."""
+        from meridiand._session_cancel import _walk_descendants
+
+        assert _walk_descendants("s1", tmp_path) == []
+
+    def test_walk_descendants_bad_json(self, tmp_path: Path) -> None:
+        """Covers 85-86."""
+        from meridiand._session_cancel import _walk_descendants
+
+        sd = tmp_path / "sessions" / "s1"
+        sd.mkdir(parents=True)
+        (sd / "manifest.json").write_text("not json")
+        assert _walk_descendants("s1", tmp_path) == []
+
+    def test_load_pending_tool_calls_no_file(self, tmp_path: Path) -> None:
+        """Covers default empty path."""
+        from meridiand._session_cancel import _load_pending_tool_calls
+
+        assert _load_pending_tool_calls(tmp_path, "s1") == []
+
+    def test_load_pending_tool_calls_bad_json(self, tmp_path: Path) -> None:
+        """Covers 110-111."""
+        from meridiand._session_cancel import _load_pending_tool_calls
+
+        cd = tmp_path / "checkpoints" / "s1"
+        cd.mkdir(parents=True)
+        (cd / "latest.json").write_text("not json")
+        assert _load_pending_tool_calls(tmp_path, "s1") == []
+
+
 class TestImportsHandlerWriteErrors:
     """Cover write-phase ImportWriteError wraps for each import endpoint."""
 
