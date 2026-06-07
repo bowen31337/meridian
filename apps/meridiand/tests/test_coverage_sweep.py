@@ -291,6 +291,50 @@ class TestCheckpointPerCall:
         assert resp.status_code == 422
 
 
+class TestVaultBackendOsKeychain:
+    def test_now_helper(self) -> None:
+        from meridiand._vault_backend_os_keychain import _now
+
+        s = _now()
+        assert isinstance(s, str) and "T" in s
+
+    def test_default_keyring_import(self) -> None:
+        """Without injected _keyring, the constructor imports the real keyring module."""
+        from meridiand._vault_backend_os_keychain import OsKeychainVaultBackend
+
+        try:
+            backend = OsKeychainVaultBackend()
+        except Exception:
+            pytest.skip("keyring not available on this system")
+        assert backend._kr is not None
+
+    def test_list_secrets_filters_existing(self) -> None:
+        from meridiand._vault_backend_os_keychain import OsKeychainVaultBackend
+
+        class _FakeKeyring:
+            def __init__(self) -> None:
+                self.store: dict[tuple[str, str], str] = {}
+
+            def get_password(self, svc: str, account: str) -> str | None:
+                return self.store.get((svc, account))
+
+            def set_password(self, svc: str, account: str, password: str) -> None:
+                self.store[(svc, account)] = password
+
+            def delete_password(self, svc: str, account: str) -> None:
+                self.store.pop((svc, account), None)
+
+        kr = _FakeKeyring()
+        backend = OsKeychainVaultBackend(_keyring=kr)
+        backend.store_secret("v1", "k1", "val1", "2024-01-01T00:00:00Z")
+        items = backend.list_secrets("v1", ["k1", "missing"])
+        assert len(items) == 1
+        assert "value" not in items[0]
+        # Delete existing + missing
+        assert backend.delete_secret("v1", "k1") is True
+        assert backend.delete_secret("v1", "missing") is False
+
+
 class TestVaultBackendEncryptedFile:
     def test_unlock_error_http_status(self) -> None:
         from meridiand._vault_backend_encrypted_file import VaultBackendUnlockError
