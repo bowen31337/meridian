@@ -375,6 +375,32 @@ class TestSkillForgePrecisionErrors:
         assert metric is not None
 
 
+class TestSessionsErrors:
+    def test_all_http_statuses(self) -> None:
+        from meridiand._sessions import (
+            MessageAppendError,
+            MessageAppendRejectedError,
+            MessageListError,
+            SessionCreateError,
+            SessionGetError,
+            SessionListError,
+            SessionNotFoundError,
+            ThreadCreateError,
+            ThreadListError,
+        )
+
+        ts = pagination_now()
+        assert SessionCreateError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert ThreadListError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert MessageListError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert ThreadCreateError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert MessageAppendRejectedError(message="m", timestamp=ts).http_status() == 422
+        assert MessageAppendError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert SessionListError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert SessionNotFoundError(message="m", timestamp=ts).http_status() == 404
+        assert SessionGetError(message="m", timestamp=ts, cause=None).http_status() == 500
+
+
 class TestMemoryStoresGenericExceptions:
     async def test_create_generic_exception_wrapped(self, tmp_path: Path) -> None:
         from core_errors import NoopAuditLog
