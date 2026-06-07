@@ -291,6 +291,172 @@ class TestCheckpointPerCall:
         assert resp.status_code == 422
 
 
+class TestResumeGenericException:
+    async def test_resume_zero_model_calls_keeps_phase(self, tmp_path: Path) -> None:
+        """_run_harness returning (0, _) skips the phase='idle' assignment (123->149)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._resume import make_resume_router
+
+        fixture_dir = tmp_path / "fixtures" / "s2"
+        fixture_dir.mkdir(parents=True)
+        (fixture_dir / "model_responses.ndjson").write_text(
+            json.dumps([{"type": "message_stop"}]) + "\n"
+        )
+        (fixture_dir / "tool_responses.ndjson").write_text(
+            json.dumps({"is_error": False, "content": "ok"}) + "\n"
+        )
+
+        router = make_resume_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/resume" in r.path and "POST" in r.methods
+        )
+
+        async def _zero_run(*_a: Any, **_k: Any) -> tuple[int, int]:
+            return 0, 0
+
+        with patch("meridiand._resume._run_harness", _zero_run):
+            resp = await handler("s2")
+        assert resp is not None
+
+    async def test_resume_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        """A generic exception inside resume is wrapped in ResumeError (lines 128-147)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._resume import (
+            ResumeError,
+            make_resume_router,
+        )
+
+        # Pre-create fixture files so resume gets past the typed-error guards
+        fixture_dir = tmp_path / "fixtures" / "s1"
+        fixture_dir.mkdir(parents=True)
+        (fixture_dir / "model_responses.ndjson").write_text(
+            json.dumps([{"type": "message_stop"}]) + "\n"
+        )
+        (fixture_dir / "tool_responses.ndjson").write_text(
+            json.dumps({"is_error": False, "content": "ok"}) + "\n"
+        )
+
+        router = make_resume_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/resume" in r.path and "POST" in r.methods
+        )
+        with patch(
+            "meridiand._resume._run_harness",
+            side_effect=RuntimeError("harness boom"),
+        ):
+            with pytest.raises(ResumeError):
+                await handler("s1")
+
+
+class TestErrorEnvelopeHooksDispatch:
+    async def test_meridian_error_with_cause_records_exception(self, tmp_path: Path) -> None:
+        """MeridianError with non-None cause triggers span.record_exception (line 79).
+        Also dispatches on_error hooks when hooks_dir is set (lines 90-99)."""
+        from core_errors import HandlerOptions, NoopAuditLog
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from meridiand._error_envelope_middleware import ErrorEnvelopeMiddleware
+
+        class _CustomMeridianError(Exception):
+            code = "custom_failed"
+            message = "boom"
+            cause = ValueError("underlying")
+            timestamp = pagination_now()
+
+            def http_status(self) -> int:
+                return 500
+
+        from core_errors import MeridianError
+
+        class _MEErr(MeridianError):
+            def __init__(self) -> None:
+                super().__init__(
+                    code="custom_failed",
+                    message="boom",
+                    timestamp=pagination_now(),
+                    cause=ValueError("underlying"),
+                )
+
+            def http_status(self) -> int:
+                return 500
+
+        # Build minimal ASGI app that raises a MeridianError
+        async def _raising_app(scope: Any, receive: Any, send: Any) -> None:
+            if scope["type"] == "http":
+                raise _MEErr()
+
+        hooks_dir = tmp_path / "hooks"
+        hooks_dir.mkdir()
+        mw = ErrorEnvelopeMiddleware(
+            _raising_app, audit_log=NoopAuditLog(), hooks_dir=hooks_dir
+        )
+
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/x",
+            "query_string": b"",
+            "headers": [],
+            "client": ("127.0.0.1", 1),
+            "server": ("127.0.0.1", 8888),
+        }
+
+        async def _receive() -> dict[str, Any]:
+            return {"type": "http.request"}
+
+        sent: list[dict[str, Any]] = []
+
+        async def _send(m: Any) -> None:
+            sent.append(m)
+
+        await mw(scope, _receive, _send)
+        assert any(s["type"] == "http.response.start" for s in sent)
+
+    async def test_unexpected_error_dispatches_on_error_hooks(self, tmp_path: Path) -> None:
+        """A non-MeridianError exception triggers the on_error hooks dispatch (149-150)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._error_envelope_middleware import ErrorEnvelopeMiddleware
+
+        async def _raising_app(scope: Any, receive: Any, send: Any) -> None:
+            if scope["type"] == "http":
+                raise RuntimeError("unexpected")
+
+        hooks_dir = tmp_path / "hooks"
+        hooks_dir.mkdir()
+        mw = ErrorEnvelopeMiddleware(
+            _raising_app, audit_log=NoopAuditLog(), hooks_dir=hooks_dir
+        )
+
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "path": "/x",
+            "query_string": b"",
+            "headers": [],
+            "client": ("127.0.0.1", 1),
+            "server": ("127.0.0.1", 8888),
+        }
+
+        async def _receive() -> dict[str, Any]:
+            return {"type": "http.request"}
+
+        sent: list[dict[str, Any]] = []
+
+        async def _send(m: Any) -> None:
+            sent.append(m)
+
+        await mw(scope, _receive, _send)
+        assert any(s["type"] == "http.response.start" for s in sent)
+
+
 class TestCursorMiddlewareEdgeCases:
     async def test_non_http_scope_passthrough(self) -> None:
         """websocket scope is passed straight through (lines 35-36)."""
