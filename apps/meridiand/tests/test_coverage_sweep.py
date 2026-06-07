@@ -1890,6 +1890,34 @@ class TestSessionsHandlersGenericExceptions:
             with pytest.raises(SessionCreateError):
                 await handler(req)
 
+    async def test_get_session_not_found(self, tmp_path: Path) -> None:
+        from meridiand._sessions import SessionNotFoundError
+
+        router = self._make_router_with_writer(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/sessions/{session_id}" and "GET" in r.methods
+        )
+        with pytest.raises(SessionNotFoundError):
+            await handler("nonexistent")
+
+    async def test_get_session_success(self, tmp_path: Path) -> None:
+        sd = tmp_path / "sessions" / "s_ok"
+        sd.mkdir(parents=True)
+        (sd / "manifest.json").write_text(
+            json.dumps({"session_id": "s_ok"})
+        )
+
+        router = self._make_router_with_writer(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/sessions/{session_id}" and "GET" in r.methods
+        )
+        resp = await handler("s_ok")
+        assert resp is not None
+
     async def test_get_session_generic_exception_wrapped(self, tmp_path: Path) -> None:
         from meridiand._sessions import SessionGetError
 
