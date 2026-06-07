@@ -2751,6 +2751,39 @@ class TestSkillsLoaders:
             with pytest.raises(SkillInstallSourceLoadError):
                 NpmSkillLoader().load("npm:pkg")
 
+    def test_npm_skill_loader_tarball_missing_skill_json(self) -> None:
+        """Covers 341->340, 343->340, 352 (tarball without skill.json)."""
+        from contextlib import contextmanager
+        import io
+        import tarfile
+
+        from meridiand._skills import NpmSkillLoader, SkillInstallSourceLoadError
+
+        # Build a tar.gz with no skill.json (just a placeholder file).
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tf:
+            data = b"hello"
+            info = tarfile.TarInfo("package/other.txt")
+            info.size = len(data)
+            tf.addfile(info, io.BytesIO(data))
+        tarball_bytes = buf.getvalue()
+
+        calls = {"n": 0}
+
+        @contextmanager
+        def _fake_urlopen(*_a: Any, **_k: Any) -> Any:
+            calls["n"] += 1
+            if calls["n"] == 1:
+                yield io.BytesIO(
+                    json.dumps({"dist": {"tarball": "http://e/x.tgz"}}).encode()
+                )
+            else:
+                yield io.BytesIO(tarball_bytes)
+
+        with patch("meridiand._skills.urllib.request.urlopen", _fake_urlopen):
+            with pytest.raises(SkillInstallSourceLoadError, match="not found"):
+                NpmSkillLoader().load("npm:pkg")
+
     def test_npm_skill_loader_returns_from_tarball(
         self, tmp_path: Path
     ) -> None:
