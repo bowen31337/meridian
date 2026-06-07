@@ -2523,6 +2523,48 @@ class TestAppLifespan:
             assert resp.status_code == 200
 
 
+class TestReplayHelpers:
+    """Cover small helpers in _replay."""
+
+    def test_find_divergence_no_divergence(self) -> None:
+        from meridiand._replay import _find_divergence
+
+        events = [{"type": "x", "data": {}}, {"type": "y", "data": {}}]
+        assert _find_divergence(events, events.copy()) is None
+
+    def test_find_divergence_divergence_at_index(self) -> None:
+        from meridiand._replay import _find_divergence
+
+        exp = [{"type": "x", "data": {}}]
+        act = [{"type": "y", "data": {}}]
+        result = _find_divergence(exp, act)
+        assert result is not None
+        seq, exp_event, act_event = result
+        assert seq == 0
+
+    def test_find_divergence_different_lengths_expected_longer(self) -> None:
+        from meridiand._replay import _find_divergence
+
+        exp = [{"type": "x"}, {"type": "y"}]
+        act = [{"type": "x"}]
+        result = _find_divergence(exp, act)
+        assert result is not None
+        seq, _, act_event = result
+        assert seq == 1
+        assert act_event is None
+
+    def test_find_divergence_different_lengths_actual_longer(self) -> None:
+        from meridiand._replay import _find_divergence
+
+        exp = [{"type": "x"}]
+        act = [{"type": "x"}, {"type": "y"}]
+        result = _find_divergence(exp, act)
+        assert result is not None
+        seq, exp_event, _ = result
+        assert seq == 1
+        assert exp_event is None
+
+
 class TestReplayHandler:
     """Cover the replay endpoint generic-exception wrap."""
 
