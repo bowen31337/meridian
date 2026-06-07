@@ -291,6 +291,90 @@ class TestCheckpointPerCall:
         assert resp.status_code == 422
 
 
+class TestSkillForgePrecisionErrors:
+    def test_skill_forge_precision_typed_error_reraised(self, tmp_path: Path) -> None:
+        """SkillForgePrecisionError raised inside is re-raised (165-179)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._skill_forge_precision import (
+            SkillForgePrecisionError,
+            compute_precision_metric,
+        )
+
+        proposals_dir = tmp_path / "proposals"
+        activations_dir = tmp_path / "activations"
+        precision_dir = tmp_path / "precision"
+        proposals_dir.mkdir()
+        activations_dir.mkdir()
+        precision_dir.mkdir()
+
+        pre = SkillForgePrecisionError(message="pre", timestamp=pagination_now(), cause=None)
+        with patch(
+            "meridiand._skill_forge_precision.json.dumps",
+            side_effect=pre,
+        ):
+            with pytest.raises(SkillForgePrecisionError):
+                compute_precision_metric(
+                    proposals_dir=proposals_dir,
+                    activations_dir=activations_dir,
+                    precision_dir=precision_dir,
+                    audit_log=NoopAuditLog(),
+                )
+
+    def test_skill_forge_precision_skips_records_without_ids(self, tmp_path: Path) -> None:
+        """Records without id/skill_version_id are skipped (branches 110->106, 125->120)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._skill_forge_precision import compute_precision_metric
+
+        proposals_dir = tmp_path / "proposals"
+        activations_dir = tmp_path / "activations"
+        precision_dir = tmp_path / "precision"
+        proposals_dir.mkdir()
+        activations_dir.mkdir()
+        precision_dir.mkdir()
+        # Proposal without 'id'
+        (proposals_dir / "noid.json").write_text(json.dumps({"name": "noid"}))
+        # Activation with active status but no skill_version_id
+        (activations_dir / "noid.json").write_text(
+            json.dumps({"status": "active"})
+        )
+        metric = compute_precision_metric(
+            proposals_dir=proposals_dir,
+            activations_dir=activations_dir,
+            precision_dir=precision_dir,
+            audit_log=NoopAuditLog(),
+        )
+        assert metric is not None
+
+    def test_skill_forge_precision_skips_malformed_files(self, tmp_path: Path) -> None:
+        """Malformed JSON in proposals/activations is silently skipped (112-113, 127-128)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._skill_forge_precision import compute_precision_metric
+
+        proposals_dir = tmp_path / "proposals"
+        activations_dir = tmp_path / "activations"
+        precision_dir = tmp_path / "precision"
+        proposals_dir.mkdir()
+        activations_dir.mkdir()
+        precision_dir.mkdir()
+        (proposals_dir / "bad.json").write_text("not json {{{")
+        (proposals_dir / "good.json").write_text(json.dumps({"id": "p1"}))
+        (activations_dir / "bad.json").write_text("not json {{{")
+        (activations_dir / "good.json").write_text(
+            json.dumps({"status": "active", "skill_version_id": "p1"})
+        )
+
+        metric = compute_precision_metric(
+            proposals_dir=proposals_dir,
+            activations_dir=activations_dir,
+            precision_dir=precision_dir,
+            audit_log=NoopAuditLog(),
+        )
+        assert metric is not None
+
+
 class TestMemoryAnniversaryErrors:
     def test_today_helper(self) -> None:
         from meridiand._memory_anniversary import _today
