@@ -375,6 +375,81 @@ class TestSkillForgePrecisionErrors:
         assert metric is not None
 
 
+class TestSystemConfigEndpoint:
+    """Cover PUT /v1/system/config endpoint paths."""
+
+    @staticmethod
+    def _make_router_client(audit_log, model_router):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from meridiand._system_config import make_system_config_router
+
+        router = make_system_config_router(audit_log=audit_log, model_router=model_router)
+        app = FastAPI()
+        app.include_router(router)
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_reload_invalid_yaml(self) -> None:
+        from core_errors import NoopAuditLog
+        from meridian_sdk_provider import ModelRouter
+
+        from meridian_sdk_provider import ModelRoutingPolicy
+        router = ModelRouter(registry=None, policy=ModelRoutingPolicy(rules=[], fallbacks=[]))
+        client = self._make_router_client(NoopAuditLog(), router)
+        resp = client.put(
+            "/v1/system/config",
+            content="not yaml ::",
+            headers={"content-type": "text/yaml"},
+        )
+        assert resp.status_code == 422
+
+    def test_reload_validate_error(self) -> None:
+        from core_errors import NoopAuditLog
+        from meridian_sdk_provider import ModelRouter
+
+        from meridiand._config import MERIDIAN_CONFIG_VERSION
+
+        from meridian_sdk_provider import ModelRoutingPolicy
+        router = ModelRouter(registry=None, policy=ModelRoutingPolicy(rules=[], fallbacks=[]))
+        client = self._make_router_client(NoopAuditLog(), router)
+        yaml_body = (
+            f"version: {MERIDIAN_CONFIG_VERSION}\n"
+            "storage_root: /tmp/m\n"
+            "daemon:\n"
+            "  log_level: info\n"
+            "  bind:\n"
+            "    host: 127.0.0.1\n"
+            "    port: 70000\n"
+        )
+        resp = client.put(
+            "/v1/system/config",
+            content=yaml_body,
+            headers={"content-type": "text/yaml"},
+        )
+        assert resp.status_code == 422
+
+    def test_reload_success_no_registry(self) -> None:
+        from core_errors import NoopAuditLog
+        from meridian_sdk_provider import ModelRouter
+
+        from meridiand._config import MERIDIAN_CONFIG_VERSION
+
+        from meridian_sdk_provider import ModelRoutingPolicy
+        router = ModelRouter(registry=None, policy=ModelRoutingPolicy(rules=[], fallbacks=[]))
+        client = self._make_router_client(NoopAuditLog(), router)
+        yaml_body = (
+            f"version: {MERIDIAN_CONFIG_VERSION}\n"
+            "storage_root: /tmp/m\n"
+        )
+        resp = client.put(
+            "/v1/system/config",
+            content=yaml_body,
+            headers={"content-type": "text/yaml"},
+        )
+        assert resp.status_code == 200
+
+
 class TestSessionsErrors:
     def test_all_http_statuses(self) -> None:
         from meridiand._sessions import (
