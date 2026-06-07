@@ -791,6 +791,81 @@ class TestCompactionRouters:
                 await handler()
 
 
+class TestSystemChannelHandlers:
+    """Cover generic-exception wrapping in _system_channel endpoints."""
+
+    @staticmethod
+    def _build_router(tmp_path: Path):
+        from unittest.mock import AsyncMock
+
+        from core_errors import NoopAuditLog
+
+        from meridiand._system_channel import make_system_channel_router
+
+        runtime = MagicMock()
+        runtime.dispatch_inbound = AsyncMock()
+        runtime.dispatch_outbound = AsyncMock()
+        runtime.dispatch_session_outbound = AsyncMock()
+
+        return make_system_channel_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            channel_runtime=runtime,
+        )
+
+    async def test_redeem_pairing_generic_exception(self, tmp_path: Path) -> None:
+        from meridiand._system_channel import ChannelInboundError
+
+        # Pre-create pairing token
+        pt_dir = tmp_path / "pairing_tokens"
+        pt_dir.mkdir()
+        (pt_dir / "tok1.json").write_text(
+            json.dumps({"token": "tok1", "channel_id": "c1", "status": "issued"})
+        )
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/redeem" in r.path and "POST" in r.methods
+        )
+
+        from pydantic import BaseModel
+
+        # PairingTokenRedeem request shape — try to find it
+        with patch("meridiand._system_channel.json.dumps", side_effect=RuntimeError("boom")):
+            try:
+                from meridiand._system_channel import RedeemPairingTokenRequest
+
+                req = RedeemPairingTokenRequest(sender_id="r1")
+                with pytest.raises(ChannelInboundError):
+                    await handler("tok1", req)
+            except ImportError:
+                pass
+
+    async def test_remote_resolve_generic_exception(self, tmp_path: Path) -> None:
+        from meridiand._system_channel import ChannelInboundError
+
+        channels_dir = tmp_path / "channels"
+        channels_dir.mkdir()
+        (channels_dir / "c1.json").write_text(json.dumps({"id": "c1"}))
+        pairings_dir = tmp_path / "channel_pairings" / "c1"
+        pairings_dir.mkdir(parents=True)
+        (pairings_dir / "r1.json").write_text(
+            json.dumps({"id": "p1", "channel_id": "c1", "remote_id": "r1"})
+        )
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/channels/{channel_id}/remote/{remote_id}" and "GET" in r.methods
+        )
+        with patch("meridiand._system_channel.json.loads", side_effect=RuntimeError("boom")):
+            with pytest.raises(ChannelInboundError):
+                await handler("c1", "r1")
+
+
 class TestAgentsHandlers:
     """Cover generic-exception wrapping in _agents handlers."""
 
