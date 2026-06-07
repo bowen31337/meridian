@@ -2972,6 +2972,77 @@ class TestVaultsHandlers:
         with pytest.raises(VaultSecretStoreError):
             await handler("v_enc", req)
 
+    async def test_list_secrets_encrypted_file_no_backend(self, tmp_path: Path) -> None:
+        """List secrets for encrypted_file vault but no backend (786-792)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._vaults import VaultSecretListError, make_vaults_router
+
+        vd = tmp_path / "vaults"
+        vd.mkdir(parents=True)
+        (vd / "v_enc.json").write_text(
+            json.dumps({"id": "v_enc", "name": "v", "backend": "encrypted_file"})
+        )
+        router = make_vaults_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            vault_backend=None,
+            os_keychain_backend=None,
+        )
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/vaults/{vault_id}/secrets" and "GET" in r.methods
+        )
+        with pytest.raises(VaultSecretListError):
+            await handler("v_enc")
+
+    async def test_list_secrets_os_keychain_no_backend(self, tmp_path: Path) -> None:
+        """List secrets for os_keychain vault but no backend (794-799)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._vaults import VaultSecretListError, make_vaults_router
+
+        vd = tmp_path / "vaults"
+        vd.mkdir(parents=True)
+        (vd / "v_kc.json").write_text(
+            json.dumps({"id": "v_kc", "name": "v", "backend": "os_keychain"})
+        )
+        router = make_vaults_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            vault_backend=None,
+            os_keychain_backend=None,
+        )
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/vaults/{vault_id}/secrets" and "GET" in r.methods
+        )
+        with pytest.raises(VaultSecretListError):
+            await handler("v_kc")
+
+    async def test_list_secrets_generic_exception(self, tmp_path: Path) -> None:
+        """List-secrets generic exception (816-832)."""
+        from meridiand._vaults import VaultSecretListError
+
+        vd = tmp_path / "vaults"
+        vd.mkdir(parents=True)
+        (vd / "v1.json").write_text(
+            json.dumps({"id": "v1", "name": "v", "backend": "os_keychain"})
+        )
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/vaults/{vault_id}/secrets"
+            and "GET" in r.methods
+            and r.endpoint.__name__ == "list_vault_secrets"
+        )
+        with patch("meridiand._vaults.json.loads", side_effect=RuntimeError("boom")):
+            with pytest.raises(VaultSecretListError):
+                await handler("v1")
+
     async def test_store_secret_conflict(self, tmp_path: Path) -> None:
         """Secret already exists raises VaultSecretConflictError."""
         from meridiand._vaults import (
