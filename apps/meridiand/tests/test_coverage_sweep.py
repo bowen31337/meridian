@@ -3690,6 +3690,334 @@ class TestMemoryStoresQueryWriteHandlers:
         resp = await handler("m1", req)
         assert resp is not None
 
+    async def test_write_with_event_log_success(self, tmp_path: Path) -> None:
+        """Write with event_log set covers lines 651-661."""
+        from unittest.mock import AsyncMock
+
+        from core_errors import NoopAuditLog
+
+        from meridiand._memory_stores import (
+            MemoryStoreWriteRequest,
+            make_memory_stores_router,
+        )
+
+        stores_dir = tmp_path / "memory_stores"
+        stores_dir.mkdir(parents=True)
+        (stores_dir / "m1.json").write_text(
+            json.dumps({"id": "m1", "backend": "sqlite-vec", "scope": "global"})
+        )
+
+        event_log = MagicMock()
+        event_log.append = AsyncMock()
+
+        router = make_memory_stores_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            event_log=event_log,
+        )
+        handler = next(
+            r.endpoint for r in router.routes if "/write" in r.path
+        )
+        req = MemoryStoreWriteRequest(key="k1", content="hello world")
+        resp = await handler("m1", req)
+        assert resp is not None
+        event_log.append.assert_called_once()
+
+    async def test_write_event_log_failure_wrapped(self, tmp_path: Path) -> None:
+        """event_log.append failing → MemoryStoreWriteError (662-683)."""
+        from unittest.mock import AsyncMock
+
+        from core_errors import NoopAuditLog
+
+        from meridiand._memory_stores import (
+            MemoryStoreWriteError,
+            MemoryStoreWriteRequest,
+            make_memory_stores_router,
+        )
+
+        stores_dir = tmp_path / "memory_stores"
+        stores_dir.mkdir(parents=True)
+        (stores_dir / "m1.json").write_text(
+            json.dumps({"id": "m1", "backend": "sqlite-vec", "scope": "global"})
+        )
+
+        event_log = MagicMock()
+        event_log.append = AsyncMock(side_effect=RuntimeError("event_log boom"))
+
+        router = make_memory_stores_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            event_log=event_log,
+        )
+        handler = next(
+            r.endpoint for r in router.routes if "/write" in r.path
+        )
+        req = MemoryStoreWriteRequest(key="k1", content="hello world")
+        with pytest.raises(MemoryStoreWriteError):
+            await handler("m1", req)
+
+    async def test_write_with_dialectic_net_new(self, tmp_path: Path) -> None:
+        """Dialectic write, net-new label (covers parts of 535-628)."""
+        from meridian_sdk_provider.types import TextDeltaEvent
+
+        from core_errors import NoopAuditLog
+
+        from meridiand._memory_stores import (
+            MemoryStoreWriteRequest,
+            make_memory_stores_router,
+        )
+
+        stores_dir = tmp_path / "memory_stores"
+        stores_dir.mkdir(parents=True)
+        (stores_dir / "m1.json").write_text(
+            json.dumps({"id": "m1", "backend": "sqlite-vec", "scope": "global"})
+        )
+
+        async def _stream(*_a: Any, **_k: Any) -> Any:
+            yield TextDeltaEvent(
+                text=json.dumps({"label": "net-new", "explanation": "ok"})
+            )
+
+        mock_router = MagicMock()
+        mock_router.call = _stream
+
+        router = make_memory_stores_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            model_router=mock_router,
+        )
+        handler = next(
+            r.endpoint for r in router.routes if "/write" in r.path
+        )
+        req = MemoryStoreWriteRequest(
+            key="k1", content="hello world", dialectic=True
+        )
+        resp = await handler("m1", req)
+        assert resp is not None
+
+    async def test_write_with_dialectic_duplicate(self, tmp_path: Path) -> None:
+        """Dialectic write, duplicate label (covers 562-563 and 279->278)."""
+        from meridian_sdk_provider.types import MessageStartEvent, TextDeltaEvent
+
+        from core_errors import NoopAuditLog
+
+        from meridiand._memory_stores import (
+            MemoryStoreWriteRequest,
+            make_memory_stores_router,
+        )
+
+        stores_dir = tmp_path / "memory_stores"
+        stores_dir.mkdir(parents=True)
+        (stores_dir / "m1.json").write_text(
+            json.dumps({"id": "m1", "backend": "sqlite-vec", "scope": "global"})
+        )
+
+        async def _stream(*_a: Any, **_k: Any) -> Any:
+            # Non-text event exercises the False arm of the isinstance check
+            # (covers the 279->278 branch).
+            yield MessageStartEvent(model="m", provider="p")
+            yield TextDeltaEvent(
+                text=json.dumps(
+                    {"label": "duplicate", "match_key": "kx", "explanation": "ok"}
+                )
+            )
+
+        mock_router = MagicMock()
+        mock_router.call = _stream
+
+        fake_kb = MagicMock()
+        fake_kb.bm25_search.return_value = [
+            {"file_path": "kx", "content": "old", "start_line": 0, "end_line": 0}
+        ]
+        fake_kb.vector_search.return_value = [
+            {"file_path": "kx", "content": "old", "start_line": 0, "end_line": 0}
+        ]
+
+        with patch("meridiand._memory_stores.KbStore", return_value=fake_kb):
+            router = make_memory_stores_router(
+                audit_log=NoopAuditLog(),
+                storage_root=tmp_path,
+                model_router=mock_router,
+            )
+            handler = next(
+                r.endpoint for r in router.routes if "/write" in r.path
+            )
+            req = MemoryStoreWriteRequest(
+                key="k1", content="hello world", dialectic=True
+            )
+            resp = await handler("m1", req)
+        assert resp is not None
+
+    async def test_write_with_dialectic_refinement(self, tmp_path: Path) -> None:
+        """Dialectic write, refinement label (covers 566-580)."""
+        from meridian_sdk_provider.types import TextDeltaEvent
+
+        from core_errors import NoopAuditLog
+
+        from meridiand._memory_stores import (
+            MemoryStoreWriteRequest,
+            make_memory_stores_router,
+        )
+
+        stores_dir = tmp_path / "memory_stores"
+        stores_dir.mkdir(parents=True)
+        (stores_dir / "m1.json").write_text(
+            json.dumps({"id": "m1", "backend": "sqlite-vec", "scope": "global"})
+        )
+
+        async def _stream(*_a: Any, **_k: Any) -> Any:
+            yield TextDeltaEvent(
+                text=json.dumps(
+                    {
+                        "label": "refinement",
+                        "match_key": "kx",
+                        "merged_content": "merged content",
+                        "explanation": "ok",
+                    }
+                )
+            )
+
+        mock_router = MagicMock()
+        mock_router.call = _stream
+
+        fake_kb = MagicMock()
+        fake_kb.bm25_search.return_value = [
+            {"file_path": "kx", "content": "old", "start_line": 0, "end_line": 0}
+        ]
+        fake_kb.vector_search.return_value = [
+            {"file_path": "kx", "content": "old", "start_line": 0, "end_line": 0}
+        ]
+        fake_kb.upsert_chunks = MagicMock()
+
+        with patch("meridiand._memory_stores.KbStore", return_value=fake_kb):
+            router = make_memory_stores_router(
+                audit_log=NoopAuditLog(),
+                storage_root=tmp_path,
+                model_router=mock_router,
+            )
+            handler = next(
+                r.endpoint for r in router.routes if "/write" in r.path
+            )
+            req = MemoryStoreWriteRequest(
+                key="k1", content="hello world", dialectic=True
+            )
+            resp = await handler("m1", req)
+        assert resp is not None
+        # Verify the merged content was used
+        fake_kb.upsert_chunks.assert_called_once()
+
+    async def test_write_with_dialectic_contradiction(self, tmp_path: Path) -> None:
+        """Dialectic write, contradiction label (provenance edge)."""
+        from meridian_sdk_provider.types import TextDeltaEvent
+
+        from core_errors import NoopAuditLog
+
+        from meridiand._memory_stores import (
+            MemoryStoreWriteRequest,
+            make_memory_stores_router,
+        )
+
+        stores_dir = tmp_path / "memory_stores"
+        stores_dir.mkdir(parents=True)
+        (stores_dir / "m1.json").write_text(
+            json.dumps({"id": "m1", "backend": "sqlite-vec", "scope": "global"})
+        )
+
+        async def _stream(*_a: Any, **_k: Any) -> Any:
+            yield TextDeltaEvent(
+                text=json.dumps(
+                    {
+                        "label": "contradiction",
+                        "match_key": "kx",
+                        "explanation": "conflicts",
+                    }
+                )
+            )
+
+        mock_router = MagicMock()
+        mock_router.call = _stream
+
+        event_log = MagicMock()
+        from unittest.mock import AsyncMock
+
+        event_log.append = AsyncMock()
+
+        fake_kb = MagicMock()
+        fake_kb.bm25_search.return_value = [
+            {"file_path": "kx", "content": "old", "start_line": 0, "end_line": 0}
+        ]
+        fake_kb.vector_search.return_value = [
+            {"file_path": "kx", "content": "old", "start_line": 0, "end_line": 0}
+        ]
+        fake_kb.has_key.return_value = False
+        fake_kb.upsert_chunks = MagicMock()
+
+        with patch("meridiand._memory_stores.KbStore", return_value=fake_kb):
+            router = make_memory_stores_router(
+                audit_log=NoopAuditLog(),
+                storage_root=tmp_path,
+                model_router=mock_router,
+                event_log=event_log,
+            )
+            handler = next(
+                r.endpoint for r in router.routes if "/write" in r.path
+            )
+            req = MemoryStoreWriteRequest(
+                key="k1", content="hello world", dialectic=True
+            )
+            resp = await handler("m1", req)
+        assert resp is not None
+        prov = tmp_path / "memory_stores" / "m1" / "provenance" / "k1.json"
+        assert prov.exists()
+
+    async def test_write_dialectic_classifier_error(self, tmp_path: Path) -> None:
+        """Dialectic classifier raises → MemoryStoreDialecticError (702-717)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._memory_stores import (
+            MemoryStoreDialecticError,
+            MemoryStoreWriteRequest,
+            make_memory_stores_router,
+        )
+
+        stores_dir = tmp_path / "memory_stores"
+        stores_dir.mkdir(parents=True)
+        (stores_dir / "m1.json").write_text(
+            json.dumps({"id": "m1", "backend": "sqlite-vec", "scope": "global"})
+        )
+
+        async def _stream(*_a: Any, **_k: Any):
+            from meridian_sdk_provider.types import TextDeltaEvent
+
+            yield TextDeltaEvent(text="not-json")
+
+        mock_router = MagicMock()
+        mock_router.call = _stream
+
+        fake_kb = MagicMock()
+        fake_kb.bm25_search.return_value = [
+            {"file_path": "kx", "content": "old", "start_line": 0, "end_line": 0}
+        ]
+        fake_kb.vector_search.return_value = [
+            {"file_path": "kx", "content": "old", "start_line": 0, "end_line": 0}
+        ]
+        fake_kb.has_key.return_value = False
+
+        with patch("meridiand._memory_stores.KbStore", return_value=fake_kb):
+            router = make_memory_stores_router(
+                audit_log=NoopAuditLog(),
+                storage_root=tmp_path,
+                model_router=mock_router,
+            )
+            handler = next(
+                r.endpoint for r in router.routes if "/write" in r.path
+            )
+            req = MemoryStoreWriteRequest(
+                key="k1", content="hello world", dialectic=True
+            )
+            with pytest.raises(MemoryStoreDialecticError):
+                await handler("m1", req)
+
 
 class TestMemoryStoresGenericExceptions:
     async def test_create_generic_exception_wrapped(self, tmp_path: Path) -> None:
@@ -4024,6 +4352,41 @@ class TestMemoryStoresErrors:
         assert MemoryStoreInvalidRequestError(message="m", timestamp=ts).http_status() == 422
         assert MemoryStoreNotFoundError(message="m", timestamp=ts).http_status() == 404
         assert MemoryStoreQueryError(message="m", timestamp=ts, cause=None).http_status() == 500
+
+    def test_write_and_dialectic_error_http_status(self) -> None:
+        """Cover http_status of MemoryStoreWriteError + MemoryStoreDialecticError."""
+        from meridiand._memory_stores import (
+            MemoryStoreDialecticError,
+            MemoryStoreWriteError,
+        )
+
+        ts = pagination_now()
+        assert MemoryStoreWriteError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert (
+            MemoryStoreDialecticError(message="m", timestamp=ts, cause=None).http_status() == 500
+        )
+
+    async def test_create_validation_empty_name(self, tmp_path: Path) -> None:
+        """Empty name → MemoryStoreInvalidRequestError (covers 169 + 340 + 355-369)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._memory_stores import (
+            MemoryStoreCreateRequest,
+            MemoryStoreInvalidRequestError,
+            make_memory_stores_router,
+        )
+
+        router = make_memory_stores_router(
+            audit_log=NoopAuditLog(), storage_root=tmp_path
+        )
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/memory_stores"
+        )
+        req = MemoryStoreCreateRequest(name="   ", backend="sqlite-vec", scope="global")
+        with pytest.raises(MemoryStoreInvalidRequestError):
+            await handler(req)
 
 
 class TestMemoryAnniversaryErrors:
