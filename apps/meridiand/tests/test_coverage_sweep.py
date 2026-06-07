@@ -6,6 +6,8 @@ without needing to spin up a full FastAPI test client where possible.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -287,6 +289,303 @@ class TestCheckpointPerCall:
             }
             resp = client.post("/v1/x/sessions/s8/checkpoint", json=body)
         assert resp.status_code == 422
+
+
+class TestHarnessPoolHelpers:
+    def test_harness_pool_error_http_status(self) -> None:
+        from meridiand._harness_pool import HarnessPoolError
+
+        assert HarnessPoolError(message="m", timestamp="t", cause=None).http_status() == 422
+
+    def test_load_session_traceparent_missing_manifest(self, tmp_path: Path) -> None:
+        from meridiand._harness_pool import HarnessPool
+
+        pool = HarnessPool(
+            storage_root=tmp_path,
+            audit_log=MagicMock(),
+            run_session=MagicMock(),
+            phase_reader=MagicMock(),
+            num_workers=2,
+        )
+        assert pool._load_session_traceparent("nope") == ""
+
+    def test_load_session_traceparent_malformed_manifest(self, tmp_path: Path) -> None:
+        from meridiand._harness_pool import HarnessPool
+
+        (tmp_path / "sessions" / "s1").mkdir(parents=True)
+        (tmp_path / "sessions" / "s1" / "manifest.json").write_text("not json {{{")
+
+        pool = HarnessPool(
+            storage_root=tmp_path,
+            audit_log=MagicMock(),
+            run_session=MagicMock(),
+            phase_reader=MagicMock(),
+            num_workers=2,
+        )
+        assert pool._load_session_traceparent("s1") == ""
+
+    async def test_pool_start_twice_skips_alive_slot(self, tmp_path: Path) -> None:
+        """A second call to start() doesn't replace an alive worker task (223->222)."""
+        from meridiand._harness_pool import HarnessPool
+
+        async def _idle_run(_sid: str) -> tuple[int, int, str]:
+            return 0, 0, ""
+
+        pool = HarnessPool(
+            storage_root=tmp_path,
+            audit_log=MagicMock(),
+            run_session=_idle_run,
+            phase_reader=MagicMock(),
+            num_workers=1,
+        )
+        await pool.start()
+        first_task = pool._slots[0].task
+        assert first_task is not None
+        await pool.start()  # second start: should skip alive slot
+        assert pool._slots[0].task is first_task
+        await pool.stop()
+
+    async def test_pool_start_skips_session_when_phase_reader_raises(
+        self, tmp_path: Path
+    ) -> None:
+        """phase_reader.current_phase raising → skipped via continue (235-236)."""
+        from meridiand._harness_pool import HarnessPool
+
+        # Pre-create a session manifest
+        sessions_dir = tmp_path / "sessions"
+        (sessions_dir / "broken").mkdir(parents=True)
+        (sessions_dir / "broken" / "manifest.json").write_text("{}")
+
+        class _RaisingReader:
+            def current_phase(self, _sid: str) -> str:
+                raise RuntimeError("phase boom")
+
+        pool = HarnessPool(
+            storage_root=tmp_path,
+            audit_log=MagicMock(),
+            run_session=lambda _s: None,  # type: ignore[arg-type]
+            phase_reader=_RaisingReader(),
+            num_workers=2,
+        )
+        await pool.start()
+        await pool.stop()
+
+    async def test_pool_start_typed_error_reraised(self, tmp_path: Path) -> None:
+        """HarnessPoolError raised inside is re-raised (lines 241-259, isinstance branch)."""
+        from meridiand._harness_pool import HarnessPool, HarnessPoolError
+
+        pool = HarnessPool(
+            storage_root=tmp_path,
+            audit_log=MagicMock(),
+            run_session=lambda _s: None,  # type: ignore[arg-type]
+            phase_reader=MagicMock(),
+            num_workers=2,
+        )
+        # Patch asyncio.create_task in the start path to raise HarnessPoolError
+        original = asyncio.create_task
+        raised = HarnessPoolError(message="pre", timestamp=pagination_now(), cause=None)
+
+        def _raising(coro: Any, *args: Any, **kwargs: Any) -> Any:
+            # Close the coro so we don't leak
+            coro.close()
+            raise raised
+
+        with patch.object(asyncio, "create_task", _raising):
+            with pytest.raises(HarnessPoolError):
+                await pool.start()
+
+    async def test_pool_start_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        """A non-HarnessPoolError exception is wrapped (lines 241-259, else branch)."""
+        from meridiand._harness_pool import HarnessPool, HarnessPoolError
+
+        pool = HarnessPool(
+            storage_root=tmp_path,
+            audit_log=MagicMock(),
+            run_session=lambda _s: None,  # type: ignore[arg-type]
+            phase_reader=MagicMock(),
+            num_workers=2,
+        )
+
+        def _raising(coro: Any, *args: Any, **kwargs: Any) -> Any:
+            coro.close()
+            raise RuntimeError("create boom")
+
+        with patch.object(asyncio, "create_task", _raising):
+            with pytest.raises(HarnessPoolError):
+                await pool.start()
+
+    async def test_worker_loop_swallows_run_session_exception(self, tmp_path: Path) -> None:
+        """run_session raising is silently swallowed (121-122)."""
+        from meridiand._harness_pool import HarnessPool
+
+        run_count = [0]
+
+        async def _raising_run(_sid: str) -> tuple[int, int, str]:
+            run_count[0] += 1
+            raise RuntimeError("intentional")
+
+        pool = HarnessPool(
+            storage_root=tmp_path,
+            audit_log=MagicMock(),
+            run_session=_raising_run,
+            phase_reader=MagicMock(),
+            num_workers=2,
+        )
+        slot = pool._slots[0]
+        slot.queue.put_nowait("s1")
+        task = asyncio.create_task(pool._worker_loop(slot))
+        await asyncio.wait_for(slot.queue.join(), timeout=2.0)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        assert run_count[0] == 1
+
+
+class TestCronErrors:
+    def test_parse_duration_empty(self) -> None:
+        from meridiand._cron import _parse_duration
+
+        with pytest.raises(ValueError, match="empty"):
+            _parse_duration("")
+
+    def test_parse_duration_invalid(self) -> None:
+        from meridiand._cron import _parse_duration
+
+        with pytest.raises(ValueError, match="Invalid"):
+            _parse_duration("xyz")
+
+    def test_parse_duration_negative(self) -> None:
+        """Duration parsing — a unit value of 0 yields total_seconds() == 0 → must be positive."""
+        from meridiand._cron import _parse_duration
+
+        with pytest.raises(ValueError, match="positive"):
+            _parse_duration("0s")
+
+    def test_cron_create_error_http_status(self) -> None:
+        from meridiand._cron import CronCreateError
+
+        assert CronCreateError(message="m", timestamp="t", cause=None).http_status() == 500
+
+    def test_cron_invalid_request_error_http_status(self) -> None:
+        from meridiand._cron import CronInvalidRequestError
+
+        assert CronInvalidRequestError(message="m", timestamp="t").http_status() == 422
+
+    def test_cron_delete_error_http_status(self) -> None:
+        from meridiand._cron import CronDeleteError
+
+        assert CronDeleteError(message="m", timestamp="t", cause=None).http_status() == 500
+
+    async def test_cron_create_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        from core_errors import NoopAuditLog
+
+        from meridiand._cron import CronCreateError, CronCreateRequest, make_cron_router
+
+        router = make_cron_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/x/cron" and "POST" in r.methods
+        )
+        req = CronCreateRequest(
+            trigger_type="interval",
+            interval="1h",
+            session_id="s1",
+            task={"prompt": "hi"},
+        )
+        with patch("meridiand._cron.json.dumps", side_effect=RuntimeError("boom")):
+            with pytest.raises(CronCreateError):
+                await handler(req)
+
+    async def test_cron_delete_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        from core_errors import NoopAuditLog
+
+        from meridiand._cron import CronDeleteError, make_cron_router
+
+        # Create a cron file
+        cron_dir = tmp_path / "cron"
+        cron_dir.mkdir(parents=True)
+        (cron_dir / "c1.json").write_text("{}")
+
+        router = make_cron_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/x/cron/{cron_id}" and "DELETE" in r.methods
+        )
+        with patch.object(Path, "unlink", side_effect=RuntimeError("unlink boom")):
+            with pytest.raises(CronDeleteError):
+                await handler("c1")
+
+
+class TestWebhookErrors:
+    def test_webhook_create_error_http_status(self) -> None:
+        from meridiand._webhooks import WebhookCreateError
+
+        assert WebhookCreateError(message="m", timestamp="t", cause=None).http_status() == 500
+
+    def test_webhook_invalid_request_error_http_status(self) -> None:
+        from meridiand._webhooks import WebhookInvalidRequestError
+
+        assert WebhookInvalidRequestError(message="m", timestamp="t").http_status() == 422
+
+    def test_webhook_not_found_error_http_status(self) -> None:
+        from meridiand._webhooks import WebhookNotFoundError
+
+        assert WebhookNotFoundError(webhook_id="x", timestamp="t").http_status() == 404
+
+    def test_webhook_delete_error_http_status(self) -> None:
+        from meridiand._webhooks import WebhookDeleteError
+
+        assert WebhookDeleteError(message="m", timestamp="t", cause=None).http_status() == 500
+
+    async def test_webhook_create_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        from core_errors import NoopAuditLog
+
+        from meridiand._webhooks import (
+            WebhookCreateError,
+            WebhookCreateRequest,
+            make_webhooks_router,
+        )
+
+        router = make_webhooks_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/webhooks" and "POST" in r.methods
+        )
+        from meridiand._webhooks import EventFilter
+
+        req = WebhookCreateRequest(
+            name="test_webhook",
+            url="https://example.com/hook",
+            event_filter=EventFilter(types=["session.completed"]),
+            max_retries=3,
+            backoff="exponential",
+        )
+        with patch("meridiand._webhooks.json.dumps", side_effect=RuntimeError("boom")):
+            with pytest.raises(WebhookCreateError):
+                await handler(req)
+
+    async def test_webhook_delete_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        from core_errors import NoopAuditLog
+
+        from meridiand._webhooks import WebhookDeleteError, make_webhooks_router
+
+        # Pre-create a webhook file so delete proceeds past the not-found check
+        wh_dir = tmp_path / "webhooks"
+        wh_dir.mkdir(parents=True)
+        (wh_dir / "wh1.json").write_text("{}")
+
+        router = make_webhooks_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/webhooks/{webhook_id}" and "DELETE" in r.methods
+        )
+        with patch.object(Path, "unlink", side_effect=RuntimeError("unlink boom")):
+            with pytest.raises(WebhookDeleteError):
+                await handler("wh1")
 
 
 class TestKbStoreSearchHelpers:
