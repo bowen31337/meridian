@@ -150,8 +150,7 @@ def _next_anniversary_fire_date(anniversary: date, days_before: int, today: date
         if ann >= cutoff:
             return ann - timedelta(days=days_before)
 
-    # Unreachable for any reasonable days_before value; satisfies type checker.
-    return ann - timedelta(days=days_before)  # type: ignore[possibly-undefined]
+    raise AssertionError("unreachable: 3-year window always contains a valid anniversary")
 
 
 # ---------------------------------------------------------------------------

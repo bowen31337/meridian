@@ -291,6 +291,75 @@ class TestCheckpointPerCall:
         assert resp.status_code == 422
 
 
+class TestMemoryAnniversaryErrors:
+    def test_today_helper(self) -> None:
+        from meridiand._memory_anniversary import _today
+
+        d = _today()
+        from datetime import date
+        assert isinstance(d, date)
+
+    def test_fire_error_http_status(self) -> None:
+        from meridiand._memory_anniversary import MemoryAnniversaryFireError
+
+        assert MemoryAnniversaryFireError(message="m", timestamp="t", cause=None).http_status() == 500
+
+    def test_memory_not_found_error_http_status(self) -> None:
+        from meridiand._memory_anniversary import MemoryNotFoundError
+
+        assert MemoryNotFoundError(memory_key="x", timestamp="t").http_status() == 404
+
+    def test_memory_value_not_date_error_http_status(self) -> None:
+        from meridiand._memory_anniversary import MemoryValueNotDateError
+
+        assert (
+            MemoryValueNotDateError(memory_key="x", value="v", timestamp="t").http_status()
+            == 422
+        )
+
+    def test_next_anniversary_fire_date_unreachable_assertion(self) -> None:
+        """If the loop's invariant breaks (mocked to never find a year), assertion raises."""
+        from datetime import date
+
+        from meridiand._memory_anniversary import _next_anniversary_fire_date
+
+        # Patch range(3) so the loop runs 0 iterations → falls through to AssertionError
+        with patch("meridiand._memory_anniversary.range", return_value=[]):
+            with pytest.raises(AssertionError, match="unreachable"):
+                _next_anniversary_fire_date(
+                    anniversary=date(2025, 1, 1),
+                    today=date(2025, 6, 1),
+                    days_before=1,
+                )
+
+    async def test_fire_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        """A generic exception raised inside fire_memory_anniversary_trigger is wrapped (257-277)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._memory_anniversary import (
+            MemoryAnniversaryFireError,
+            fire_memory_anniversary_trigger,
+        )
+
+        cron = {
+            "id": "c1",
+            "memory_key": "k1",
+            "days_before": 1,
+            "session_id": "s1",
+            "task": {},
+        }
+        with patch(
+            "meridiand._memory_anniversary._load_memory_date",
+            side_effect=RuntimeError("load boom"),
+        ):
+            with pytest.raises(MemoryAnniversaryFireError):
+                fire_memory_anniversary_trigger(
+                    cron_resource=cron,
+                    audit_log=NoopAuditLog(),
+                    storage_root=tmp_path,
+                )
+
+
 class TestConfigErrors:
     def test_parse_config_yaml_not_mapping(self) -> None:
         """YAML content is a sequence, not a mapping → ValueError → wrapped (line 317)."""
