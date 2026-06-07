@@ -791,6 +791,202 @@ class TestCompactionRouters:
                 await handler()
 
 
+class TestEnvironmentsHelpers:
+    def test_referenced_by_agent_skips_malformed(self, tmp_path: Path) -> None:
+        from meridiand._environments import _referenced_by_agent
+
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        (agents_dir / "a1.json").write_text("not json {{{")
+        (agents_dir / "a2.json").write_text(
+            json.dumps({"id": "a2", "default_environment_id": "e1"})
+        )
+        assert _referenced_by_agent("e1", agents_dir) is True
+        assert _referenced_by_agent("nope", agents_dir) is False
+
+    def test_referenced_by_agent_no_agents_dir(self, tmp_path: Path) -> None:
+        from meridiand._environments import _referenced_by_agent
+
+        assert _referenced_by_agent("e1", tmp_path / "nope") is False
+
+    def test_has_active_session_various_paths(self, tmp_path: Path) -> None:
+        """Cover all branches of _has_active_session."""
+        from meridiand._environments import _has_active_session
+
+        sessions_dir = tmp_path / "sessions"
+        agents_dir = tmp_path / "agents"
+        sessions_dir.mkdir()
+        agents_dir.mkdir()
+
+        # Non-dir entry — skipped
+        (sessions_dir / "not_a_dir.txt").write_text("ignore")
+        # Session without manifest — skipped
+        (sessions_dir / "no_manifest").mkdir()
+        # Session with malformed manifest — skipped
+        (sessions_dir / "bad").mkdir()
+        (sessions_dir / "bad" / "manifest.json").write_text("not json {{{")
+        # Session with status != active — skipped
+        (sessions_dir / "inactive").mkdir()
+        (sessions_dir / "inactive" / "manifest.json").write_text(
+            json.dumps({"status": "done", "agent_id": "a1"})
+        )
+        # Session active but agent_id None — skipped
+        (sessions_dir / "noagent").mkdir()
+        (sessions_dir / "noagent" / "manifest.json").write_text(
+            json.dumps({"status": "active"})
+        )
+        # Session active, agent exists but doesn't reference env → False
+        (sessions_dir / "other").mkdir()
+        (sessions_dir / "other" / "manifest.json").write_text(
+            json.dumps({"status": "active", "agent_id": "a1"})
+        )
+        (agents_dir / "a1.json").write_text(
+            json.dumps({"id": "a1", "default_environment_id": "other_env"})
+        )
+        assert _has_active_session("e1", sessions_dir, agents_dir) is False
+
+        # Session active, agent path missing — skipped
+        (sessions_dir / "missingagent").mkdir()
+        (sessions_dir / "missingagent" / "manifest.json").write_text(
+            json.dumps({"status": "active", "agent_id": "missing"})
+        )
+
+        # Active session with matching env
+        (sessions_dir / "match").mkdir()
+        (sessions_dir / "match" / "manifest.json").write_text(
+            json.dumps({"status": "active", "agent_id": "a_match"})
+        )
+        (agents_dir / "a_match.json").write_text(
+            json.dumps({"id": "a_match", "default_environment_id": "e1"})
+        )
+        assert _has_active_session("e1", sessions_dir, agents_dir) is True
+
+    def test_has_active_session_no_sessions_dir(self, tmp_path: Path) -> None:
+        from meridiand._environments import _has_active_session
+
+        assert _has_active_session("e1", tmp_path / "nope", tmp_path / "agents") is False
+
+
+class TestEnvironmentsHandlers:
+    """Cover generic-exception wrapping in env handlers."""
+
+    @staticmethod
+    def _build_router(tmp_path: Path):
+        from core_errors import NoopAuditLog
+
+        from meridiand._environments import make_environments_router
+
+        return make_environments_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+
+    async def test_create_generic_exception(self, tmp_path: Path) -> None:
+        from meridiand._environments import (
+            EnvironmentCreateError,
+            EnvironmentCreateRequest,
+        )
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint for r in router.routes if r.path == "/v1/environments" and "POST" in r.methods
+        )
+        req = EnvironmentCreateRequest(name="env1", backend="docker")
+        with patch("meridiand._environments.json.dumps", side_effect=RuntimeError("boom")):
+            with pytest.raises(EnvironmentCreateError):
+                await handler(req)
+
+    async def test_list_generic_exception(self, tmp_path: Path) -> None:
+        from meridiand._environments import EnvironmentListError
+
+        d = tmp_path / "environments"
+        d.mkdir()
+        (d / "e1.json").write_text(json.dumps({"id": "e1"}))
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/environments" and "GET" in r.methods
+        )
+        # Patch glob to raise so the exception is raised outside the inner try-except
+        with patch.object(Path, "glob", side_effect=RuntimeError("boom")):
+            with pytest.raises(EnvironmentListError):
+                await handler()
+
+    async def test_list_skips_malformed_files(self, tmp_path: Path) -> None:
+        """Malformed env JSON files are silently skipped (lines 386-387)."""
+        from core_errors import NoopAuditLog
+
+        d = tmp_path / "environments"
+        d.mkdir()
+        (d / "bad.json").write_text("not json {{{")
+        (d / "good.json").write_text(json.dumps({"id": "good"}))
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/environments" and "GET" in r.methods
+        )
+        resp = await handler()
+        assert resp is not None
+
+    async def test_get_generic_exception(self, tmp_path: Path) -> None:
+        from meridiand._environments import EnvironmentGetError
+
+        d = tmp_path / "environments"
+        d.mkdir()
+        (d / "e1.json").write_text(json.dumps({"id": "e1"}))
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/environments/{environment_id}" and "GET" in r.methods
+        )
+        with patch("meridiand._environments.json.loads", side_effect=RuntimeError("boom")):
+            with pytest.raises(EnvironmentGetError):
+                await handler("e1")
+
+    async def test_update_generic_exception(self, tmp_path: Path) -> None:
+        from meridiand._environments import (
+            EnvironmentUpdateError,
+            EnvironmentUpdateRequest,
+        )
+
+        d = tmp_path / "environments"
+        d.mkdir()
+        (d / "e1.json").write_text(
+            json.dumps({"id": "e1", "name": "env1", "description": "d"})
+        )
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/environments/{environment_id}" and "PATCH" in r.methods
+        )
+        req = EnvironmentUpdateRequest(name="new_env")
+        with patch("meridiand._environments.json.dumps", side_effect=RuntimeError("boom")):
+            with pytest.raises(EnvironmentUpdateError):
+                await handler("e1", req)
+
+    async def test_delete_generic_exception(self, tmp_path: Path) -> None:
+        from meridiand._environments import EnvironmentDeleteError
+
+        d = tmp_path / "environments"
+        d.mkdir()
+        (d / "e1.json").write_text(json.dumps({"id": "e1"}))
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/environments/{environment_id}" and "DELETE" in r.methods
+        )
+        with patch.object(Path, "unlink", side_effect=RuntimeError("boom")):
+            with pytest.raises(EnvironmentDeleteError):
+                await handler("e1")
+
+
 class TestCanvasInteractions:
     """Cover make_canvas_interactions_router POST endpoint."""
 
