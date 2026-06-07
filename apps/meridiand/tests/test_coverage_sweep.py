@@ -375,6 +375,318 @@ class TestSkillForgePrecisionErrors:
         assert metric is not None
 
 
+class TestProviderFactory:
+    """Cover _resolve_auth, _build_provider, _convert_routing_policy,
+    build_provider_registry, build_model_router."""
+
+    def test_resolve_auth_none(self) -> None:
+        from meridiand._config import ProviderConfig
+        from meridiand._provider_factory import _resolve_auth
+
+        cfg = ProviderConfig(name="p1", kind="anthropic")
+        assert _resolve_auth(cfg, resolver=None) is None
+
+    def test_resolve_auth_plain(self) -> None:
+        from meridiand._config import ProviderConfig
+        from meridiand._provider_factory import _resolve_auth
+
+        cfg = ProviderConfig(name="p1", kind="anthropic", auth="sk-direct-key")
+        assert _resolve_auth(cfg, resolver=None) == "sk-direct-key"
+
+    def test_resolve_auth_secret_ref_resolved(self) -> None:
+        from meridiand._config import ProviderConfig
+        from meridiand._provider_factory import _resolve_auth
+
+        class _Resolver:
+            def resolve(self, ref: str) -> str:
+                return "resolved-secret"
+
+        cfg = ProviderConfig(
+            name="p1", kind="anthropic", auth="secret_ref://vault/v/api_key"
+        )
+        assert _resolve_auth(cfg, resolver=_Resolver()) == "resolved-secret"
+
+    def test_build_provider_anthropic(self) -> None:
+        from meridian_provider_anthropic_apikey import AnthropicApiKeyProvider
+
+        from meridiand._config import ProviderConfig
+        from meridiand._provider_factory import _build_provider
+
+        cfg = ProviderConfig(name="p1", kind="anthropic", auth="sk-test")
+        provider = _build_provider(cfg, resolved_auth="sk-test")
+        assert isinstance(provider, AnthropicApiKeyProvider)
+
+    def test_build_provider_anthropic_with_base_url(self) -> None:
+        from meridiand._config import ProviderConfig
+        from meridiand._provider_factory import _build_provider
+
+        cfg = ProviderConfig(name="p1", kind="anthropic", auth="x", base_url="https://x")
+        provider = _build_provider(cfg, resolved_auth="x")
+        assert provider is not None
+
+    def test_build_provider_openai(self) -> None:
+        from meridiand._config import ProviderConfig
+        from meridiand._provider_factory import _build_provider
+
+        cfg = ProviderConfig(name="p", kind="openai", auth="key")
+        provider = _build_provider(cfg, resolved_auth="key")
+        assert provider is not None
+
+    def test_build_provider_openai_with_base_url(self) -> None:
+        from meridiand._config import ProviderConfig
+        from meridiand._provider_factory import _build_provider
+
+        cfg = ProviderConfig(name="p", kind="openai", auth="key", base_url="https://api.openai.com")
+        assert _build_provider(cfg, resolved_auth="key") is not None
+
+    def test_build_provider_openrouter(self) -> None:
+        from meridiand._config import ProviderConfig
+        from meridiand._provider_factory import _build_provider
+
+        cfg = ProviderConfig(name="p", kind="openrouter", auth="key")
+        assert _build_provider(cfg, resolved_auth="key") is not None
+
+    def test_build_provider_openrouter_with_base_url(self) -> None:
+        from meridiand._config import ProviderConfig
+        from meridiand._provider_factory import _build_provider
+
+        cfg = ProviderConfig(name="p", kind="openrouter", auth="k", base_url="https://x")
+        assert _build_provider(cfg, resolved_auth="k") is not None
+
+    def test_build_provider_ollama(self) -> None:
+        from meridiand._config import ProviderConfig
+        from meridiand._provider_factory import _build_provider
+
+        cfg = ProviderConfig(name="p", kind="ollama")
+        assert _build_provider(cfg, resolved_auth=None) is not None
+
+    def test_build_provider_local(self) -> None:
+        from meridiand._config import ProviderConfig
+        from meridiand._provider_factory import _build_provider
+
+        cfg = ProviderConfig(name="p", kind="local", base_url="http://localhost:1234")
+        assert _build_provider(cfg, resolved_auth=None) is not None
+
+    def test_build_provider_claude_code_oauth(self) -> None:
+        from meridiand._config import ProviderConfig
+        from meridiand._provider_factory import _build_provider
+
+        cfg = ProviderConfig(name="p", kind="claude_code_oauth")
+        assert _build_provider(cfg, resolved_auth=None) is not None
+
+    def test_build_provider_claude_code_oauth_with_cli_path(self) -> None:
+        from meridiand._config import ProviderConfig
+        from meridiand._provider_factory import _build_provider
+
+        cfg = ProviderConfig(name="p", kind="claude_code_oauth", base_url="/usr/local/bin/claude")
+        assert _build_provider(cfg, resolved_auth=None) is not None
+
+    def test_build_provider_unsupported_raises(self) -> None:
+        from meridiand._config import ProviderConfig
+        from meridiand._provider_factory import ProviderFactoryError, _build_provider
+
+        cfg = ProviderConfig(name="p", kind="bogus")
+        with pytest.raises(ProviderFactoryError):
+            _build_provider(cfg, resolved_auth=None)
+
+    def test_convert_routing_policy_default_none(self) -> None:
+        from meridiand._config import RoutingConfig
+        from meridiand._provider_factory import _convert_routing_policy
+
+        policy = _convert_routing_policy(RoutingConfig(default=None))
+        assert policy.rules == [] and policy.fallbacks == []
+
+    def test_convert_routing_policy_with_rules_and_fallbacks(self) -> None:
+        from meridiand._config import (
+            FallbackRuleConfig,
+            RoutingConditionConfig,
+            RoutingConfig,
+            RoutingDefaultConfig,
+            RoutingRuleConfig,
+        )
+        from meridiand._provider_factory import _convert_routing_policy
+
+        cfg = RoutingConfig(
+            default=RoutingDefaultConfig(
+                rules=[
+                    RoutingRuleConfig(
+                        when=RoutingConditionConfig(
+                            skill_id="s1",
+                            metadata_match={"x": "y"},
+                            role="user",
+                        ),
+                        model="m1",
+                    ),
+                ],
+                fallbacks=[FallbackRuleConfig(on="rate_limit", model="m2")],
+            )
+        )
+        policy = _convert_routing_policy(cfg)
+        assert len(policy.rules) == 1
+        assert len(policy.fallbacks) == 1
+
+    def test_convert_routing_policy_with_when_none(self) -> None:
+        """A rule with when=None → rules.append with when=None (125->136)."""
+        from meridiand._config import (
+            RoutingConfig,
+            RoutingDefaultConfig,
+            RoutingRuleConfig,
+        )
+        from meridiand._provider_factory import _convert_routing_policy
+
+        cfg = RoutingConfig(
+            default=RoutingDefaultConfig(
+                rules=[RoutingRuleConfig(when=None, model="default-model")],
+                fallbacks=[],
+            )
+        )
+        policy = _convert_routing_policy(cfg)
+        assert len(policy.rules) == 1
+        assert policy.rules[0].when is None
+
+    def test_convert_routing_policy_with_token_range(self) -> None:
+        from meridiand._config import (
+            RoutingConditionConfig,
+            RoutingConfig,
+            RoutingDefaultConfig,
+            RoutingRuleConfig,
+            TokenRangeConfig,
+        )
+        from meridiand._provider_factory import _convert_routing_policy
+
+        cfg = RoutingConfig(
+            default=RoutingDefaultConfig(
+                rules=[
+                    RoutingRuleConfig(
+                        when=RoutingConditionConfig(
+                            estimated_input_tokens=TokenRangeConfig(gt=100, lte=200)
+                        ),
+                        model="m1",
+                    ),
+                ],
+                fallbacks=[],
+            )
+        )
+        policy = _convert_routing_policy(cfg)
+        assert len(policy.rules) == 1
+
+    def test_build_provider_registry_success(self) -> None:
+        from meridiand._config import MeridianConfig
+        from meridiand._provider_factory import build_provider_registry
+
+        config = MeridianConfig.model_validate(
+            {
+                "version": 2,
+                "storage_root": "/tmp/m",
+                "providers": [
+                    {"name": "p1", "kind": "anthropic", "auth": "sk-test"}
+                ],
+            }
+        )
+        registry = build_provider_registry(config)
+        assert registry is not None
+
+    def test_build_provider_registry_typed_error_reraise(self) -> None:
+        from meridiand._config import MeridianConfig
+        from meridiand._provider_factory import ProviderFactoryError, build_provider_registry
+
+        config = MeridianConfig.model_validate(
+            {
+                "version": 2,
+                "storage_root": "/tmp/m",
+                "providers": [{"name": "p1", "kind": "anthropic", "auth": "x"}],
+            }
+        )
+
+        with patch(
+            "meridiand._provider_factory._build_provider",
+            side_effect=ProviderFactoryError(message="unsupported", timestamp=pagination_now()),
+        ):
+            with pytest.raises(ProviderFactoryError):
+                build_provider_registry(config)
+
+    def test_build_provider_registry_generic_error_wrapped(self) -> None:
+        from meridiand._config import MeridianConfig
+        from meridiand._provider_factory import ProviderFactoryError, build_provider_registry
+
+        config = MeridianConfig.model_validate(
+            {
+                "version": 2,
+                "storage_root": "/tmp/m",
+                "providers": [{"name": "p1", "kind": "anthropic", "auth": "x"}],
+            }
+        )
+
+        with patch(
+            "meridiand._provider_factory._build_provider",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(ProviderFactoryError):
+                build_provider_registry(config)
+
+    def test_build_provider_registry_outer_exception_wrapped(self) -> None:
+        """Exception raised outside the inner per-provider try-except is wrapped (201-217)."""
+        from meridiand._config import MeridianConfig
+        from meridiand._provider_factory import ProviderFactoryError, build_provider_registry
+
+        config = MeridianConfig.model_validate(
+            {
+                "version": 2,
+                "storage_root": "/tmp/m",
+                "providers": [{"name": "p1", "kind": "anthropic", "auth": "x"}],
+            }
+        )
+
+        with patch(
+            "meridiand._provider_factory.ProviderRegistry",
+            side_effect=RuntimeError("outer boom"),
+        ):
+            with pytest.raises(ProviderFactoryError):
+                build_provider_registry(config)
+
+    def test_build_model_router_no_routing(self) -> None:
+        from meridiand._config import MeridianConfig
+        from meridiand._provider_factory import (
+            build_model_router,
+            build_provider_registry,
+        )
+
+        config = MeridianConfig.model_validate(
+            {
+                "version": 2,
+                "storage_root": "/tmp/m",
+                "providers": [{"name": "p1", "kind": "anthropic", "auth": "x"}],
+            }
+        )
+        registry = build_provider_registry(config)
+        router = build_model_router(config, registry)
+        assert router is not None
+
+    def test_build_model_router_with_routing(self) -> None:
+        from meridiand._config import MeridianConfig
+        from meridiand._provider_factory import (
+            build_model_router,
+            build_provider_registry,
+        )
+
+        config = MeridianConfig.model_validate(
+            {
+                "version": 2,
+                "storage_root": "/tmp/m",
+                "providers": [{"name": "p1", "kind": "anthropic", "auth": "x"}],
+                "routing": {
+                    "default": {
+                        "rules": [{"when": {"skill_id": "s1"}, "model": "m1"}],
+                        "fallbacks": [],
+                    }
+                },
+            }
+        )
+        registry = build_provider_registry(config)
+        router = build_model_router(config, registry)
+        assert router is not None
+
+
 class TestBudgetOverrunDiscipline:
     """Cover _build_soft_overrun_stats, _build_hard_transition_stats, and the router."""
 
