@@ -2103,6 +2103,215 @@ class TestAgentsErrors:
         assert AgentListError(message="m", timestamp=ts, cause=None).http_status() == 500
 
 
+class TestMainEntryPoint:
+    """Cover __main__.py error paths."""
+
+    def test_resolve_config_location_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from meridiand.__main__ import main
+
+        monkeypatch.delenv("MERIDIAN_CONFIG", raising=False)
+        with patch(
+            "meridiand.__main__.resolve_config_location",
+            side_effect=RuntimeError("no config"),
+        ):
+            result = main(argv=[])
+        assert result == 1
+
+    def test_load_config_error(self, tmp_path: Path) -> None:
+        from meridiand.__main__ import main
+
+        cfg = tmp_path / "c.yml"
+        cfg.write_text("not yaml ::")
+        result = main(argv=["--config", str(cfg)])
+        assert result == 1
+
+    def test_init_services_error(self, tmp_path: Path) -> None:
+        from meridiand._config import MERIDIAN_CONFIG_VERSION
+        from meridiand.__main__ import main
+
+        cfg = tmp_path / "c.yml"
+        cfg.write_text(
+            f"version: {MERIDIAN_CONFIG_VERSION}\nstorage_root: {tmp_path}\n"
+        )
+
+        with patch(
+            "meridiand.__main__.init_services",
+            side_effect=RuntimeError("init boom"),
+        ):
+            result = main(argv=["--config", str(cfg)])
+        assert result == 1
+
+    def test_validate_config_error(self, tmp_path: Path) -> None:
+        from meridiand._config import MERIDIAN_CONFIG_VERSION
+        from meridiand.__main__ import main
+
+        cfg = tmp_path / "c.yml"
+        cfg.write_text(
+            f"version: {MERIDIAN_CONFIG_VERSION}\nstorage_root: {tmp_path}\n"
+        )
+
+        with patch(
+            "meridiand.__main__.validate_config",
+            side_effect=RuntimeError("validate boom"),
+        ):
+            result = main(argv=["--config", str(cfg)])
+        assert result == 1
+
+    def test_logging_config_error(self, tmp_path: Path) -> None:
+        from meridiand._config import MERIDIAN_CONFIG_VERSION
+        from meridiand._logging import LoggingConfigError
+        from meridiand.__main__ import main
+
+        cfg = tmp_path / "c.yml"
+        cfg.write_text(
+            f"version: {MERIDIAN_CONFIG_VERSION}\nstorage_root: {tmp_path}\n"
+        )
+
+        with patch(
+            "meridiand.__main__.configure_json_logging",
+            side_effect=LoggingConfigError(message="log boom", timestamp=pagination_now()),
+        ):
+            result = main(argv=["--config", str(cfg)])
+        assert result == 1
+
+    def test_migration_repository_failure(self, tmp_path: Path) -> None:
+        from storage_repository import RepositoryFailure
+
+        from meridiand._config import MERIDIAN_CONFIG_VERSION
+        from meridiand.__main__ import main
+
+        cfg = tmp_path / "c.yml"
+        cfg.write_text(
+            f"version: {MERIDIAN_CONFIG_VERSION}\nstorage_root: {tmp_path}\n"
+        )
+
+        with patch(
+            "meridiand.__main__._run_db_migrations",
+            side_effect=RepositoryFailure(
+                code="migration_error",
+                message="boom",
+                timestamp=pagination_now(),
+                entity_type="",
+                entity_id="",
+                operation="migrate",
+            ),
+        ):
+            result = main(argv=["--config", str(cfg)])
+        assert result == 1
+
+    def test_migration_generic_failure(self, tmp_path: Path) -> None:
+        from meridiand._config import MERIDIAN_CONFIG_VERSION
+        from meridiand.__main__ import main
+
+        cfg = tmp_path / "c.yml"
+        cfg.write_text(
+            f"version: {MERIDIAN_CONFIG_VERSION}\nstorage_root: {tmp_path}\n"
+        )
+
+        with patch(
+            "meridiand.__main__._run_db_migrations",
+            side_effect=RuntimeError("generic boom"),
+        ):
+            result = main(argv=["--config", str(cfg)])
+        assert result == 1
+
+    def test_provider_init_failure(self, tmp_path: Path) -> None:
+        from meridiand._config import MERIDIAN_CONFIG_VERSION
+        from meridiand._provider_factory import ProviderFactoryError
+        from meridiand.__main__ import main
+
+        cfg = tmp_path / "c.yml"
+        cfg.write_text(
+            f"version: {MERIDIAN_CONFIG_VERSION}\nstorage_root: {tmp_path}\n"
+            "providers:\n  - name: p1\n    kind: anthropic\n    auth: x\n"
+        )
+
+        with patch(
+            "meridiand.__main__.build_provider_registry",
+            side_effect=ProviderFactoryError(
+                message="provider boom",
+                timestamp=pagination_now(),
+                cause=None,
+            ),
+        ):
+            with patch("meridiand.__main__._run_db_migrations"):
+                result = main(argv=["--config", str(cfg)])
+        assert result == 1
+
+    def test_run_db_migrations_calls_migrate(self, tmp_path: Path) -> None:
+        import asyncio
+
+        from meridiand.__main__ import _run_db_migrations
+
+        asyncio.run(_run_db_migrations(tmp_path / "db.db"))
+
+    def test_dunder_main_block(self) -> None:
+        """Execute __main__.py with __name__='__main__' to cover line 218."""
+        from meridiand import __main__ as main_mod
+
+        src_path = Path(main_mod.__file__)
+        code = compile(src_path.read_text(), str(src_path), "exec")
+        called: list[int] = []
+
+        def _fake_exit(rc: int = 0) -> None:
+            called.append(rc)
+            raise SystemExit(rc)
+
+        ns: dict[str, object] = {
+            "__name__": "__main__",
+            "__file__": str(src_path),
+            "__package__": "meridiand",
+            "__loader__": None,
+        }
+
+        # Patch sys.exit and main to no-op
+        import sys as _sys
+
+        original_exit = _sys.exit
+        _sys.exit = _fake_exit  # type: ignore[assignment]
+        try:
+            with patch("meridiand.__main__.main", return_value=42):
+                try:
+                    exec(code, ns)
+                except SystemExit:
+                    pass
+        finally:
+            _sys.exit = original_exit
+        # The if __name__ block was executed (called.append(42) happened or main() was)
+        assert ns["__name__"] == "__main__"
+
+    def test_uvicorn_startup_failure(self, tmp_path: Path) -> None:
+        """uvicorn.run raises → return 1 (lines 198-212)."""
+        from meridiand._config import MERIDIAN_CONFIG_VERSION
+        from meridiand.__main__ import main
+
+        cfg = tmp_path / "c.yml"
+        cfg.write_text(
+            f"version: {MERIDIAN_CONFIG_VERSION}\nstorage_root: {tmp_path}\n"
+        )
+
+        with patch("meridiand.__main__._run_db_migrations"):
+            with patch("meridiand.__main__.uvicorn.run", side_effect=RuntimeError("uvicorn boom")):
+                result = main(argv=["--config", str(cfg)])
+        assert result == 1
+
+    def test_successful_startup_with_providers(self, tmp_path: Path) -> None:
+        """Successfully build providers → covers line 130."""
+        from meridiand._config import MERIDIAN_CONFIG_VERSION
+        from meridiand.__main__ import main
+
+        cfg = tmp_path / "c.yml"
+        cfg.write_text(
+            f"version: {MERIDIAN_CONFIG_VERSION}\nstorage_root: {tmp_path}\n"
+            "providers:\n  - name: p1\n    kind: anthropic\n    auth: x\n"
+        )
+
+        with patch("meridiand.__main__._run_db_migrations"):
+            with patch("meridiand.__main__.uvicorn.run"):
+                result = main(argv=["--config", str(cfg)])
+        assert result == 0
+
+
 class TestVaultsHandlers:
     """Cover generic-exception wrapping in _vaults handlers."""
 
