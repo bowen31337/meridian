@@ -2453,6 +2453,88 @@ class TestSessionsErrors:
         assert SessionGetError(message="m", timestamp=ts, cause=None).http_status() == 500
 
 
+class TestMemoryStoresQueryWriteHandlers:
+    """Cover query_memory_store + write_memory handlers."""
+
+    @staticmethod
+    def _seed_store(tmp_path: Path, store_id: str = "m1"):
+        from core_errors import NoopAuditLog
+
+        from meridiand._memory_stores import make_memory_stores_router
+
+        stores_dir = tmp_path / "memory_stores"
+        stores_dir.mkdir(parents=True)
+        (stores_dir / f"{store_id}.json").write_text(
+            json.dumps(
+                {
+                    "id": store_id,
+                    "backend": "sqlite-vec",
+                    "scope": "global",
+                }
+            )
+        )
+        return make_memory_stores_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+
+    async def test_query_not_found(self, tmp_path: Path) -> None:
+        from meridiand._memory_stores import MemoryStoreNotFoundError, MemoryStoreQueryRequest
+
+        router = self._seed_store(tmp_path)
+        handler = next(
+            r.endpoint for r in router.routes if "/query_runs" in r.path
+        )
+        req = MemoryStoreQueryRequest(query="hello")
+        with pytest.raises(MemoryStoreNotFoundError):
+            await handler("nonexistent", req)
+
+    async def test_query_success(self, tmp_path: Path) -> None:
+        from meridiand._memory_stores import MemoryStoreQueryRequest
+
+        router = self._seed_store(tmp_path)
+        handler = next(
+            r.endpoint for r in router.routes if "/query_runs" in r.path
+        )
+        req = MemoryStoreQueryRequest(query="hello")
+        resp = await handler("m1", req)
+        assert resp is not None
+
+    async def test_query_generic_exception(self, tmp_path: Path) -> None:
+        from meridiand._memory_stores import MemoryStoreQueryError, MemoryStoreQueryRequest
+
+        router = self._seed_store(tmp_path)
+        handler = next(
+            r.endpoint for r in router.routes if "/query_runs" in r.path
+        )
+        req = MemoryStoreQueryRequest(query="hello")
+        with patch(
+            "meridiand._memory_stores.KbStore",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(MemoryStoreQueryError):
+                await handler("m1", req)
+
+    async def test_write_not_found(self, tmp_path: Path) -> None:
+        from meridiand._memory_stores import MemoryStoreNotFoundError, MemoryStoreWriteRequest
+
+        router = self._seed_store(tmp_path)
+        handler = next(
+            r.endpoint for r in router.routes if "/write" in r.path
+        )
+        req = MemoryStoreWriteRequest(key="k1", content="hello")
+        with pytest.raises(MemoryStoreNotFoundError):
+            await handler("nonexistent", req)
+
+    async def test_write_success(self, tmp_path: Path) -> None:
+        from meridiand._memory_stores import MemoryStoreWriteRequest
+
+        router = self._seed_store(tmp_path)
+        handler = next(
+            r.endpoint for r in router.routes if "/write" in r.path
+        )
+        req = MemoryStoreWriteRequest(key="k1", content="hello world")
+        resp = await handler("m1", req)
+        assert resp is not None
+
+
 class TestMemoryStoresGenericExceptions:
     async def test_create_generic_exception_wrapped(self, tmp_path: Path) -> None:
         from core_errors import NoopAuditLog
