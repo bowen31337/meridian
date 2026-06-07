@@ -375,6 +375,57 @@ class TestSkillForgePrecisionErrors:
         assert metric is not None
 
 
+class TestMemoryStoresGenericExceptions:
+    async def test_create_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        from core_errors import NoopAuditLog
+
+        from meridiand._memory_stores import (
+            MemoryStoreCreateError,
+            MemoryStoreCreateRequest,
+            make_memory_stores_router,
+        )
+
+        router = make_memory_stores_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/memory_stores" and "POST" in r.methods
+        )
+        req = MemoryStoreCreateRequest(name="m", backend="sqlite-vec", scope="global")
+        with patch("meridiand._memory_stores.json.dumps", side_effect=RuntimeError("boom")):
+            with pytest.raises(MemoryStoreCreateError):
+                await handler(req)
+
+    async def test_query_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        from core_errors import NoopAuditLog
+
+        from meridiand._memory_stores import (
+            MemoryStoreQueryError,
+            MemoryStoreQueryRequest,
+            make_memory_stores_router,
+        )
+
+        stores_dir = tmp_path / "memory_stores"
+        stores_dir.mkdir(parents=True)
+        (stores_dir / "m1.json").write_text(
+            json.dumps({"id": "m1", "backend": "sqlite-vec", "scope": "global"})
+        )
+
+        router = make_memory_stores_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/query_runs" in r.path and "POST" in r.methods
+        )
+        req = MemoryStoreQueryRequest(query="hello")
+        with patch(
+            "meridiand._memory_stores.json.dumps",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(MemoryStoreQueryError):
+                await handler("m1", req)
+
+
 class TestSkillActivationsGenericExceptions:
     """Cover generic-exception wrapping in skill_activations handlers."""
 
