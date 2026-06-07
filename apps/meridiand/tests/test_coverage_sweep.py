@@ -2183,6 +2183,239 @@ class TestAppLifespan:
             resp = client.get("/healthz")
             assert resp.status_code == 200
 
+    def test_create_app_with_event_log(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Cover sessions/canvas/phase/cancel/budget/soft-budget/user_can_continue routes (431-479)."""
+        from fastapi.testclient import TestClient
+        from storage_event_log import LocalEventLogWriter
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        async def _noop(*_a: Any, **_k: Any) -> None:
+            return None
+
+        monkeypatch.setattr("meridiand._app.run_cron_scheduler_loop", _noop)
+        monkeypatch.setattr("meridiand._app.run_webhook_sender_loop", _noop)
+
+        writer = LocalEventLogWriter(tmp_path)
+        audit = FileAuditLog(tmp_path)
+        app = create_app(
+            audit,
+            storage_root=tmp_path,
+            event_log=writer,
+        )
+
+        with TestClient(app) as client:
+            resp = client.get("/healthz")
+            assert resp.status_code == 200
+
+    def test_create_app_with_harness_pool_and_event_log(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Cover submit_tool_results route (480-489) and session_wake_router (311-317)."""
+        from unittest.mock import MagicMock
+
+        from fastapi.testclient import TestClient
+        from storage_event_log import LocalEventLogWriter
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        async def _noop(*_a: Any, **_k: Any) -> None:
+            return None
+
+        monkeypatch.setattr("meridiand._app.run_cron_scheduler_loop", _noop)
+        monkeypatch.setattr("meridiand._app.run_webhook_sender_loop", _noop)
+
+        writer = LocalEventLogWriter(tmp_path)
+        audit = FileAuditLog(tmp_path)
+        pool = MagicMock()
+
+        app = create_app(
+            audit,
+            storage_root=tmp_path,
+            event_log=writer,
+            harness_pool=pool,
+        )
+
+        with TestClient(app) as client:
+            resp = client.get("/healthz")
+            assert resp.status_code == 200
+
+    def test_create_app_with_channel_runtime_and_credential_proxy(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Cover make_system_channel_router (381-389) and credential_proxy (414-421)."""
+        from unittest.mock import MagicMock
+
+        import httpx
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+        from meridiand._credential_proxy import CredentialProxyProviderConfig
+
+        async def _noop(*_a: Any, **_k: Any) -> None:
+            return None
+
+        monkeypatch.setattr("meridiand._app.run_cron_scheduler_loop", _noop)
+        monkeypatch.setattr("meridiand._app.run_webhook_sender_loop", _noop)
+
+        runtime = MagicMock()
+
+        class _Resolver:
+            def resolve(self, ref: str) -> str | None:
+                return "tok"
+
+        provider = CredentialProxyProviderConfig(
+            name="p1",
+            base_url="http://localhost:1",
+            token_secret_ref="secret_ref://v/k",
+        )
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(
+            audit,
+            storage_root=tmp_path,
+            channel_runtime=runtime,
+            credential_proxy_providers=[provider],
+            secret_resolver=_Resolver(),  # type: ignore[arg-type]
+        )
+
+        with TestClient(app) as client:
+            resp = client.get("/healthz")
+            assert resp.status_code == 200
+
+    def test_create_app_with_serve_ui(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Cover serve_ui branch (283-284)."""
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        async def _noop(*_a: Any, **_k: Any) -> None:
+            return None
+
+        monkeypatch.setattr("meridiand._app.run_cron_scheduler_loop", _noop)
+        monkeypatch.setattr("meridiand._app.run_webhook_sender_loop", _noop)
+
+        ui_dist = tmp_path / "ui_dist"
+        ui_dist.mkdir()
+        (ui_dist / "index.html").write_text("<html></html>")
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(
+            audit,
+            storage_root=tmp_path,
+            serve_ui=True,
+            ui_dist_path=ui_dist,
+        )
+
+        with TestClient(app) as client:
+            resp = client.get("/healthz")
+            assert resp.status_code == 200
+
+    def test_create_app_without_storage_root(self, tmp_path: Path) -> None:
+        """No storage_root → no background tasks created (covers if-False branches)."""
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(audit)  # no storage_root
+        with TestClient(app) as client:
+            resp = client.get("/healthz")
+            assert resp.status_code == 200
+
+    def test_create_app_with_skill_forge_disabled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """SkillForge disabled → skip create_task (branch 212->222)."""
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+        from meridiand._config import SkillForgeConfig
+
+        async def _noop(*_a: Any, **_k: Any) -> None:
+            return None
+
+        monkeypatch.setattr("meridiand._app.run_cron_scheduler_loop", _noop)
+        monkeypatch.setattr("meridiand._app.run_webhook_sender_loop", _noop)
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(
+            audit,
+            storage_root=tmp_path,
+            skill_forge=SkillForgeConfig(enabled=False),
+        )
+        with TestClient(app) as client:
+            resp = client.get("/healthz")
+            assert resp.status_code == 200
+
+    def test_create_app_with_acp_targets(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ACP targets → covers lines 489-498."""
+        from fastapi.testclient import TestClient
+
+        from meridiand._acp import DefaultAcpInboundHandler
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        async def _noop(*_a: Any, **_k: Any) -> None:
+            return None
+
+        monkeypatch.setattr("meridiand._app.run_cron_scheduler_loop", _noop)
+        monkeypatch.setattr("meridiand._app.run_webhook_sender_loop", _noop)
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(
+            audit,
+            storage_root=tmp_path,
+            acp_targets={"target1": "http://example.com/acp"},
+            acp_inbound_handler=DefaultAcpInboundHandler(),
+        )
+        with TestClient(app) as client:
+            resp = client.get("/healthz")
+            assert resp.status_code == 200
+
+    def test_create_app_with_model_router_and_event_log(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Cover lines 500-503 (event log adapter)."""
+        from fastapi.testclient import TestClient
+        from meridian_sdk_provider import ModelRouter, ModelRoutingPolicy
+        from storage_event_log import LocalEventLogWriter
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        async def _noop(*_a: Any, **_k: Any) -> None:
+            return None
+
+        monkeypatch.setattr("meridiand._app.run_cron_scheduler_loop", _noop)
+        monkeypatch.setattr("meridiand._app.run_webhook_sender_loop", _noop)
+
+        writer = LocalEventLogWriter(tmp_path)
+        audit = FileAuditLog(tmp_path)
+        router = ModelRouter(registry=None, policy=ModelRoutingPolicy(rules=[], fallbacks=[]))
+        app = create_app(
+            audit,
+            storage_root=tmp_path,
+            event_log=writer,
+            model_router=router,
+        )
+
+        with TestClient(app) as client:
+            resp = client.get("/healthz")
+            assert resp.status_code == 200
+
     def test_lifespan_with_sighup_handler(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
