@@ -2103,6 +2103,29 @@ class TestAgentsErrors:
         assert AgentListError(message="m", timestamp=ts, cause=None).http_status() == 500
 
 
+class TestReplayHandler:
+    """Cover the replay endpoint generic-exception wrap."""
+
+    async def test_replay_endpoint_generic_exception(self, tmp_path: Path) -> None:
+        from core_errors import NoopAuditLog
+
+        from meridiand._replay import ReplayError, make_replay_router
+
+        router = make_replay_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+        )
+        handler = next(
+            r.endpoint for r in router.routes if "/replay" in r.path and "POST" in r.methods
+        )
+        with patch(
+            "meridiand._replay.FakeModelAdapter",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(ReplayError):
+                await handler("s1")
+
+
 class TestSkillsLoaders:
     """Cover NpmSkillLoader + GitSkillLoader + FileSkillLoader paths."""
 
