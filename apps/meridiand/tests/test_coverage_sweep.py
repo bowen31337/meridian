@@ -790,6 +790,125 @@ class TestCompactionRouters:
             with pytest.raises(CompactionError):
                 await handler()
 
+    def test_compactor_skips_non_ndjson_files(self, tmp_path: Path) -> None:
+        """Covers 126 + 129->124 (non-ndjson file skip + mtime not-greater branch)."""
+        from meridiand._compaction import AutoCompactor
+
+        events = tmp_path / "events" / "2026" / "06" / "08"
+        events.mkdir(parents=True)
+        # Two files with same session id but different suffixes; one a .ndjson and
+        # another junk file at the same level so the suffix-skip branch fires.
+        (events / "s1.ndjson").write_text("")
+        (events / "s1.bin").write_text("junk")
+        (events / "s2.ndjson").write_text("")
+        # Same session second .ndjson with EARLIER mtime → covers the
+        # mtime-not-greater branch (129->124).
+        import os
+        import time
+
+        later_dir = tmp_path / "events" / "2026" / "06" / "07"
+        later_dir.mkdir(parents=True)
+        early_path = later_dir / "s1.ndjson"
+        early_path.write_text("")
+        os.utime(early_path, (time.time() - 100, time.time() - 100))
+
+        comp = AutoCompactor(tmp_path, idle_days=0, tail_events=10)
+        result = comp.find_idle_sessions()
+        assert "s1" in result
+        assert "s2" in result
+
+    async def test_restore_session_no_live_files(self, tmp_path: Path) -> None:
+        """Covers 227-238 (creates new live target when no live_files)."""
+        import gzip
+
+        from meridiand._compaction import AutoCompactor
+
+        # Pre-build manifest + archive blob via the local blob store.
+        comp = AutoCompactor(tmp_path, idle_days=0, tail_events=10)
+
+        archive_data = (
+            (json.dumps({"seq": 0, "type": "x"}) + "\n").encode()
+        )
+        compressed = gzip.compress(archive_data)
+        await comp._blob.put("compaction/s1/archive-abc.ndjson.gz", compressed)
+
+        cd = tmp_path / "compaction" / "s1"
+        cd.mkdir(parents=True, exist_ok=True)
+        (cd / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "session_id": "s1",
+                    "archive_key": "compaction/s1/archive-abc.ndjson.gz",
+                    "summary_event_count": 0,
+                }
+            )
+        )
+
+        result = await comp.restore_session("s1")
+        assert result["session_id"] == "s1"
+
+    async def test_run_compaction_loop_runs_once_then_breaks(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 281-336: run one iteration of the loop by patching sleep to raise.
+
+        The loop suppresses CancelledError around asyncio.sleep, so to exit it
+        we patch sleep to raise a non-CancelledError exception (e.g. SystemExit
+        — which isn't caught by the try/except Exception block).
+        """
+        from core_errors import NoopAuditLog
+
+        from meridiand._compaction import run_compaction_loop
+        from meridiand._config import CompactionConfig
+
+        policy = CompactionConfig(enabled=True, idle_days=1, tail_events=10)
+
+        sleep_calls = {"n": 0}
+
+        async def _sleep(_seconds: float) -> None:
+            sleep_calls["n"] += 1
+            raise SystemExit("stop loop")
+
+        with patch("meridiand._compaction.asyncio.sleep", new=_sleep):
+            with pytest.raises(SystemExit):
+                await run_compaction_loop(
+                    tmp_path,
+                    policy,
+                    NoopAuditLog(),
+                    check_interval_seconds=0.01,
+                )
+
+        assert sleep_calls["n"] == 1
+
+    async def test_run_compaction_loop_handles_exception(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 318-333 (auto_run exception → CompactionError audit log)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._compaction import run_compaction_loop
+        from meridiand._config import CompactionConfig
+
+        policy = CompactionConfig(enabled=True, idle_days=1, tail_events=10)
+
+        async def _sleep(_seconds: float) -> None:
+            raise SystemExit("stop loop")
+
+        with (
+            patch(
+                "meridiand._compaction.AutoCompactor.run",
+                side_effect=RuntimeError("auto boom"),
+            ),
+            patch("meridiand._compaction.asyncio.sleep", new=_sleep),
+        ):
+            with pytest.raises(SystemExit):
+                await run_compaction_loop(
+                    tmp_path,
+                    policy,
+                    NoopAuditLog(),
+                    check_interval_seconds=0.01,
+                )
+
 
 class TestEventsHandlers:
     """Cover the events.py handler error paths."""
