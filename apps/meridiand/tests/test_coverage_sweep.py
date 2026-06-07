@@ -375,6 +375,57 @@ class TestSkillForgePrecisionErrors:
         assert metric is not None
 
 
+class TestVaultsErrors:
+    def test_all_http_statuses(self) -> None:
+        from meridiand._vaults import (
+            VaultCreateError,
+            VaultDeleteError,
+            VaultInUseError,
+            VaultInvalidRequestError,
+            VaultListError,
+            VaultNotFoundError,
+            VaultSecretConflictError,
+            VaultSecretDeleteConfirmationError,
+            VaultSecretDeleteError,
+            VaultSecretInvalidRequestError,
+            VaultSecretListError,
+            VaultSecretMetaError,
+            VaultSecretNotFoundError,
+            VaultSecretStoreError,
+        )
+
+        ts = pagination_now()
+        assert VaultCreateError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert VaultInvalidRequestError(message="m", timestamp=ts).http_status() == 422
+        assert VaultNotFoundError(vault_id="x", timestamp=ts).http_status() == 404
+        assert VaultInUseError(vault_id="x", timestamp=ts).http_status() == 409
+        assert VaultDeleteError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert VaultListError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert VaultSecretStoreError(message="m", timestamp=ts, cause=None).http_status() == 500
+        assert VaultSecretInvalidRequestError(message="m", timestamp=ts).http_status() == 422
+        assert (
+            VaultSecretConflictError(vault_id="v", key="k", timestamp=ts).http_status() == 409
+        )
+        assert (
+            VaultSecretNotFoundError(vault_id="v", name="n", timestamp=ts).http_status() == 404
+        )
+        assert (
+            VaultSecretMetaError(message="m", timestamp=ts, cause=None).http_status() == 500
+        )
+        assert (
+            VaultSecretListError(message="m", timestamp=ts, cause=None).http_status() == 500
+        )
+        assert (
+            VaultSecretDeleteError(message="m", timestamp=ts, cause=None).http_status() == 500
+        )
+        assert (
+            VaultSecretDeleteConfirmationError(
+                name="n", vault_id="v", timestamp=ts
+            ).http_status()
+            == 400
+        )
+
+
 class TestSkillForgeProposalsErrors:
     def test_all_http_statuses(self) -> None:
         from meridiand._skill_forge_proposals import (
