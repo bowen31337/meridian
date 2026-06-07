@@ -847,6 +847,31 @@ class TestEventsHandlers:
                 await handler("s1", limit=10, offset=0)
 
 
+class TestSystemChannelHelpers:
+    """Cover helpers in _system_channel."""
+
+    def test_check_hmac_signature_no_header(self) -> None:
+        from meridiand._system_channel import _check_hmac_signature
+
+        assert _check_hmac_signature(b"x", "secret", None) is False
+
+    def test_check_hmac_signature_wrong_prefix(self) -> None:
+        from meridiand._system_channel import _check_hmac_signature
+
+        assert _check_hmac_signature(b"x", "secret", "md5=abc") is False
+
+    def test_check_hmac_signature_valid(self) -> None:
+        from meridiand._system_channel import _check_hmac_signature, _sign_payload
+
+        sig = _sign_payload(b"data", "secret")
+        assert _check_hmac_signature(b"data", "secret", f"sha256={sig}") is True
+
+    def test_check_hmac_signature_invalid_signature(self) -> None:
+        from meridiand._system_channel import _check_hmac_signature
+
+        assert _check_hmac_signature(b"data", "secret", "sha256=wrong") is False
+
+
 class TestSystemChannelHandlers:
     """Cover generic-exception wrapping in _system_channel endpoints."""
 
