@@ -375,6 +375,125 @@ class TestSkillForgePrecisionErrors:
         assert metric is not None
 
 
+class TestUserProfilesGenericExceptions:
+    """Cover generic-exception wrapping in all 4 user_profile handlers."""
+
+    @staticmethod
+    def _client(tmp_path: Path):
+        from fastapi.testclient import TestClient
+
+        from meridiand._app import create_app
+        from meridiand._audit import FileAuditLog
+
+        audit = FileAuditLog(tmp_path)
+        app = create_app(audit, storage_root=tmp_path)
+        return TestClient(app, raise_server_exceptions=False)
+
+    async def test_create_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        client = self._client(tmp_path)
+        with patch("meridiand._user_profiles.json.dumps", side_effect=RuntimeError("boom")):
+            resp = client.post(
+                "/v1/user_profiles",
+                json={"username": "u1", "display_name": "U One"},
+            )
+        assert resp.status_code == 500
+
+    async def test_delete_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        client = self._client(tmp_path)
+        d = tmp_path / "user_profiles"
+        d.mkdir()
+        (d / "u1.json").write_text(json.dumps({"id": "u1", "is_primary": False}))
+        with patch.object(Path, "unlink", side_effect=RuntimeError("unlink boom")):
+            resp = client.delete("/v1/user_profiles/u1")
+        assert resp.status_code == 500
+
+    async def test_update_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        client = self._client(tmp_path)
+        d = tmp_path / "user_profiles"
+        d.mkdir()
+        (d / "u2.json").write_text(
+            json.dumps({"id": "u2", "username": "u", "display_name": "U"})
+        )
+        with patch("meridiand._user_profiles.json.dumps", side_effect=RuntimeError("boom")):
+            resp = client.patch(
+                "/v1/user_profiles/u2",
+                json={"display_name": "New"},
+            )
+        assert resp.status_code == 500
+
+    async def test_get_generic_exception_wrapped(self, tmp_path: Path) -> None:
+        client = self._client(tmp_path)
+        d = tmp_path / "user_profiles"
+        d.mkdir()
+        (d / "u3.json").write_text(json.dumps({"id": "u3"}))
+        with patch(
+            "meridiand._user_profiles.json.loads",
+            side_effect=RuntimeError("boom"),
+        ):
+            resp = client.get("/v1/user_profiles/u3")
+        assert resp.status_code == 500
+
+    async def test_create_handler_direct_generic_exception(self, tmp_path: Path) -> None:
+        """Call create handler directly to ensure raise-from is traced (line 272)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._user_profiles import (
+            UserProfileCreateError,
+            UserProfileCreateRequest,
+            make_user_profiles_router,
+        )
+
+        router = make_user_profiles_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/user_profiles" and "POST" in r.methods
+        )
+        req = UserProfileCreateRequest(username="u", display_name="U")
+        with patch("meridiand._user_profiles.json.dumps", side_effect=RuntimeError("boom")):
+            with pytest.raises(UserProfileCreateError):
+                await handler(req)
+
+    async def test_update_handler_direct_generic_exception(self, tmp_path: Path) -> None:
+        """Call update handler directly (line 448)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._user_profiles import (
+            UserProfileUpdateError,
+            UserProfileUpdateRequest,
+            make_user_profiles_router,
+        )
+
+        d = tmp_path / "user_profiles"
+        d.mkdir()
+        (d / "u_upd.json").write_text(
+            json.dumps({"id": "u_upd", "username": "u", "display_name": "U"})
+        )
+        router = make_user_profiles_router(audit_log=NoopAuditLog(), storage_root=tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/user_profiles/{user_profile_id}" and "PATCH" in r.methods
+        )
+        req = UserProfileUpdateRequest(display_name="New")
+        with patch("meridiand._user_profiles.json.dumps", side_effect=RuntimeError("boom")):
+            with pytest.raises(UserProfileUpdateError):
+                await handler("u_upd", req)
+
+    async def test_delete_skips_malformed_manifest(self, tmp_path: Path) -> None:
+        """A malformed session manifest is silently skipped during delete (309-310)."""
+        client = self._client(tmp_path)
+        d = tmp_path / "user_profiles"
+        d.mkdir()
+        (d / "u_del.json").write_text(json.dumps({"id": "u_del", "is_primary": False}))
+        # Seed a malformed session manifest
+        sessions_dir = tmp_path / "sessions" / "broken"
+        sessions_dir.mkdir(parents=True)
+        (sessions_dir / "manifest.json").write_text("not json {{{")
+        resp = client.delete("/v1/user_profiles/u_del")
+        assert resp.status_code in {204, 404, 200}
+
+
 class TestUserProfilesErrors:
     """http_status for all user_profile error classes."""
 
