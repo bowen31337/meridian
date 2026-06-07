@@ -687,6 +687,110 @@ class TestProviderFactory:
         assert router is not None
 
 
+class TestCompactionRouters:
+    """Cover the compaction endpoint generic-exception wraps + autoctor loop."""
+
+    @staticmethod
+    def _build_router(tmp_path: Path, *, policy=None):
+        from core_errors import NoopAuditLog
+
+        from meridiand._compaction import make_compaction_router
+        from meridiand._config import CompactionConfig
+
+        return make_compaction_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            policy=policy or CompactionConfig(),
+        )
+
+    async def test_compact_session_generic_exception(self, tmp_path: Path) -> None:
+        from meridiand._compaction import CompactionError
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/x/compaction/sessions/{session_id}" and "POST" in r.methods
+        )
+        with patch(
+            "meridiand._compaction.AutoCompactor.compact_session",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(CompactionError):
+                await handler("s1")
+
+    async def test_compact_session_typed_error_reraised(self, tmp_path: Path) -> None:
+        from meridiand._compaction import CompactionError
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/x/compaction/sessions/{session_id}" and "POST" in r.methods
+        )
+        pre = CompactionError(message="pre", timestamp=pagination_now(), cause=None)
+        with patch(
+            "meridiand._compaction.AutoCompactor.compact_session",
+            side_effect=pre,
+        ):
+            with pytest.raises(CompactionError):
+                await handler("s1")
+
+    async def test_archive_session_generic_exception(self, tmp_path: Path) -> None:
+        from meridiand._compaction import CompactionError
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/archive" in r.path and "POST" in r.methods
+        )
+        with patch(
+            "meridiand._compaction.AutoCompactor.compact_session",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(CompactionError):
+                await handler("s1")
+
+    async def test_restore_session_generic_exception(self, tmp_path: Path) -> None:
+        from meridiand._compaction import RestoreError
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/restore" in r.path and "POST" in r.methods
+        )
+        with patch(
+            "meridiand._compaction.AutoCompactor.restore_session",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(RestoreError):
+                await handler("s1")
+
+    async def test_get_policy_endpoint(self, tmp_path: Path) -> None:
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint for r in router.routes if r.path == "/v1/x/compaction/policy"
+        )
+        resp = await handler()
+        assert resp is not None
+
+    async def test_run_endpoint_generic_exception(self, tmp_path: Path) -> None:
+        from meridiand._compaction import CompactionError
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint for r in router.routes if r.path == "/v1/x/compaction/run"
+        )
+        with patch(
+            "meridiand._compaction.AutoCompactor.run",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(CompactionError):
+                await handler()
+
+
 class TestCanvasInteractions:
     """Cover make_canvas_interactions_router POST endpoint."""
 
