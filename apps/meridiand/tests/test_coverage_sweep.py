@@ -291,6 +291,100 @@ class TestCheckpointPerCall:
         assert resp.status_code == 422
 
 
+class TestBudgetsReportsLookupAndTool:
+    def test_lookup_agent_cached_after_first_call(self, tmp_path: Path) -> None:
+        """Second call uses cache (158->164 False branch)."""
+        from meridiand._budgets_reports import _lookup_agent_id
+
+        sessions = tmp_path / "sessions" / "s1"
+        sessions.mkdir(parents=True)
+        (sessions / "manifest.json").write_text(json.dumps({"agent_id": "a1"}))
+        cache: dict[str, str | None] = {}
+        # First call: populates cache
+        assert _lookup_agent_id(tmp_path / "sessions", "s1", cache) == "a1"
+        # Second call: uses cache without reading
+        assert _lookup_agent_id(tmp_path / "sessions", "s1", cache) == "a1"
+
+    def test_build_tool_report_skips_blank_tool_names(self, tmp_path: Path) -> None:
+        """tool_call.requested with empty tool_name is skipped (228->226)."""
+        from meridiand._budgets_reports import _build_tool_report
+
+        events_dir = tmp_path / "events"
+        events_dir.mkdir()
+        (events_dir / "s1.ndjson").write_text(
+            json.dumps(
+                {"type": "tool_call.requested", "ts": "2024-01-01T00:00:00Z", "data": {}}
+            )
+            + "\n"
+            + json.dumps(
+                {
+                    "type": "tool_call.requested",
+                    "ts": "2024-01-01T00:00:00Z",
+                    "data": {"tool_name": "bash"},
+                }
+            )
+            + "\n"
+        )
+        report = _build_tool_report(events_dir, since=None, until=None)
+        # Only bash is counted (empty tool_name skipped)
+        assert len(report) == 1
+        assert report[0]["tool_name"] == "bash"
+
+
+class TestBudgetsReportsHelper:
+    def test_count_event_skips_unreadable_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A file that raises OSError is silently skipped (lines 126-127)."""
+        from meridiand._budgets_reports import _scan_events
+
+        events_dir = tmp_path / "events"
+        events_dir.mkdir()
+        # File that exists but read fails
+        (events_dir / "broken.ndjson").write_text("ignored")
+        # Valid file
+        (events_dir / "ok.ndjson").write_text(
+            json.dumps({"type": "budget.warning", "ts": "2024-01-01T00:00:00Z"}) + "\n"
+        )
+
+        real = Path.read_text
+
+        def _selective(self: Path, *a: Any, **k: Any) -> str:
+            if self.name == "broken.ndjson":
+                raise OSError("denied")
+            return real(self, *a, **k)
+
+        monkeypatch.setattr(Path, "read_text", _selective)
+        result = _scan_events(events_dir, frozenset({"budget.warning"}), since=None, until=None)
+        # ok.ndjson contributes 1
+        assert len(result) == 1
+
+    def test_scan_events_skips_blank_lines_and_invalid_json(self, tmp_path: Path) -> None:
+        """Blank lines and invalid JSON lines are skipped (131, 134-135, 137)."""
+        from meridiand._budgets_reports import _scan_events
+
+        events_dir = tmp_path / "events"
+        events_dir.mkdir()
+        (events_dir / "s1.ndjson").write_text(
+            "\n"  # blank
+            "  \n"  # whitespace
+            "not json {{{\n"  # invalid
+            + json.dumps({"type": "other", "ts": "2024-01-01T00:00:00Z"})
+            + "\n"  # wrong type
+            + json.dumps({"type": "budget.warning", "ts": "2024-01-01T00:00:00Z"})
+            + "\n"
+            + json.dumps({"type": "budget.warning", "ts": "1999-01-01T00:00:00Z"})
+            + "\n"  # before since
+        )
+        result = _scan_events(
+            events_dir,
+            frozenset({"budget.warning"}),
+            since="2023-01-01T00:00:00Z",
+            until=None,
+        )
+        assert len(result) == 1
+
+
 class TestSkillSuggestionsErrors:
     def test_request_error_http_status(self) -> None:
         from meridiand._skill_suggestions import SkillSuggestionRequestError
