@@ -291,6 +291,80 @@ class TestCheckpointPerCall:
         assert resp.status_code == 422
 
 
+class TestSkillForgeSelHelpers:
+    def test_error_http_status(self) -> None:
+        from meridiand._skill_forge_sel import ForgeSelError
+
+        assert ForgeSelError(message="m", timestamp="t", cause=None).http_status() == 500
+
+    def test_load_events_no_events_dir(self, tmp_path: Path) -> None:
+        """No events dir → returns [] (line 99 if-False)."""
+        from meridiand._skill_forge_sel import _read_session_events
+
+        assert _read_session_events(tmp_path, "s1") == []
+
+    def test_load_events_skips_blank_and_invalid(self, tmp_path: Path) -> None:
+        """Blank lines and invalid JSON skipped (104, 108-109)."""
+        from meridiand._skill_forge_sel import _read_session_events
+
+        events_dir = tmp_path / "events"
+        events_dir.mkdir()
+        (events_dir / "s1.ndjson").write_text(
+            "\n"  # blank
+            "not json {{{\n"  # invalid
+            + json.dumps({"seq": 1, "type": "test"})
+            + "\n"
+        )
+        result = _read_session_events(tmp_path, "s1")
+        assert len(result) == 1
+
+    def test_collect_no_terminal_phase(self, tmp_path: Path) -> None:
+        """No phase_change with terminal phase → no summary added (149->140)."""
+        from meridiand._skill_forge_sel import collect_terminated_sessions
+
+        events_dir = tmp_path / "events"
+        events_dir.mkdir()
+        # Session with only running state, no terminal
+        (events_dir / "s1.ndjson").write_text(
+            json.dumps({"seq": 1, "type": "session.created", "data": {}}) + "\n"
+        )
+        summaries = collect_terminated_sessions(tmp_path)
+        assert summaries == []
+
+    def test_enumerate_session_ids_dedupes(self, tmp_path: Path) -> None:
+        """Same session_id appearing twice is only counted once (122->120)."""
+        from meridiand._skill_forge_sel import _enumerate_session_ids
+
+        events_dir = tmp_path / "events"
+        (events_dir / "2024-01-01").mkdir(parents=True)
+        (events_dir / "2024-01-02").mkdir(parents=True)
+        (events_dir / "2024-01-01" / "s1.ndjson").write_text("")
+        (events_dir / "2024-01-02" / "s1.ndjson").write_text("")  # duplicate
+        result = _enumerate_session_ids(tmp_path)
+        assert result == ["s1"]
+
+    def test_collect_tool_call_without_name(self, tmp_path: Path) -> None:
+        """tool_call.requested with empty tool_name skipped (122->120 branch)."""
+        from meridiand._skill_forge_sel import collect_terminated_sessions
+
+        events_dir = tmp_path / "events"
+        events_dir.mkdir()
+        (events_dir / "s2.ndjson").write_text(
+            json.dumps({"seq": 1, "type": "tool_call.requested", "data": {}})
+            + "\n"
+            + json.dumps(
+                {
+                    "seq": 2,
+                    "type": "session.phase_change",
+                    "data": {"after": "terminated"},
+                }
+            )
+            + "\n"
+        )
+        summaries = collect_terminated_sessions(tmp_path)
+        assert len(summaries) == 1
+
+
 class TestChannelDriverProtocolImpls:
     """Cover NoopSecretResolver + NoopSocketModeClient + small protocol impls."""
 
