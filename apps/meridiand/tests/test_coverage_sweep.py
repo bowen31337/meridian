@@ -1084,6 +1084,171 @@ class TestSystemChannelHandlers:
             with pytest.raises(ChannelInboundError):
                 await handler("c1", "r1")
 
+    async def test_session_outbound_not_found(self, tmp_path: Path) -> None:
+        """Covers 944-945 (no channel_sessions for session)."""
+        from meridiand._system_channel import (
+            SessionOutboundNotFoundError,
+            SessionOutboundRequest,
+        )
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/sessions/{session_id}/outbound" and "POST" in r.methods
+        )
+        req = SessionOutboundRequest(content="hi", content_type="text")
+        with pytest.raises(SessionOutboundNotFoundError):
+            await handler("nonexistent_session", req)
+
+    async def test_session_outbound_skips_missing_channel(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 958-959 (channel_file does not exist → skipped)."""
+        from meridiand._system_channel import SessionOutboundRequest
+
+        # Channel session exists, but channel file doesn't.
+        chsd = tmp_path / "channel_sessions" / "c_missing"
+        chsd.mkdir(parents=True)
+        (chsd / "s1.json").write_text(
+            json.dumps(
+                {"channel_id": "c_missing", "sender_id": "r1", "session_id": "s1"}
+            )
+        )
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/sessions/{session_id}/outbound" and "POST" in r.methods
+        )
+        req = SessionOutboundRequest(content="hi", content_type="text")
+        resp = await handler("s1", req)
+        assert resp is not None
+
+    async def test_session_outbound_channel_failure(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 990-1013 (ChannelFailure → SessionOutboundError per-channel)."""
+        from unittest.mock import AsyncMock
+
+        from core_errors import NoopAuditLog
+
+        from sdk_channel import ChannelFailure
+
+        from meridiand._system_channel import (
+            SessionOutboundRequest,
+            make_system_channel_router,
+        )
+
+        chsd = tmp_path / "channel_sessions" / "c1"
+        chsd.mkdir(parents=True)
+        (chsd / "s1.json").write_text(
+            json.dumps({"channel_id": "c1", "sender_id": "r1", "session_id": "s1"})
+        )
+        channels_dir = tmp_path / "channels"
+        channels_dir.mkdir()
+        (channels_dir / "c1.json").write_text(
+            json.dumps({"id": "c1", "kind": "slack", "egress_policy": "enabled"})
+        )
+
+        runtime = MagicMock()
+        runtime.send = AsyncMock(
+            side_effect=ChannelFailure(
+                channel_id="c1",
+                channel_kind="slack",
+                session_id="s1",
+                code="error_code",
+                message="bad",
+                timestamp=pagination_now(),
+            )
+        )
+
+        router = make_system_channel_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            channel_runtime=runtime,
+        )
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/sessions/{session_id}/outbound" and "POST" in r.methods
+        )
+        req = SessionOutboundRequest(content="hi", content_type="text")
+        resp = await handler("s1", req)
+        assert resp is not None
+
+    async def test_session_outbound_unexpected_per_channel_exception(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 1014-1036 (generic Exception → SessionOutboundError per-channel)."""
+        from unittest.mock import AsyncMock
+
+        from core_errors import NoopAuditLog
+
+        from meridiand._system_channel import (
+            SessionOutboundRequest,
+            make_system_channel_router,
+        )
+
+        chsd = tmp_path / "channel_sessions" / "c1"
+        chsd.mkdir(parents=True)
+        (chsd / "s1.json").write_text(
+            json.dumps({"channel_id": "c1", "sender_id": "r1", "session_id": "s1"})
+        )
+        channels_dir = tmp_path / "channels"
+        channels_dir.mkdir()
+        (channels_dir / "c1.json").write_text(
+            json.dumps({"id": "c1", "kind": "slack", "egress_policy": "enabled"})
+        )
+
+        runtime = MagicMock()
+        runtime.send = AsyncMock(side_effect=RuntimeError("boom"))
+
+        router = make_system_channel_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            channel_runtime=runtime,
+        )
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/sessions/{session_id}/outbound" and "POST" in r.methods
+        )
+        req = SessionOutboundRequest(content="hi", content_type="text")
+        resp = await handler("s1", req)
+        assert resp is not None
+
+    async def test_session_outbound_top_level_generic_exception(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 1051-1067 (top-level generic exception wrap)."""
+        from meridiand._system_channel import (
+            SessionOutboundError,
+            SessionOutboundRequest,
+        )
+
+        chsd = tmp_path / "channel_sessions" / "c1"
+        chsd.mkdir(parents=True)
+        (chsd / "s1.json").write_text(
+            json.dumps({"channel_id": "c1", "sender_id": "r1", "session_id": "s1"})
+        )
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/sessions/{session_id}/outbound" and "POST" in r.methods
+        )
+        req = SessionOutboundRequest(content="hi", content_type="text")
+        # json.loads will raise inside the try block.
+        with patch(
+            "meridiand._system_channel.json.loads",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(SessionOutboundError):
+                await handler("s1", req)
+
 
 class TestAgentsHandlers:
     """Cover generic-exception wrapping in _agents handlers."""
