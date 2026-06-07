@@ -2103,6 +2103,89 @@ class TestAgentsErrors:
         assert AgentListError(message="m", timestamp=ts, cause=None).http_status() == 500
 
 
+class TestVaultsHandlers:
+    """Cover generic-exception wrapping in _vaults handlers."""
+
+    @staticmethod
+    def _make_router(tmp_path: Path):
+        from core_errors import NoopAuditLog
+
+        from meridiand._vault_backend_encrypted_file import EncryptedFileVaultBackend
+        from meridiand._vault_backend_os_keychain import OsKeychainVaultBackend
+        from meridiand._vaults import make_vaults_router
+
+        class _FakeKr:
+            def __init__(self) -> None:
+                self.store: dict[tuple[str, str], str] = {}
+
+            def get_password(self, svc: str, account: str) -> str | None:
+                return self.store.get((svc, account))
+
+            def set_password(self, svc: str, account: str, password: str) -> None:
+                self.store[(svc, account)] = password
+
+            def delete_password(self, svc: str, account: str) -> None:
+                self.store.pop((svc, account), None)
+
+        oskc = OsKeychainVaultBackend(_keyring=_FakeKr())
+        encf = EncryptedFileVaultBackend(storage_root=tmp_path)
+        encf.unlock_with_passphrase("test")
+
+        return make_vaults_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            vault_backend=encf,
+            os_keychain_backend=oskc,
+        )
+
+    async def test_create_generic_exception(self, tmp_path: Path) -> None:
+        from meridiand._vaults import VaultCreateError, VaultCreateRequest
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint for r in router.routes if r.path == "/v1/vaults" and "POST" in r.methods
+        )
+        req = VaultCreateRequest(name="v", backend="os_keychain")
+        with patch("meridiand._vaults.json.dumps", side_effect=RuntimeError("boom")):
+            with pytest.raises(VaultCreateError):
+                await handler(req)
+
+    async def test_list_generic_exception(self, tmp_path: Path) -> None:
+        from meridiand._vaults import VaultListError
+
+        # Pre-create a vault
+        vd = tmp_path / "vaults"
+        vd.mkdir(parents=True)
+        (vd / "v1.json").write_text(json.dumps({"id": "v1"}))
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint for r in router.routes if r.path == "/v1/vaults" and "GET" in r.methods
+        )
+        with patch.object(Path, "glob", side_effect=RuntimeError("boom")):
+            with pytest.raises(VaultListError):
+                await handler()
+
+    async def test_delete_generic_exception(self, tmp_path: Path) -> None:
+        from meridiand._vaults import VaultDeleteError
+
+        vd = tmp_path / "vaults"
+        vd.mkdir(parents=True)
+        (vd / "v1.json").write_text(
+            json.dumps({"id": "v1", "name": "v", "backend": "os_keychain"})
+        )
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/vaults/{vault_id}" and "DELETE" in r.methods
+        )
+        with patch.object(Path, "unlink", side_effect=RuntimeError("boom")):
+            with pytest.raises(VaultDeleteError):
+                await handler("v1")
+
+
 class TestVaultsErrors:
     def test_all_http_statuses(self) -> None:
         from meridiand._vaults import (
