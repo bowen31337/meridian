@@ -2103,6 +2103,37 @@ class TestAgentsErrors:
         assert AgentListError(message="m", timestamp=ts, cause=None).http_status() == 500
 
 
+class TestMessagesHelper:
+    async def test_collect_handles_all_event_types(self) -> None:
+        """_collect handles MessageStart/TextDelta/ToolUseStart/ToolInputDelta/MessageDelta/MessageStop."""
+        from meridian_sdk_provider.types import (
+            MessageDeltaEvent,
+            MessageStartEvent,
+            MessageStopEvent,
+            TextDeltaEvent,
+            ToolInputDeltaEvent,
+            ToolUseStartEvent,
+        )
+
+        from meridiand._messages import _collect
+
+        async def _stream() -> Any:
+            yield MessageStartEvent(model="claude-opus-4", input_tokens=10, provider="test")
+            yield TextDeltaEvent(text="hello ")
+            yield ToolUseStartEvent(id="t1", name="search")
+            yield ToolInputDeltaEvent(id="t1", partial_json='{"q":')
+            yield ToolInputDeltaEvent(id="t1", partial_json='"x"}')
+            yield ToolInputDeltaEvent(id="unknown", partial_json="ignored")
+            yield MessageDeltaEvent(stop_reason="tool_use")
+            yield MessageStopEvent(stop_reason="end_turn", input_tokens=20, output_tokens=10)
+
+        result = await _collect(_stream(), "claude-sonnet-4")
+        assert result["model"] == "claude-opus-4"
+        assert result["usage"]["input_tokens"] == 20
+        assert result["usage"]["output_tokens"] == 10
+        assert result["stop_reason"] == "end_turn"
+
+
 class TestSkillForgeHelpers:
     def test_skill_forge_run_error_http_status(self) -> None:
         from meridiand._skill_forge import SkillForgeRunError
