@@ -3505,6 +3505,127 @@ class TestSystemConfigEndpoint:
         )
         assert resp.status_code == 200
 
+    async def test_reload_body_read_failure(self) -> None:
+        """Covers lines 81-92 (raw body decode/read failure)."""
+        from core_errors import NoopAuditLog
+        from meridian_sdk_provider import ModelRouter, ModelRoutingPolicy
+
+        from meridiand._system_config import make_system_config_router
+
+        router = ModelRouter(
+            registry=None, policy=ModelRoutingPolicy(rules=[], fallbacks=[])
+        )
+        api_router = make_system_config_router(
+            audit_log=NoopAuditLog(), model_router=router
+        )
+        handler = next(
+            r.endpoint for r in api_router.routes if r.path == "/v1/system/config"
+        )
+        request = MagicMock()
+
+        async def _bad_body() -> bytes:
+            raise RuntimeError("body read failed")
+
+        request.body = _bad_body
+        resp = await handler(request)
+        assert resp.status_code == 422
+
+    async def test_reload_provider_factory_error(self, tmp_path: Path) -> None:
+        """Covers lines 161-181 (provider hot-swap failure)."""
+        from core_errors import NoopAuditLog
+        from meridian_sdk_provider import ModelRouter, ModelRoutingPolicy, ProviderRegistry
+
+        from meridiand._config import MERIDIAN_CONFIG_VERSION
+        from meridiand._provider_factory import ProviderFactoryError
+        from meridiand._system_config import make_system_config_router
+
+        registry = ProviderRegistry({})
+        router = ModelRouter(
+            registry=registry, policy=ModelRoutingPolicy(rules=[], fallbacks=[])
+        )
+
+        api_router = make_system_config_router(
+            audit_log=NoopAuditLog(), model_router=router
+        )
+        handler = next(
+            r.endpoint for r in api_router.routes if r.path == "/v1/system/config"
+        )
+
+        # YAML with a provider so _build_provider gets called and we can raise.
+        yaml_body = (
+            f"version: {MERIDIAN_CONFIG_VERSION}\n"
+            f"storage_root: {tmp_path}\n"
+            "providers:\n"
+            "  - name: p1\n"
+            "    kind: anthropic\n"
+        )
+
+        request = MagicMock()
+
+        async def _body() -> bytes:
+            return yaml_body.encode("utf-8")
+
+        request.body = _body
+
+        with patch(
+            "meridiand._system_config._build_provider",
+            side_effect=ProviderFactoryError(
+                message="bad provider", timestamp=pagination_now(), cause=None
+            ),
+        ):
+            resp = await handler(request)
+        assert resp.status_code == 500
+
+    async def test_reload_provider_swap_success(self, tmp_path: Path) -> None:
+        """Covers lines 168-169 (successful provider build + swap_all)."""
+        from unittest.mock import AsyncMock
+
+        from core_errors import NoopAuditLog
+        from meridian_sdk_provider import (
+            ModelRouter,
+            ModelRoutingPolicy,
+            ProviderRegistry,
+        )
+
+        from meridiand._config import MERIDIAN_CONFIG_VERSION
+        from meridiand._system_config import make_system_config_router
+
+        registry = ProviderRegistry({})
+        registry.swap_all = AsyncMock()  # type: ignore[method-assign]
+        router = ModelRouter(
+            registry=registry, policy=ModelRoutingPolicy(rules=[], fallbacks=[])
+        )
+
+        api_router = make_system_config_router(
+            audit_log=NoopAuditLog(), model_router=router
+        )
+        handler = next(
+            r.endpoint for r in api_router.routes if r.path == "/v1/system/config"
+        )
+
+        yaml_body = (
+            f"version: {MERIDIAN_CONFIG_VERSION}\n"
+            f"storage_root: {tmp_path}\n"
+            "providers:\n"
+            "  - name: p1\n"
+            "    kind: anthropic\n"
+        )
+
+        request = MagicMock()
+
+        async def _body() -> bytes:
+            return yaml_body.encode("utf-8")
+
+        request.body = _body
+
+        with patch(
+            "meridiand._system_config._build_provider",
+            return_value=MagicMock(),
+        ):
+            resp = await handler(request)
+        assert resp.status_code == 200
+        registry.swap_all.assert_awaited_once()
+
 
 class TestSessionsErrors:
     def test_all_http_statuses(self) -> None:
