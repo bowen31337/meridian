@@ -2103,6 +2103,43 @@ class TestAgentsErrors:
         assert AgentListError(message="m", timestamp=ts, cause=None).http_status() == 500
 
 
+class TestSkillForgeHelpers:
+    def test_skill_forge_run_error_http_status(self) -> None:
+        from meridiand._skill_forge import SkillForgeRunError
+
+        assert SkillForgeRunError(message="m", timestamp="t", cause=None).http_status() == 500
+
+    async def test_noop_provider_returns_empty(self) -> None:
+        from meridiand._skill_forge import NoopSkillForgeProvider
+
+        p = NoopSkillForgeProvider()
+        assert await p.forge({"id": "s1"}, "type") == ""
+
+    def test_find_primary_user_no_dir(self, tmp_path: Path) -> None:
+        from meridiand._skill_forge import _find_primary_user
+
+        assert _find_primary_user(tmp_path / "nope") is None
+
+    def test_find_primary_user_skips_malformed(self, tmp_path: Path) -> None:
+        from meridiand._skill_forge import _find_primary_user
+
+        d = tmp_path / "user_profiles"
+        d.mkdir()
+        (d / "bad.json").write_text("not json {{{")
+        (d / "no_primary.json").write_text(json.dumps({"is_primary": False}))
+        assert _find_primary_user(d) is None
+
+    def test_find_primary_user_returns_match(self, tmp_path: Path) -> None:
+        from meridiand._skill_forge import _find_primary_user
+
+        d = tmp_path / "user_profiles"
+        d.mkdir()
+        (d / "u1.json").write_text(json.dumps({"id": "u1", "is_primary": True}))
+        result = _find_primary_user(d)
+        assert result is not None
+        assert result["id"] == "u1"
+
+
 class TestMainEntryPoint:
     """Cover __main__.py error paths."""
 
