@@ -3833,6 +3833,11 @@ class TestReplayHandler:
 
         from meridiand._replay import ReplayError, make_replay_router
 
+        # Pre-create the model fixture so the handler enters the try block.
+        fixture_dir = tmp_path / "fixtures" / "s1"
+        fixture_dir.mkdir(parents=True)
+        (fixture_dir / "model_responses.ndjson").write_text("")
+
         router = make_replay_router(
             audit_log=NoopAuditLog(),
             storage_root=tmp_path,
