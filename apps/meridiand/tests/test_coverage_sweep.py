@@ -7609,23 +7609,24 @@ class TestParallelRunsErrors:
     async def test_parallel_runs_budget_exceeded_cancels_pending(
         self, tmp_path: Path
     ) -> None:
-        """Covers _parallel_runs.py 185-190 (budget exceeded → cancel pending tasks)."""
+        """Covers _parallel_runs.py 185-190 (budget exceeded → cancel pending tasks).
+
+        Force one fast worker (emits usage.delta) and one hanging worker so
+        that pending is non-empty when budget_acc.exceeded fires.
+        """
+        import asyncio as _asyncio
+
         from meridiand._parallel_runs import (
-            BudgetExceededError,
             ChildSpec,
             _run_children_parallel,
         )
+        from meridiand._replay import UsageDelta as _UsageDelta
 
-        # Build fixtures for 2 children. Each emits one message that triggers
-        # one usage.delta event (via _run_harness's `on_usage_delta(100, 50)`).
-        # With budget_model_calls=0, the very first delta will set exceeded.
+        # Build fixture dirs so FakeModelAdapter doesn't error on missing files.
         for sid in ("s1", "s2"):
             fixture_dir = tmp_path / "fixtures" / sid
             fixture_dir.mkdir(parents=True)
-            (fixture_dir / "model_responses.ndjson").write_text(
-                json.dumps([{"type": "message_stop", "stop_reason": "end_turn"}])
-                + "\n"
-            )
+            (fixture_dir / "model_responses.ndjson").write_text("")
             (fixture_dir / "tool_responses.ndjson").write_text("")
 
         children = [
@@ -7633,16 +7634,37 @@ class TestParallelRunsErrors:
             ChildSpec(fixture_session_id="s2"),
         ]
 
-        # Budget 0 → the first usage.delta exceeds; the other worker is
-        # cancelled at its next iteration. The exceeded flag triggers
-        # the cleanup loop at 185-190 even if both finish naturally.
-        results, status, total_model, total_tool = await _run_children_parallel(
-            children,
-            storage_root=tmp_path,
-            budget_model_calls=0,
-        )
+        call_count = {"n": 0}
+
+        async def _patched_run_harness(
+            model_adapter,
+            sandbox_adapter,
+            on_usage_delta=None,
+            cancel_event=None,
+        ):
+            call_count["n"] += 1
+            if call_count["n"] == 1:
+                # First worker: emit usage.delta → triggers budget exceeded.
+                if on_usage_delta is not None:
+                    on_usage_delta(_UsageDelta(input_tokens=100, output_tokens=50))
+                return (1, 0)
+            # Second worker: hang until cancelled.
+            await _asyncio.Future()  # never completes → cancelled by 185
+            return (0, 0)
+
+        with patch(
+            "meridiand._parallel_runs._run_harness",
+            new=_patched_run_harness,
+        ):
+            results, status, total_model, total_tool = await _run_children_parallel(
+                children,
+                storage_root=tmp_path,
+                budget_model_calls=0,
+            )
         assert status == "budget_exceeded"
         assert len(results) == 2
+        statuses = sorted(r["status"] for r in results)
+        assert "cancelled" in statuses
 
 
 class TestRecoverySoakHelpers:
