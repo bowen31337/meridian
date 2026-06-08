@@ -4597,6 +4597,63 @@ class TestReplayHandler:
         assert model_calls == 2
         assert tool_calls == 1
 
+    async def test_run_harness_loop_on_stop_dispatch(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers _replay.py 802-803 (on_stop hook dispatch when stop_reason != end_turn)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._replay import (
+            FakeModelAdapter,
+            FakeSandboxAdapter,
+            run_harness_loop,
+        )
+
+        # Model returns stop_reason="stop_sequence" — neither end_turn, tool_use
+        # nor max_tokens — so the else branch dispatches on_stop.
+        model_fixture = tmp_path / "model.ndjson"
+        model_fixture.write_text(
+            json.dumps(
+                [
+                    {"type": "message_stop", "stop_reason": "stop_sequence"},
+                ]
+            )
+            + "\n"
+        )
+        sandbox_fixture = tmp_path / "sandbox.ndjson"
+        sandbox_fixture.write_text("")
+
+        hooks_dir = tmp_path / "hooks"
+        hooks_dir.mkdir()
+
+        class _PhaseReader:
+            def __init__(self) -> None:
+                self.n = 0
+
+            def current_phase(self, _session_id: str) -> str:
+                self.n += 1
+                return "waiting_for_model"
+
+        async def _fake_dispatch(*_a: Any, **_k: Any):
+            return []
+
+        with patch(
+            "meridiand._replay.dispatch_hooks",
+            new=_fake_dispatch,
+        ):
+            model_adapter = FakeModelAdapter(model_fixture)
+            sandbox_adapter = FakeSandboxAdapter(sandbox_fixture)
+            model_calls, tool_calls, final_phase = await run_harness_loop(
+                "s1",
+                model_adapter=model_adapter,
+                sandbox_adapter=sandbox_adapter,
+                phase_reader=_PhaseReader(),
+                audit_log=NoopAuditLog(),
+                hooks_dir=hooks_dir,
+            )
+        assert model_calls == 1
+        assert final_phase == "idle"
+
     async def test_run_harness_with_hooks_dir(self, tmp_path: Path) -> None:
         """Covers 246, 273, 292-293, 295-310, 313 (hooks_dir branches in _run_harness)."""
         from core_errors import NoopAuditLog
