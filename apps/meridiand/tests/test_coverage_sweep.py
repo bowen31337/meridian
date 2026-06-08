@@ -1973,6 +1973,130 @@ class TestImportsHandlerWriteErrors:
             with pytest.raises(ImportWriteError):
                 await handler(body)
 
+    def test_openclaw_tool_capabilities_relaxed_false_branch(self) -> None:
+        """Covers 584->590 (capabilities supplied but only allow_file_read overridden)."""
+        from meridiand._imports import (
+            OpenClawToolRecord,
+            _translate_openclaw_tool,
+        )
+
+        rec = OpenClawToolRecord(
+            id="t1",
+            name="t",
+            capabilities={"allow_file_read": True},  # only allow_file_read
+        )
+        _, lossy = _translate_openclaw_tool(rec, now=pagination_now())
+        assert "capabilities_relaxed" not in lossy
+
+    async def test_openclaw_install_write_failure_cleanup_existing(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 1398-1399 (unlink existing on openclaw/install write rollback)."""
+        from meridiand._imports import (
+            ImportWriteError,
+            OpenClawInstallImportRequest,
+            OpenClawRecord,
+        )
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/imports/openclaw/install" in r.path
+        )
+
+        body = OpenClawInstallImportRequest(
+            channels=[
+                OpenClawRecord(id="c1", kind="channel", name="ch1"),
+                OpenClawRecord(id="c2", kind="channel", name="ch2"),
+            ]
+        )
+
+        call_count = {"n": 0}
+        original = Path.write_text
+
+        def _raise_second(self: Path, *a: Any, **kw: Any) -> int:
+            if "channels" in str(self) and str(self).endswith(".json"):
+                call_count["n"] += 1
+                if call_count["n"] >= 2:
+                    raise RuntimeError("write boom on 2nd")
+            return original(self, *a, **kw)
+
+        with patch.object(Path, "write_text", _raise_second):
+            with pytest.raises(ImportWriteError):
+                await handler(body)
+
+    async def test_hermes_install_translator_record_invalid_reraise(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 1664-1667 (_translate_hermes raised Exception → wrap as RecordInvalid)."""
+        from meridiand._imports import (
+            HermesInstallImportRequest,
+            HermesRecord,
+            ImportRecordInvalidError,
+        )
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/imports/hermes/install" in r.path
+        )
+        body = HermesInstallImportRequest(
+            skills=[
+                HermesRecord(
+                    id="h1",
+                    name="x",
+                    description="d",
+                    instructions="i",
+                    tools=[{"name": "t1"}],
+                )
+            ]
+        )
+        with patch(
+            "meridiand._imports._translate_hermes",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(ImportRecordInvalidError):
+                await handler(body)
+
+    async def test_hermes_install_translator_record_invalid_passthrough(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 1487 (_translate_hermes raised ImportRecordInvalidError → re-raise)."""
+        from meridiand._imports import (
+            HermesImportRequest,
+            HermesRecord,
+            ImportRecordInvalidError,
+        )
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/imports/hermes" in r.path and r.path.endswith("/hermes")
+        )
+        body = HermesImportRequest(
+            records=[
+                HermesRecord(
+                    id="h1",
+                    name="x",
+                    description="d",
+                    instructions="i",
+                    tools=[{"name": "t1"}],
+                )
+            ]
+        )
+        pre = ImportRecordInvalidError(
+            message="precooked", timestamp=pagination_now(), seq=0
+        )
+        with patch(
+            "meridiand._imports._translate_hermes",
+            side_effect=pre,
+        ):
+            with pytest.raises(ImportRecordInvalidError):
+                await handler(body)
+
     async def test_hermes_install_acp_empty_id(self, tmp_path: Path) -> None:
         """Covers 1858-1861."""
         from meridiand._imports import (
