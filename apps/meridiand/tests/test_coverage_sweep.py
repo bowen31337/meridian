@@ -1449,6 +1449,274 @@ class TestImportsHandlerWriteErrors:
         with pytest.raises(ValueError, match="base_url"):
             _translate_hermes_acp(rec, now=pagination_now())
 
+    # -- OpenClaw translators metadata branches --
+
+    def test_openclaw_skill_metadata_branch(self) -> None:
+        """Covers 398-400 in _translate_hermes_skill (hermes_meta_)."""
+        from meridiand._imports import HermesRecord, _translate_hermes
+
+        rec = HermesRecord(
+            id="h1",
+            name="skill",
+            description="d",
+            instructions="i",
+            tools=[{"name": "t1"}],
+            metadata={"k": "v"},
+        )
+        sr, vr, lossy = _translate_hermes(rec, now=pagination_now())
+        assert sr["metadata"]["hermes_meta_k"] == "v"
+        assert "metadata" in lossy
+
+    def test_openclaw_session_metadata_branch(self) -> None:
+        """Covers 494-496."""
+        from meridiand._imports import (
+            OpenClawSessionRecord,
+            _translate_openclaw_session,
+        )
+
+        rec = OpenClawSessionRecord(
+            id="s1",
+            agent_id="a1",
+            created_at="2026-01-01T00:00:00Z",
+            metadata={"k": "v"},
+        )
+        sr, lossy = _translate_openclaw_session(rec, now=pagination_now())
+        assert (
+            sr["manifest"]["metadata"]["openclaw_meta_k"] == "v"
+        )
+        assert "metadata" in lossy
+
+    def test_openclaw_memory_store_empty_lossy(self) -> None:
+        """Covers 541."""
+        from meridiand._imports import _translate_openclaw_memory_store
+
+        sr, lossy = _translate_openclaw_memory_store([], now=pagination_now())
+        assert "memory_empty" in lossy
+
+    def test_openclaw_tool_unknown_handler_kind_lossy(self) -> None:
+        """Covers 574."""
+        from meridiand._imports import (
+            OpenClawToolRecord,
+            _translate_openclaw_tool,
+        )
+
+        rec = OpenClawToolRecord(
+            id="t1", name="t", handler_kind="weird_unknown"
+        )
+        _, lossy = _translate_openclaw_tool(rec, now=pagination_now())
+        assert "handler_kind_unknown" in lossy
+
+    def test_openclaw_tool_capabilities_relaxed_lossy(self) -> None:
+        """Covers 581-586."""
+        from meridiand._imports import (
+            OpenClawToolRecord,
+            _translate_openclaw_tool,
+        )
+
+        rec = OpenClawToolRecord(
+            id="t1",
+            name="t",
+            handler_kind="http",
+            capabilities={"allow_exec": True},
+        )
+        _, lossy = _translate_openclaw_tool(rec, now=pagination_now())
+        assert "capabilities_relaxed" in lossy
+
+    def test_openclaw_tool_metadata_branch(self) -> None:
+        """Covers 593-595."""
+        from meridiand._imports import (
+            OpenClawToolRecord,
+            _translate_openclaw_tool,
+        )
+
+        rec = OpenClawToolRecord(
+            id="t1", name="t", metadata={"k": "v"}
+        )
+        translated, lossy = _translate_openclaw_tool(rec, now=pagination_now())
+        assert translated["metadata"]["openclaw_meta_k"] == "v"
+        assert "metadata" in lossy
+
+    # -- Hermes install endpoint: empty-id validation across subsystems --
+
+    async def test_hermes_install_skill_empty_id(self, tmp_path: Path) -> None:
+        """Covers 1659-1661."""
+        from meridiand._imports import (
+            HermesInstallImportRequest,
+            HermesRecord,
+            ImportRecordInvalidError,
+        )
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/imports/hermes/install" in r.path
+        )
+        body = HermesInstallImportRequest(
+            skills=[
+                HermesRecord(
+                    id="   ",
+                    name="x",
+                    description="d",
+                    instructions="i",
+                    tools=[{"name": "t1"}],
+                )
+            ]
+        )
+        with pytest.raises(ImportRecordInvalidError):
+            await handler(body)
+
+    async def test_hermes_install_env_empty_id(self, tmp_path: Path) -> None:
+        """Covers 1693-1696."""
+        from meridiand._imports import (
+            HermesEnvRecord,
+            HermesInstallImportRequest,
+            ImportRecordInvalidError,
+        )
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/imports/hermes/install" in r.path
+        )
+        body = HermesInstallImportRequest(
+            environments=[
+                HermesEnvRecord(id="   ", name="env", backend="docker")
+            ]
+        )
+        with pytest.raises(ImportRecordInvalidError):
+            await handler(body)
+
+    async def test_hermes_install_provider_empty_id(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 1726-1729."""
+        from meridiand._imports import (
+            HermesInstallImportRequest,
+            HermesProviderRecord,
+            ImportRecordInvalidError,
+        )
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/imports/hermes/install" in r.path
+        )
+        body = HermesInstallImportRequest(
+            providers=[
+                HermesProviderRecord(id="   ", name="p", kind="x")
+            ]
+        )
+        with pytest.raises(ImportRecordInvalidError):
+            await handler(body)
+
+    async def test_hermes_install_session_empty_id(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 1759-1762."""
+        from meridiand._imports import (
+            HermesInstallImportRequest,
+            HermesSessionRecord,
+            ImportRecordInvalidError,
+        )
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/imports/hermes/install" in r.path
+        )
+        body = HermesInstallImportRequest(
+            sessions=[
+                HermesSessionRecord(
+                    id="   ",
+                    agent_id="a1",
+                    created_at="2026-01-01T00:00:00Z",
+                )
+            ]
+        )
+        with pytest.raises(ImportRecordInvalidError):
+            await handler(body)
+
+    async def test_hermes_install_user_profile_empty_id(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 1792-1795."""
+        from meridiand._imports import (
+            HermesInstallImportRequest,
+            HermesUserProfileRecord,
+            ImportRecordInvalidError,
+        )
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/imports/hermes/install" in r.path
+        )
+        body = HermesInstallImportRequest(
+            user_profiles=[
+                HermesUserProfileRecord(id="   ", username="user")
+            ]
+        )
+        with pytest.raises(ImportRecordInvalidError):
+            await handler(body)
+
+    async def test_hermes_install_cron_empty_id(self, tmp_path: Path) -> None:
+        """Covers 1825-1828."""
+        from meridiand._imports import (
+            HermesCronRecord,
+            HermesInstallImportRequest,
+            ImportRecordInvalidError,
+        )
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/imports/hermes/install" in r.path
+        )
+        body = HermesInstallImportRequest(
+            cron=[
+                HermesCronRecord(
+                    id="   ",
+                    session_id="s1",
+                    trigger_type="timestamp",
+                    timestamp="2026-01-01T00:00:00Z",
+                )
+            ]
+        )
+        with pytest.raises(ImportRecordInvalidError):
+            await handler(body)
+
+    async def test_hermes_install_acp_empty_id(self, tmp_path: Path) -> None:
+        """Covers 1858-1861."""
+        from meridiand._imports import (
+            HermesAcpRecord,
+            HermesInstallImportRequest,
+            ImportRecordInvalidError,
+        )
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/imports/hermes/install" in r.path
+        )
+        body = HermesInstallImportRequest(
+            acp_registry=[
+                HermesAcpRecord(
+                    id="   ",
+                    peer_id="p1",
+                    base_url="http://e",
+                )
+            ]
+        )
+        with pytest.raises(ImportRecordInvalidError):
+            await handler(body)
+
     async def test_hermes_install_write_failure(
         self, tmp_path: Path
     ) -> None:
