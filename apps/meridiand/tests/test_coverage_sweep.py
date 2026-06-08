@@ -1169,16 +1169,18 @@ class TestSmallGapsSweep:
         (cd / "latest.json").write_text("not json")
         assert _load_pending_tool_calls(tmp_path, "s1") == []
 
-    def test_walk_descendants_already_seen_child(self, tmp_path: Path) -> None:
-        """Covers 95-97 (child already in seen set, skip)."""
+    def test_walk_descendants_multi_level(self, tmp_path: Path) -> None:
+        """Covers 96-97 (grandchild not in seen → enqueue) and the already-seen branch."""
         from meridiand._session_cancel import _walk_descendants
 
         sd = tmp_path / "sessions"
-        # parent → child1, parent → child2, child1 → child2 (already seen)
+        # parent → child1, parent → child2, child1 → grandchild,
+        # child2 → grandchild (already seen)
         for sid, parent, child in [
             ("link_a", "parent", "child1"),
             ("link_b", "parent", "child2"),
-            ("link_c", "child1", "child2"),
+            ("link_c", "child1", "grandchild"),
+            ("link_d", "child2", "grandchild"),
         ]:
             (sd / sid).mkdir(parents=True)
             (sd / sid / "manifest.json").write_text(
@@ -1190,8 +1192,8 @@ class TestSmallGapsSweep:
                 )
             )
         descendants = _walk_descendants("parent", tmp_path)
-        # child2 should only appear once even though both parent and child1 link to it
-        assert sorted(descendants) == ["child1", "child2"]
+        # grandchild should appear once even though both child1 and child2 link to it
+        assert sorted(descendants) == ["child1", "child2", "grandchild"]
 
     # ---- _secret_ref.py ----
     def test_secret_ref_resolve_encrypted_file_success(
