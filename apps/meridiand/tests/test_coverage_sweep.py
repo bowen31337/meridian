@@ -7561,6 +7561,45 @@ class TestParallelRunsErrors:
                 await handler("s1", req)
 
 
+    async def test_parallel_runs_budget_exceeded_cancels_pending(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers _parallel_runs.py 185-190 (budget exceeded → cancel pending tasks)."""
+        from meridiand._parallel_runs import (
+            BudgetExceededError,
+            ChildSpec,
+            _run_children_parallel,
+        )
+
+        # Build fixtures for 2 children. Each emits one message that triggers
+        # one usage.delta event (via _run_harness's `on_usage_delta(100, 50)`).
+        # With budget_model_calls=0, the very first delta will set exceeded.
+        for sid in ("s1", "s2"):
+            fixture_dir = tmp_path / "fixtures" / sid
+            fixture_dir.mkdir(parents=True)
+            (fixture_dir / "model_responses.ndjson").write_text(
+                json.dumps([{"type": "message_stop", "stop_reason": "end_turn"}])
+                + "\n"
+            )
+            (fixture_dir / "tool_responses.ndjson").write_text("")
+
+        children = [
+            ChildSpec(fixture_session_id="s1"),
+            ChildSpec(fixture_session_id="s2"),
+        ]
+
+        # Budget 0 → the first usage.delta exceeds; the other worker is
+        # cancelled at its next iteration. The exceeded flag triggers
+        # the cleanup loop at 185-190 even if both finish naturally.
+        results, status, total_model, total_tool = await _run_children_parallel(
+            children,
+            storage_root=tmp_path,
+            budget_model_calls=0,
+        )
+        assert status == "budget_exceeded"
+        assert len(results) == 2
+
+
 class TestRecoverySoakHelpers:
     def test_crash_recovery_attempt_success(self, tmp_path: Path) -> None:
         """_attempt_recovery success path returns True when phase not in stop phases (110)."""
