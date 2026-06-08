@@ -1061,7 +1061,7 @@ class TestSmallGapsSweep:
                 await handler("c1", req)
 
     # ---- _secret_ref.py ----
-    async def test_secret_ref_resolve_encrypted_file_no_backend(
+    def test_secret_ref_resolve_encrypted_file_no_backend(
         self, tmp_path: Path
     ) -> None:
         """Covers 140-148."""
@@ -1081,9 +1081,9 @@ class TestSmallGapsSweep:
             vault_backend=None,
         )
         with pytest.raises(SecretRefResolveError):
-            await resolver.resolve("secret_ref://vault/v1/k")
+            resolver.resolve("secret_ref://vault/v1/k")
 
-    async def test_secret_ref_resolve_generic_exception(
+    def test_secret_ref_resolve_generic_exception(
         self, tmp_path: Path
     ) -> None:
         """Covers 197-218."""
@@ -1106,7 +1106,7 @@ class TestSmallGapsSweep:
             side_effect=RuntimeError("boom"),
         ):
             with pytest.raises(SecretRefResolveError):
-                await resolver.resolve("secret_ref://vault/v1/k")
+                resolver.resolve("secret_ref://vault/v1/k")
 
     # ---- _skill_forge.py ----
     async def test_skill_forge_build_proposal_generic_exception(
@@ -1168,6 +1168,110 @@ class TestSmallGapsSweep:
         cd.mkdir(parents=True)
         (cd / "latest.json").write_text("not json")
         assert _load_pending_tool_calls(tmp_path, "s1") == []
+
+    def test_walk_descendants_already_seen_child(self, tmp_path: Path) -> None:
+        """Covers 95-97 (child already in seen set, skip)."""
+        from meridiand._session_cancel import _walk_descendants
+
+        sd = tmp_path / "sessions"
+        # parent → child1, parent → child2, child1 → child2 (already seen)
+        for sid, parent, child in [
+            ("link_a", "parent", "child1"),
+            ("link_b", "parent", "child2"),
+            ("link_c", "child1", "child2"),
+        ]:
+            (sd / sid).mkdir(parents=True)
+            (sd / sid / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "parent_session_id": parent,
+                        "child_session_id": child,
+                    }
+                )
+            )
+        descendants = _walk_descendants("parent", tmp_path)
+        # child2 should only appear once even though both parent and child1 link to it
+        assert sorted(descendants) == ["child1", "child2"]
+
+    # ---- _secret_ref.py ----
+    def test_secret_ref_resolve_encrypted_file_success(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 148 (successful encrypted_file get_secret)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._secret_ref import SecretRefResolver
+        from meridiand._vault_backend_encrypted_file import (
+            EncryptedFileVaultBackend,
+        )
+
+        vd = tmp_path / "vaults"
+        vd.mkdir()
+        (vd / "v_enc.json").write_text(
+            json.dumps({"id": "v_enc", "backend": "encrypted_file"})
+        )
+
+        backend = EncryptedFileVaultBackend(storage_root=tmp_path)
+        backend.unlock_with_passphrase("p")
+        backend.store_secret("v_enc", "k1", "secret-value", "2026-06-08T00:00:00Z")
+
+        resolver = SecretRefResolver(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            vault_backend=backend,
+        )
+        result = resolver.resolve("secret_ref://vault/v_enc/k1")
+        assert result == "secret-value"
+
+    # ---- _messages.py ----
+    async def test_messages_collect_no_text_no_tool(self) -> None:
+        """Cover the no-text + tool block insertion."""
+        from meridian_sdk_provider.types import MessageStartEvent
+
+        from meridiand._messages import _collect
+
+        async def _stream():
+            yield MessageStartEvent(model="m", input_tokens=5, provider="p")
+
+        result = await _collect(_stream(), "fallback")
+        assert result["model"] == "m"
+        assert result["content"] == []
+
+    async def test_messages_infer_generic_exception(self, tmp_path: Path) -> None:
+        """Covers 220-237 (generic exception wrap)."""
+        from core_errors import NoopAuditLog
+        from meridian_sdk_provider import ModelRouter, ModelRoutingPolicy
+
+        from meridiand._messages import (
+            MessagesInferError,
+            MessagesRequest,
+            make_messages_router,
+        )
+
+        # A model_router whose call() raises a generic Exception (not ProviderError)
+        async def _bad_call(opts):
+            raise RuntimeError("boom")
+            yield  # unreachable; make this a generator
+
+        mock_router = MagicMock(spec=ModelRouter)
+        mock_router.call = _bad_call
+
+        router = make_messages_router(
+            audit_log=NoopAuditLog(),
+            model_router=mock_router,
+        )
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/messages" and "POST" in r.methods
+        )
+        req = MessagesRequest(
+            model="m",
+            messages=[],
+            max_tokens=10,
+        )
+        with pytest.raises(MessagesInferError):
+            await handler(req)
 
 
 class TestImportsHandlerWriteErrors:
@@ -3179,8 +3283,9 @@ class TestSessionsHandlersGenericExceptions:
         self, tmp_path: Path
     ) -> None:
         """Covers 697 (blank line continue) + 700 (id injection)."""
-        td = tmp_path / "sessions" / "s_ml" / "threads" / "t1"
+        td = tmp_path / "threads" / "s_ml" / "t1"
         td.mkdir(parents=True)
+        (td / "manifest.json").write_text(json.dumps({"id": "t1"}))
         (td / "messages.ndjson").write_text(
             "\n"  # blank line covers 697
             + json.dumps(
