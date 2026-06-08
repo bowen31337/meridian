@@ -1239,6 +1239,80 @@ class TestSmallGapsSweep:
         assert result["model"] == "m"
         assert result["content"] == []
 
+    async def test_messages_with_hooks_dir(self, tmp_path: Path) -> None:
+        """Covers 180 (hooks_dir-not-None branch)."""
+        from meridian_sdk_provider.types import TextDeltaEvent
+
+        from core_errors import NoopAuditLog
+
+        from meridiand._messages import (
+            MessagesRequest,
+            make_messages_router,
+        )
+
+        async def _stream(opts):
+            yield TextDeltaEvent(text="hello")
+
+        mock_router = MagicMock()
+        mock_router.call = _stream
+
+        hooks_dir = tmp_path / "hooks"
+        hooks_dir.mkdir()
+
+        router = make_messages_router(
+            audit_log=NoopAuditLog(),
+            model_router=mock_router,
+            hooks_dir=hooks_dir,
+        )
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/messages" and "POST" in r.methods
+        )
+        req = MessagesRequest(model="m", messages=[], max_tokens=10)
+        resp = await handler(req)
+        assert resp is not None
+
+    async def test_restore_session_multiple_live_files(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers _compaction line 227 (unlink older live files in restore)."""
+        import gzip
+
+        from meridiand._compaction import AutoCompactor
+
+        comp = AutoCompactor(tmp_path, idle_days=0, tail_events=10)
+
+        # Set up two live files (different dates) for the same session.
+        for date in ("2026/06/07", "2026/06/08"):
+            d = tmp_path / "events" / date.split("/")[0] / date.split("/")[1] / date.split("/")[2]
+            d.mkdir(parents=True)
+            (d / "s1.ndjson").write_text(
+                json.dumps({"seq": 0, "type": "x", "ts": "t", "data": {}}) + "\n"
+            )
+
+        # Stage an archive blob.
+        archive_data = (
+            json.dumps({"seq": 1, "type": "x", "ts": "t", "data": {}}).encode() + b"\n"
+        )
+        compressed = gzip.compress(archive_data)
+        await comp._blob.put("compaction/s1/archive-abc.ndjson.gz", compressed)
+
+        cd = tmp_path / "compaction" / "s1"
+        cd.mkdir(parents=True, exist_ok=True)
+        (cd / "manifest.json").write_text(
+            json.dumps(
+                {
+                    "session_id": "s1",
+                    "archive_key": "compaction/s1/archive-abc.ndjson.gz",
+                    "summary_event_count": 0,
+                }
+            )
+        )
+
+        result = await comp.restore_session("s1")
+        assert result["session_id"] == "s1"
+
     async def test_messages_infer_generic_exception(self, tmp_path: Path) -> None:
         """Covers 220-237 (generic exception wrap)."""
         from core_errors import NoopAuditLog
@@ -2470,6 +2544,54 @@ class TestSystemChannelHandlers:
         ):
             with pytest.raises(ChannelInboundError):
                 await handler("c1", req, request)
+
+    async def test_channel_inbound_latency_target_exceeded(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 755 (latency_ms > _INBOUND_LATENCY_TARGET_MS branch)."""
+        from meridiand._system_channel import InboundMessageRequest
+
+        channels_dir = tmp_path / "channels"
+        channels_dir.mkdir()
+        (channels_dir / "c1.json").write_text(
+            json.dumps(
+                {
+                    "id": "c1",
+                    "kind": "slack",
+                    "inbound_policy": "open",
+                    "config": {},
+                }
+            )
+        )
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/channels/{channel_id}/inbound" and "POST" in r.methods
+        )
+        req = InboundMessageRequest(
+            sender_id="sender1",
+            content="hello",
+            content_type="text",
+        )
+        request = MagicMock()
+        request.headers = {}
+
+        # Patch time.perf_counter so the elapsed latency exceeds the inbound target.
+        counter = {"n": 0}
+
+        def _fake_perf_counter() -> float:
+            counter["n"] += 1
+            # First call: t0=0; second call: elapsed = 100 seconds → 100000ms ≫ target
+            return 0.0 if counter["n"] == 1 else 100.0
+
+        with patch(
+            "meridiand._system_channel.time.perf_counter",
+            _fake_perf_counter,
+        ):
+            resp = await handler("c1", req, request)
+        assert resp is not None
 
     async def test_channel_outbound_generic_exception(
         self, tmp_path: Path
