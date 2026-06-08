@@ -856,10 +856,23 @@ class TestCompactionRouters:
         we patch sleep to raise a non-CancelledError exception (e.g. SystemExit
         — which isn't caught by the try/except Exception block).
         """
+        import os
+        import time as _time
+
         from core_errors import NoopAuditLog
 
         from meridiand._compaction import run_compaction_loop
         from meridiand._config import CompactionConfig
+
+        # Pre-create an old event file so the compactor finds it idle.
+        events = tmp_path / "events" / "2026" / "06" / "08"
+        events.mkdir(parents=True)
+        evt_file = events / "s_auto.ndjson"
+        evt_file.write_text(
+            json.dumps({"seq": 0, "type": "x", "ts": "t", "data": {}}) + "\n"
+        )
+        old = _time.time() - 86400 * 365
+        os.utime(evt_file, (old, old))
 
         policy = CompactionConfig(enabled=True, idle_days=1, tail_events=10)
 
@@ -10374,6 +10387,73 @@ class TestCancelMissingDescendantManifest:
         resp = client.post("/v1/x/sessions/p1/cancel")
         # the cancel-walk processes ghost without crashing
         assert resp.status_code in {200, 204}
+
+    async def test_cancel_malformed_created_at_swallowed(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers _session_cancel.py 211-212 (datetime.fromisoformat raises → except: pass)."""
+        from unittest.mock import AsyncMock
+
+        from core_errors import NoopAuditLog
+
+        from meridiand._session_cancel import make_session_cancel_router
+
+        # Pre-create a session whose manifest has a malformed created_at.
+        sd = tmp_path / "sessions" / "s_bad"
+        sd.mkdir(parents=True)
+        (sd / "manifest.json").write_text(
+            json.dumps({"session_id": "s_bad", "created_at": "not-a-date"})
+        )
+
+        event_log = MagicMock()
+        event_log.append = AsyncMock()
+
+        router = make_session_cancel_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            event_log=event_log,
+        )
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/sessions/{session_id}/cancel"
+        )
+        resp = await handler("s_bad")
+        assert resp is not None
+
+    async def test_cancel_valid_created_at_records_duration(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers _session_cancel.py 208-210 (valid created_at → record duration)."""
+        from unittest.mock import AsyncMock
+
+        from core_errors import NoopAuditLog
+
+        from meridiand._session_cancel import make_session_cancel_router
+
+        sd = tmp_path / "sessions" / "s_ok"
+        sd.mkdir(parents=True)
+        (sd / "manifest.json").write_text(
+            json.dumps(
+                {"session_id": "s_ok", "created_at": "2026-01-01T00:00:00+00:00"}
+            )
+        )
+
+        event_log = MagicMock()
+        event_log.append = AsyncMock()
+
+        router = make_session_cancel_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            event_log=event_log,
+        )
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/sessions/{session_id}/cancel"
+        )
+        resp = await handler("s_ok")
+        assert resp is not None
 
 
 # ---------------------------------------------------------------------------
