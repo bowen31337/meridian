@@ -996,12 +996,11 @@ class TestEventsHandlers:
             resp = await handler(
                 "s1", mock_request, since=-1, type=None, stream=True
             )
-            # Consume the streaming generator to drive the error path.
+            # Consume the streaming generator to drive the error path
+            # (and let the `return` after the error yield actually execute).
             chunks: list[str] = []
             async for chunk in resp.body_iterator:
                 chunks.append(chunk if isinstance(chunk, str) else chunk.decode())
-                if "event: error" in chunks[-1]:
-                    break
             assert any("event: error" in c for c in chunks)
 
     async def test_sdk_events_typed_error_reraise(self, tmp_path: Path) -> None:
