@@ -2134,6 +2134,43 @@ class TestImportsHandlerWriteErrors:
             with pytest.raises(ImportRecordInvalidError):
                 await handler(body)
 
+    async def test_hermes_install_translator_typed_error_reraise(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 1665 (hermes/install translator raised ImportRecordInvalidError → re-raise)."""
+        from meridiand._imports import (
+            HermesInstallImportRequest,
+            HermesRecord,
+            ImportRecordInvalidError,
+        )
+
+        router = self._make_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/imports/hermes/install" in r.path
+        )
+        body = HermesInstallImportRequest(
+            skills=[
+                HermesRecord(
+                    id="h1",
+                    name="x",
+                    description="d",
+                    instructions="i",
+                    tools=[{"name": "t1"}],
+                )
+            ]
+        )
+        pre = ImportRecordInvalidError(
+            message="precooked", timestamp=pagination_now(), seq=0
+        )
+        with patch(
+            "meridiand._imports._translate_hermes",
+            side_effect=pre,
+        ):
+            with pytest.raises(ImportRecordInvalidError):
+                await handler(body)
+
     async def test_hermes_install_translator_record_invalid_passthrough(
         self, tmp_path: Path
     ) -> None:
