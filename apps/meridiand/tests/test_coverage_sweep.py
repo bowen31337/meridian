@@ -4534,6 +4534,69 @@ class TestReplayHandler:
             [{"type": "message_stop", "stop_reason": "end_turn"}]
         ]
 
+    async def test_run_harness_with_hooks_dir_mutates_args(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers _replay.py 308-310 (pre_tool_call hook mutates args)."""
+        from core_errors import NoopAuditLog
+
+        from meridiand._hook_dispatch import HookDispatchResult
+        from meridiand._replay import (
+            FakeModelAdapter,
+            FakeSandboxAdapter,
+            _run_harness,
+        )
+
+        # Model emits a tool_use that the pre_tool_call hook will mutate.
+        model_fixture = tmp_path / "model.ndjson"
+        model_fixture.write_text(
+            json.dumps(
+                [
+                    {"type": "tool_use_start", "id": "t1", "name": "do"},
+                    {"type": "tool_input_delta", "partial_json": "{}"},
+                    {"type": "message_stop", "stop_reason": "tool_use"},
+                ]
+            )
+            + "\n"
+            + json.dumps([{"type": "message_stop", "stop_reason": "end_turn"}])
+            + "\n"
+        )
+
+        sandbox_fixture = tmp_path / "sandbox.ndjson"
+        sandbox_fixture.write_text(json.dumps({"content": "ok"}) + "\n")
+
+        hooks_dir = tmp_path / "hooks"
+        hooks_dir.mkdir()
+
+        async def _fake_dispatch(event, *_a, **_k):
+            if event == "pre_tool_call":
+                return [
+                    HookDispatchResult(
+                        hook_id="h1",
+                        hook_name="mutator",
+                        is_error=False,
+                        verdict="continue",
+                        mutations={"args": {"q": "mutated"}},
+                    )
+                ]
+            return []
+
+        with patch(
+            "meridiand._replay.dispatch_hooks",
+            new=_fake_dispatch,
+        ):
+            model_adapter = FakeModelAdapter(model_fixture)
+            sandbox_adapter = FakeSandboxAdapter(sandbox_fixture)
+            model_calls, tool_calls = await _run_harness(
+                model_adapter,
+                sandbox_adapter,
+                hooks_dir=hooks_dir,
+                session_id="s1",
+                audit_log=NoopAuditLog(),
+            )
+        assert model_calls == 2
+        assert tool_calls == 1
+
     async def test_run_harness_with_hooks_dir(self, tmp_path: Path) -> None:
         """Covers 246, 273, 292-293, 295-310, 313 (hooks_dir branches in _run_harness)."""
         from core_errors import NoopAuditLog
