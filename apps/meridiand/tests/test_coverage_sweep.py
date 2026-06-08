@@ -4442,6 +4442,54 @@ class TestReplayHandler:
             == 422
         )
 
+    def test_extract_canvas_op_non_str_non_dict(self) -> None:
+        """Covers 91->99 (content is neither str nor dict)."""
+        from meridiand._replay import _extract_canvas_op
+
+        assert _extract_canvas_op(123) is None
+        assert _extract_canvas_op(None) is None
+        assert _extract_canvas_op([1, 2, 3]) is None
+
+    def test_extract_canvas_op_str_not_canvas_op(self) -> None:
+        """Covers 94->99 (parsed dict has no type=canvas_op)."""
+        from meridiand._replay import _extract_canvas_op
+
+        assert _extract_canvas_op('{"type": "other", "data": 1}') is None
+        assert _extract_canvas_op('[1, 2, 3]') is None
+
+    def test_extract_canvas_op_dict(self) -> None:
+        """Covers the dict path."""
+        from meridiand._replay import _extract_canvas_op
+
+        result = _extract_canvas_op({"type": "canvas_op", "canvas_op": {"a": 1}})
+        assert result == {"a": 1}
+
+    def test_extract_canvas_op_str(self) -> None:
+        """Covers the str path."""
+        from meridiand._replay import _extract_canvas_op
+
+        result = _extract_canvas_op(
+            json.dumps({"type": "canvas_op", "canvas_op": {"b": 2}})
+        )
+        assert result == {"b": 2}
+
+    def test_fake_model_adapter_skips_blank_lines(self, tmp_path: Path) -> None:
+        """Covers 165->163 (blank line skipped in fixture)."""
+        from meridiand._replay import FakeModelAdapter
+
+        fixture = tmp_path / "model.ndjson"
+        fixture.write_text(
+            "\n"  # blank line
+            "  \n"  # whitespace
+            + json.dumps([{"type": "message_stop", "stop_reason": "end_turn"}])
+            + "\n"
+        )
+
+        adapter = FakeModelAdapter(fixture)
+        assert adapter._calls == [
+            [{"type": "message_stop", "stop_reason": "end_turn"}]
+        ]
+
     async def test_run_harness_with_hooks_dir(self, tmp_path: Path) -> None:
         """Covers 246, 273, 292-293, 295-310, 313 (hooks_dir branches in _run_harness)."""
         from core_errors import NoopAuditLog
