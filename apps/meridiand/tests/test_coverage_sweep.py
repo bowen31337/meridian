@@ -2022,6 +2022,89 @@ class TestSystemChannelHandlers:
             with pytest.raises(SessionOutboundError):
                 await handler("s1", req)
 
+    async def test_channel_inbound_generic_exception(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 733-749 (ChannelInboundError generic exception wrap)."""
+        from meridiand._system_channel import (
+            ChannelInboundError,
+            InboundMessageRequest,
+        )
+
+        channels_dir = tmp_path / "channels"
+        channels_dir.mkdir()
+        (channels_dir / "c1.json").write_text(
+            json.dumps(
+                {
+                    "id": "c1",
+                    "kind": "slack",
+                    "inbound_policy": "open",
+                    "config": {},
+                }
+            )
+        )
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/channels/{channel_id}/inbound" and "POST" in r.methods
+        )
+        req = InboundMessageRequest(
+            sender_id="sender1",
+            content="hello",
+            content_type="text",
+        )
+        # json.dumps will raise inside the try block when writing the session record.
+        request = MagicMock()
+        request.headers = {}
+        with patch(
+            "meridiand._system_channel.json.dumps",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(ChannelInboundError):
+                await handler("c1", req, request)
+
+    async def test_channel_outbound_generic_exception(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 885-901 (ChannelOutboundError generic exception wrap)."""
+        from meridiand._system_channel import (
+            ChannelOutboundError,
+            OutboundMessageRequest,
+        )
+
+        channels_dir = tmp_path / "channels"
+        channels_dir.mkdir()
+        (channels_dir / "c1.json").write_text(
+            json.dumps(
+                {
+                    "id": "c1",
+                    "kind": "slack",
+                    "egress_policy": "enabled",
+                }
+            )
+        )
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/channels/{channel_id}/outbound" and "POST" in r.methods
+        )
+        req = OutboundMessageRequest(
+            session_id="s1",
+            recipient="r1",
+            content="hi",
+            content_type="text",
+        )
+        with patch(
+            "meridiand._system_channel.json.loads",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(ChannelOutboundError):
+                await handler("c1", req)
+
 
 class TestAgentsHandlers:
     """Cover generic-exception wrapping in _agents handlers."""
