@@ -959,6 +959,51 @@ class TestEventsHandlers:
             with pytest.raises(SessionEventsError):
                 await handler("s1", mock_request, since=-1, type=None, stream=False)
 
+    async def test_session_events_sse_read_exception_writes_error(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers _events.py 169-192 (SSE read_events raises → audit + error event)."""
+        from unittest.mock import AsyncMock, MagicMock as _Mm
+
+        from core_errors import NoopAuditLog
+        from storage_event_log import SubscriberBus
+
+        from meridiand._events import make_events_router
+
+        bus = SubscriberBus()
+        router = make_events_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            subscriber_bus=bus,
+        )
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/sessions/{session_id}/events" and "GET" in r.methods
+        )
+
+        async def _boom(*_a: Any, **_k: Any):
+            if False:
+                yield  # unreachable, makes this an async generator
+            raise RuntimeError("read boom")
+
+        with patch(
+            "meridiand._events.LocalEventLogReader.read_events",
+            new=_boom,
+        ):
+            mock_request = _Mm()
+            mock_request.headers = {}
+            resp = await handler(
+                "s1", mock_request, since=-1, type=None, stream=True
+            )
+            # Consume the streaming generator to drive the error path.
+            chunks: list[str] = []
+            async for chunk in resp.body_iterator:
+                chunks.append(chunk if isinstance(chunk, str) else chunk.decode())
+                if "event: error" in chunks[-1]:
+                    break
+            assert any("event: error" in c for c in chunks)
+
     async def test_sdk_events_typed_error_reraise(self, tmp_path: Path) -> None:
         """SessionEventsError raised inside SDK events is re-raised (line 379)."""
         from meridiand._events import SessionEventsError
