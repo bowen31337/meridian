@@ -188,6 +188,42 @@ describe("FormWidget interactions", () => {
     expect(event.payload.action).toBe("cancel");
   });
 
+  it("submit failure with non-Error rejection still displays its String() value", async () => {
+    const onInteraction = vi.fn().mockRejectedValue("not an Error instance");
+    renderForm(makeBlock(), { onInteraction });
+
+    fireEvent.click(screen.getByTestId("form-submit-button"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("form-widget-error")).toBeTruthy();
+    });
+    expect(screen.getByTestId("form-widget-error").textContent).toContain(
+      "not an Error instance",
+    );
+  });
+
+  it("action-click failure with non-Error rejection still displays its String() value", async () => {
+    const onInteraction = vi.fn().mockRejectedValue("plain string failure");
+    renderForm(
+      makeBlock({
+        props: {
+          fields: [{ name: "x", label: "X", type: "text" }],
+          actions: [{ name: "go", label: "Go" }],
+        },
+      }),
+      { onInteraction },
+    );
+
+    fireEvent.click(screen.getByTestId("form-action-go"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("form-widget-error")).toBeTruthy();
+    });
+    expect(screen.getByTestId("form-widget-error").textContent).toContain(
+      "plain string failure",
+    );
+  });
+
   it("on action-click failure, displays error and writes audit log", async () => {
     const onInteraction = vi.fn().mockRejectedValue(new Error("click boom"));
     const { auditLog } = renderForm(

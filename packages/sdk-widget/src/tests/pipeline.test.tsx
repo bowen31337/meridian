@@ -175,4 +175,12 @@ describe("WidgetRegistry", () => {
   it("throws on duplicate registration", () => {
     expect(() => registry.register(TextWidget)).toThrowError(/already registered/);
   });
+
+  it("get() returns the registered component for a known kind", () => {
+    expect(registry.get("test.text")).toBe(TextWidget);
+  });
+
+  it("get() returns undefined for an unknown kind", () => {
+    expect(registry.get("acme.never")).toBeUndefined();
+  });
 });
