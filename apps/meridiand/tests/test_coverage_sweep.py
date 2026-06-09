@@ -923,6 +923,95 @@ class TestCompactionRouters:
                 )
 
 
+class TestCiRegressionHandlerGaps:
+    """Cover the residual branches in _ci_regression endpoint."""
+
+    @staticmethod
+    def _build_router(tmp_path: Path):
+        from core_errors import NoopAuditLog
+
+        from meridiand._ci_regression import make_ci_regression_router
+
+        return make_ci_regression_router(
+            audit_log=NoopAuditLog(), storage_root=tmp_path
+        )
+
+    async def test_regression_skips_non_dir_entry(self, tmp_path: Path) -> None:
+        """Covers line 86 (non-dir entry in fixtures_dir is skipped)."""
+        fixtures = tmp_path / "fixtures"
+        fixtures.mkdir(parents=True)
+        # A regular file at the same level — should be skipped.
+        (fixtures / "not_a_dir.txt").write_text("ignore me")
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/regression-run" in r.path
+        )
+        resp = await handler()
+        assert resp is not None
+
+    async def test_regression_generic_exception_in_session(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers 134-140 + 157 (error path with no seq → 'session_id': error)."""
+        from meridiand._ci_regression import RegressionError
+
+        # Build a valid fixture dir that will trigger an exception during read.
+        fixtures = tmp_path / "fixtures" / "sess1"
+        # parent fixtures dir for the regression endpoint scan
+
+        fixtures.mkdir(parents=True)
+        (fixtures / "expected_events.ndjson").write_text(
+            json.dumps({"type": "x", "data": {}}) + "\n"
+        )
+        (fixtures / "model_responses.ndjson").write_text("")
+        (fixtures / "tool_responses.ndjson").write_text("")
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/regression-run" in r.path
+        )
+        # Patch _run_harness_capturing to raise a generic exception.
+        with patch(
+            "meridiand._ci_regression._run_harness_capturing",
+            side_effect=RuntimeError("boom"),
+        ):
+            with pytest.raises(RegressionError):
+                await handler()
+
+    async def test_regression_error_passthrough(self, tmp_path: Path) -> None:
+        """Covers 132-133 (typed RegressionError re-raise)."""
+        from meridiand._ci_regression import RegressionError
+
+        fixtures = tmp_path / "fixtures" / "sess1"
+        # parent fixtures dir for the regression endpoint scan
+
+        fixtures.mkdir(parents=True)
+        (fixtures / "expected_events.ndjson").write_text(
+            json.dumps({"type": "x", "data": {}}) + "\n"
+        )
+        (fixtures / "model_responses.ndjson").write_text("")
+        (fixtures / "tool_responses.ndjson").write_text("")
+
+        router = self._build_router(tmp_path)
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if "/regression-run" in r.path
+        )
+        pre = RegressionError(message="precooked", timestamp=pagination_now())
+        with patch(
+            "meridiand._ci_regression._run_harness_capturing",
+            side_effect=pre,
+        ):
+            with pytest.raises(RegressionError):
+                await handler()
+
+
 class TestEventsHandlers:
     """Cover the events.py handler error paths."""
 
