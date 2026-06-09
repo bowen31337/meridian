@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -138,29 +139,59 @@ class CliSubprocessManager:
     async def stop(self) -> None:
         """No-op: nothing persistent to tear down."""
 
-    def _build_args(self, opts: ModelCallOpts) -> list[str]:
-        args = [
-            self._cli_path,
-            "-p",
-            _build_prompt(opts),
-            "--output-format",
-            "json",
-            "--disallowed-tools",
-            *sorted(ALL_CLAUDE_CODE_BUILTIN_TOOLS),
-        ]
+    def _build_args(self, opts: ModelCallOpts) -> tuple[list[str], str | None]:
+        """Build the CLI argv and optional cwd for a call.
+
+        When ``opts.metadata["meridian_tools"]`` is present, the Agent's tools are
+        bridged in via an MCP stdio server (§13.4 Contract 2): the CLI is told to
+        use only ``mcp__meridian__*`` tools while its own built-ins stay disabled,
+        and runs with cwd set to the Agent's workspace.
+        """
+        args = [self._cli_path, "-p", _build_prompt(opts), "--output-format", "json"]
+        cwd: str | None = None
+
+        meta = getattr(opts, "metadata", None)
+        tool_cfg = meta.get("meridian_tools") if isinstance(meta, dict) else None
+        if tool_cfg and tool_cfg.get("tools"):
+            mcp_config = json.dumps(
+                {
+                    "mcpServers": {
+                        "meridian": {
+                            "command": sys.executable,
+                            "args": [
+                                "-m",
+                                "meridiand._agent_tool_server",
+                                "--agent-id",
+                                str(tool_cfg["agent_id"]),
+                                "--storage-root",
+                                str(tool_cfg["storage_root"]),
+                            ],
+                        }
+                    }
+                }
+            )
+            allowed = [f"mcp__meridian__{name}" for name in tool_cfg["tools"]]
+            args += ["--mcp-config", mcp_config, "--allowed-tools", *allowed]
+            cwd = tool_cfg.get("workspace") or None
+
+        # Contract 1: the CLI's own built-in tools stay disabled regardless.
+        args += ["--disallowed-tools", *sorted(ALL_CLAUDE_CODE_BUILTIN_TOOLS)]
+
         model = _map_model(opts.model)
         if model is not None:
             args += ["--model", model]
         if opts.system:
             args += ["--append-system-prompt", opts.system]
-        return args
+        return args, cwd
 
     async def call(self, opts: ModelCallOpts) -> AsyncIterator[ModelEvent]:
         """Spawn ``claude -p``, await its JSON result, and yield ModelEvents."""
+        args, cwd = self._build_args(opts)
         proc = await asyncio.create_subprocess_exec(
-            *self._build_args(opts),
+            *args,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            cwd=cwd,
         )
         try:
             stdout, stderr = await asyncio.wait_for(

@@ -78,7 +78,43 @@ class AgentResponder:
         except Exception:  # noqa: BLE001 - fall back to the default persona
             return self._system_prompt
 
-    async def _generate_reply(self, content: str, system_prompt: str) -> str:
+    def _load_agent_context(self, channel_id: str) -> dict[str, Any] | None:
+        """Resolve the channel's Agent tool context (id, tools, workspace) for the provider."""
+        if self._storage_root is None:
+            return None
+        try:
+            channel = json.loads(
+                (self._storage_root / "channels" / f"{channel_id}.json").read_text()
+            )
+            agent_id = channel.get("default_agent_id")
+            if not agent_id:
+                return None
+            agent = json.loads((self._storage_root / "agents" / f"{agent_id}.json").read_text())
+            version = agent.get("version") or {}
+            tools = [t.get("name") for t in version.get("tools", []) if t.get("name")]
+            if not tools:
+                return None
+            workspace = str(self._storage_root)
+            env_id = agent.get("default_environment_id") or version.get("default_environment_id")
+            if env_id:
+                env_file = self._storage_root / "environments" / f"{env_id}.json"
+                if env_file.exists():
+                    workspace = json.loads(env_file.read_text()).get("workspace_path") or workspace
+            return {
+                "agent_id": agent_id,
+                "storage_root": str(self._storage_root),
+                "tools": tools,
+                "workspace": workspace,
+            }
+        except Exception:  # noqa: BLE001 - no tool context -> plain text reply
+            return None
+
+    async def _generate_reply(
+        self, content: str, system_prompt: str, tool_context: dict[str, Any] | None
+    ) -> str:
+        metadata: dict[str, Any] = {}
+        if tool_context is not None:
+            metadata["meridian_tools"] = tool_context
         opts = ModelCallOpts(
             model=self._model,
             messages=[{"role": "user", "content": content}],
@@ -86,7 +122,7 @@ class AgentResponder:
             system=system_prompt,
             temperature=None,
             tools=[],
-            metadata={},
+            metadata=metadata,
             stream=False,
         )
         parts: list[str] = []
@@ -114,7 +150,11 @@ class AgentResponder:
                 self._audit_failure(channel_id, "inbound", exc)
 
             try:
-                reply = await self._generate_reply(content, self._load_persona(channel_id))
+                reply = await self._generate_reply(
+                    content,
+                    self._load_persona(channel_id),
+                    self._load_agent_context(channel_id),
+                )
             except Exception as exc:  # noqa: BLE001 - model failure -> fallback reply
                 self._audit_failure(channel_id, "model", exc)
                 reply = _FALLBACK_REPLY
