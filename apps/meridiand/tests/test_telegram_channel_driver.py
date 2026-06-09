@@ -26,9 +26,13 @@ from typing import Any
 
 import httpx
 from meridiand._telegram_channel_driver import (
+    _DEFAULT_ALLOWED_UPDATES,
     _DEFAULT_POLL_TIMEOUT,
     TELEGRAM_MARKDOWN_CONTENT_TYPE,
     TelegramChannelDriver,
+    TelegramLongPollClient,
+    UpdateSink,
+    _RetryAfter,
 )
 from opentelemetry.trace import StatusCode
 import pytest
@@ -687,3 +691,403 @@ class TestDriverStop:
         await driver.stop(
             StopRequest(channel_id="ch_tg_1", channel_kind=_TELEGRAM_KIND, session_id="s")
         )
+
+
+# ---------------------------------------------------------------------------
+# TelegramLongPollClient — real getUpdates loop
+# ---------------------------------------------------------------------------
+
+
+def _update(update_id: int, text: str = "hi", chat_id: int = 42, *, key: str = "message") -> dict:
+    return {"update_id": update_id, key: {"chat": {"id": chat_id}, "text": text}}
+
+
+def _resp_updates(updates: list[dict]) -> httpx.Response:
+    return httpx.Response(200, json={"ok": True, "result": updates})
+
+
+class RecordingSink:
+    """UpdateSink that records dispatches."""
+
+    def __init__(self) -> None:
+        self.dispatched: list[dict[str, Any]] = []
+
+    async def dispatch(
+        self, *, channel_id: str, sender_id: str, content: str, content_type: str
+    ) -> None:
+        self.dispatched.append(
+            {
+                "channel_id": channel_id,
+                "sender_id": sender_id,
+                "content": content,
+                "content_type": content_type,
+            }
+        )
+
+
+class _ScriptedPollClient:
+    """
+    Fake httpx.AsyncClient for getUpdates.
+
+    `script` is a per-call list; each item is either an httpx.Response (returned)
+    or an Exception (raised). When the call index reaches `stop_on_call`, the
+    target client's stop event is set *before* that call resolves, so the poll
+    loop terminates deterministically without real sleeps.
+    """
+
+    def __init__(
+        self,
+        script: list[Any],
+        *,
+        stop_target: TelegramLongPollClient | None = None,
+        stop_on_call: int | None = None,
+    ) -> None:
+        self._script = script
+        self._stop_target = stop_target
+        self._stop_on_call = stop_on_call
+        self.calls: list[dict[str, Any]] = []
+
+    async def post(self, url: str, *, json: dict[str, Any], timeout: float) -> httpx.Response:
+        idx = len(self.calls)
+        self.calls.append({"url": url, "payload": json, "timeout": timeout})
+        if self._stop_on_call is not None and idx == self._stop_on_call and self._stop_target:
+            self._stop_target._stop_event.set()
+        item = self._script[min(idx, len(self._script) - 1)]
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+class TestLongPollClientImplementsProtocol:
+    def test_satisfies_update_sink_protocol(self) -> None:
+        assert isinstance(RecordingSink(), UpdateSink)
+
+    async def test_noop_sink_not_required(self) -> None:
+        # The driver's LongPollClient protocol only needs poll/stop.
+        client = TelegramLongPollClient(channel_id="c", sink=RecordingSink())
+        assert hasattr(client, "poll")
+        assert hasattr(client, "stop")
+
+
+class TestLongPollClientPolling:
+    async def test_pulls_update_and_dispatches_to_sink(self) -> None:
+        sink = RecordingSink()
+        client = TelegramLongPollClient(channel_id="ch_x", sink=sink)
+        http = _ScriptedPollClient(
+            [_resp_updates([_update(100, "hello", chat_id=7)]), _resp_updates([])],
+            stop_target=client,
+            stop_on_call=1,
+        )
+        client._http_client = http  # type: ignore[assignment]
+
+        await client.poll(_BOT_TOKEN, timeout=5)
+
+        assert sink.dispatched == [
+            {
+                "channel_id": "ch_x",
+                "sender_id": "7",
+                "content": "hello",
+                "content_type": "text/plain",
+            }
+        ]
+
+    async def test_first_call_has_no_offset_second_call_acks(self) -> None:
+        sink = RecordingSink()
+        client = TelegramLongPollClient(channel_id="ch_x", sink=sink)
+        http = _ScriptedPollClient(
+            [_resp_updates([_update(233, chat_id=7)]), _resp_updates([])],
+            stop_target=client,
+            stop_on_call=1,
+        )
+        client._http_client = http  # type: ignore[assignment]
+
+        await client.poll(_BOT_TOKEN, timeout=5)
+
+        assert "offset" not in http.calls[0]["payload"]
+        assert http.calls[1]["payload"]["offset"] == 234  # last update_id + 1
+
+    async def test_payload_includes_allowed_updates_and_timeout(self) -> None:
+        client = TelegramLongPollClient(channel_id="ch_x", sink=RecordingSink())
+        http = _ScriptedPollClient([_resp_updates([])], stop_target=client, stop_on_call=0)
+        client._http_client = http  # type: ignore[assignment]
+
+        await client.poll(_BOT_TOKEN, timeout=25)
+
+        assert http.calls[0]["payload"]["allowed_updates"] == list(_DEFAULT_ALLOWED_UPDATES)
+        assert http.calls[0]["payload"]["timeout"] == 25
+        # HTTP read timeout outlives the long poll.
+        assert http.calls[0]["timeout"] == 35.0
+        assert "/getUpdates" in http.calls[0]["url"]
+
+    async def test_processes_multiple_updates_in_one_batch(self) -> None:
+        sink = RecordingSink()
+        client = TelegramLongPollClient(channel_id="ch_x", sink=sink)
+        http = _ScriptedPollClient(
+            [_resp_updates([_update(1, "a"), _update(2, "b")]), _resp_updates([])],
+            stop_target=client,
+            stop_on_call=1,
+        )
+        client._http_client = http  # type: ignore[assignment]
+
+        await client.poll(_BOT_TOKEN, timeout=5)
+
+        assert [d["content"] for d in sink.dispatched] == ["a", "b"]
+        assert client._offset == 3
+
+    async def test_on_event_callback_receives_update(self) -> None:
+        events: list[tuple[str, dict[str, Any]]] = []
+        client = TelegramLongPollClient(
+            channel_id="ch_x",
+            sink=RecordingSink(),
+            on_event=lambda name, detail: events.append((name, detail)),
+        )
+        http = _ScriptedPollClient(
+            [_resp_updates([_update(5, "yo", chat_id=9)]), _resp_updates([])],
+            stop_target=client,
+            stop_on_call=1,
+        )
+        client._http_client = http  # type: ignore[assignment]
+
+        await client.poll(_BOT_TOKEN, timeout=5)
+
+        assert ("update", {"update_id": 5, "sender_id": "9", "text": "yo"}) in events
+
+
+class TestLongPollClientErrorHandling:
+    async def test_network_error_triggers_backoff_then_continues(self) -> None:
+        events: list[tuple[str, dict[str, Any]]] = []
+        client = TelegramLongPollClient(
+            channel_id="ch_x",
+            sink=RecordingSink(),
+            backoff_base=0.0,
+            on_event=lambda name, detail: events.append((name, detail)),
+        )
+        # call0 raises (stop set first so the backoff sleep returns instantly).
+        http = _ScriptedPollClient(
+            [httpx.ConnectError("boom"), _resp_updates([])],
+            stop_target=client,
+            stop_on_call=0,
+        )
+        client._http_client = http  # type: ignore[assignment]
+
+        await client.poll(_BOT_TOKEN, timeout=5)
+
+        assert any(name == "error" for name, _ in events)
+
+    async def test_non_success_status_is_retried(self) -> None:
+        client = TelegramLongPollClient(channel_id="ch_x", sink=RecordingSink(), backoff_base=0.0)
+        http = _ScriptedPollClient(
+            [httpx.Response(500, text="upstream"), _resp_updates([])],
+            stop_target=client,
+            stop_on_call=0,
+        )
+        client._http_client = http  # type: ignore[assignment]
+
+        await client.poll(_BOT_TOKEN, timeout=5)
+        assert len(http.calls) == 1
+
+    async def test_api_ok_false_is_retried(self) -> None:
+        client = TelegramLongPollClient(channel_id="ch_x", sink=RecordingSink(), backoff_base=0.0)
+        http = _ScriptedPollClient(
+            [httpx.Response(200, json={"ok": False, "description": "nope"}), _resp_updates([])],
+            stop_target=client,
+            stop_on_call=0,
+        )
+        client._http_client = http  # type: ignore[assignment]
+
+        await client.poll(_BOT_TOKEN, timeout=5)
+        assert len(http.calls) == 1
+
+    async def test_429_honors_retry_after(self) -> None:
+        events: list[tuple[str, dict[str, Any]]] = []
+        client = TelegramLongPollClient(
+            channel_id="ch_x",
+            sink=RecordingSink(),
+            on_event=lambda name, detail: events.append((name, detail)),
+        )
+        http = _ScriptedPollClient(
+            [httpx.Response(429, json={"parameters": {"retry_after": 0}}), _resp_updates([])],
+            stop_target=client,
+            stop_on_call=0,
+        )
+        client._http_client = http  # type: ignore[assignment]
+
+        await client.poll(_BOT_TOKEN, timeout=5)
+
+        assert ("rate_limited", {"retry_after": 0}) in events
+
+    async def test_429_malformed_body_defaults_retry_after_to_one(self) -> None:
+        events: list[tuple[str, dict[str, Any]]] = []
+        client = TelegramLongPollClient(
+            channel_id="ch_x",
+            sink=RecordingSink(),
+            on_event=lambda name, detail: events.append((name, detail)),
+        )
+        # Non-JSON 429 body -> .json() raises -> retry_after defaults to 1.
+        # stop is set on the same call, so the 1s interruptible sleep returns at once.
+        http = _ScriptedPollClient(
+            [httpx.Response(429, content=b"not json")],
+            stop_target=client,
+            stop_on_call=0,
+        )
+        client._http_client = http  # type: ignore[assignment]
+
+        await client.poll(_BOT_TOKEN, timeout=5)
+
+        assert ("rate_limited", {"retry_after": 1}) in events
+
+
+class TestLongPollClientUpdateDecoding:
+    async def test_edited_message_is_handled(self) -> None:
+        sink = RecordingSink()
+        client = TelegramLongPollClient(channel_id="ch_x", sink=sink)
+        await client._handle_update(_update(1, "edited", chat_id=3, key="edited_message"))
+        assert sink.dispatched[0]["content"] == "edited"
+        assert sink.dispatched[0]["sender_id"] == "3"
+
+    async def test_update_without_message_is_skipped(self) -> None:
+        sink = RecordingSink()
+        client = TelegramLongPollClient(channel_id="ch_x", sink=sink)
+        await client._handle_update({"update_id": 1, "my_chat_member": {}})
+        assert sink.dispatched == []
+
+    async def test_message_without_text_is_skipped(self) -> None:
+        sink = RecordingSink()
+        client = TelegramLongPollClient(channel_id="ch_x", sink=sink)
+        await client._handle_update({"update_id": 1, "message": {"chat": {"id": 5}}})
+        assert sink.dispatched == []
+
+
+class TestLongPollClientLifecycle:
+    async def test_stop_sets_event(self) -> None:
+        client = TelegramLongPollClient(channel_id="ch_x", sink=RecordingSink())
+        assert not client._stop_event.is_set()
+        await client.stop()
+        assert client._stop_event.is_set()
+
+    async def test_poll_exits_immediately_when_already_stopped(self) -> None:
+        client = TelegramLongPollClient(channel_id="ch_x", sink=RecordingSink())
+        http = _ScriptedPollClient([_resp_updates([])])
+        client._http_client = http  # type: ignore[assignment]
+        await client.stop()
+        await client.poll(_BOT_TOKEN, timeout=5)
+        assert http.calls == []
+
+    async def test_cancellation_propagates(self) -> None:
+        client = TelegramLongPollClient(channel_id="ch_x", sink=RecordingSink())
+        started = asyncio.Event()
+
+        class _BlockingClient:
+            async def post(
+                self, url: str, *, json: dict[str, Any], timeout: float
+            ) -> httpx.Response:
+                started.set()
+                await asyncio.sleep(999)
+                raise AssertionError("unreachable")
+
+        client._http_client = _BlockingClient()  # type: ignore[assignment]
+        task = asyncio.ensure_future(client.poll(_BOT_TOKEN, timeout=5))
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+
+class TestLongPollClientBackoff:
+    def test_backoff_within_full_jitter_bounds(self) -> None:
+        client = TelegramLongPollClient(
+            channel_id="ch_x", sink=RecordingSink(), backoff_base=1.0, backoff_max=30.0
+        )
+        for attempt in range(1, 8):
+            delay = client._backoff(attempt)
+            capped = min(1.0 * (2 ** (attempt - 1)), 30.0)
+            assert 0.5 * capped <= delay <= capped
+
+    def test_backoff_is_capped_at_max(self) -> None:
+        client = TelegramLongPollClient(
+            channel_id="ch_x", sink=RecordingSink(), backoff_base=1.0, backoff_max=4.0
+        )
+        assert client._backoff(20) <= 4.0
+
+
+class TestLongPollClientDefaultHttpClient:
+    async def test_default_client_branch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        client = TelegramLongPollClient(channel_id="ch_x", sink=RecordingSink())
+
+        recorded: dict[str, Any] = {}
+
+        class _MockClient:
+            def __init__(self, *a: Any, **kw: Any) -> None:
+                recorded["timeout"] = kw.get("timeout")
+
+            async def __aenter__(self) -> Any:
+                return self
+
+            async def __aexit__(self, *_a: Any) -> None:
+                return None
+
+            async def post(
+                self, url: str, *, json: dict[str, Any], timeout: float
+            ) -> httpx.Response:
+                # Stop after this single call so the loop ends.
+                await client.stop()
+                return _resp_updates([])
+
+        monkeypatch.setattr("meridiand._telegram_channel_driver.httpx.AsyncClient", _MockClient)
+        await client.poll(_BOT_TOKEN, timeout=12)
+        assert recorded["timeout"] == 22.0
+
+
+class TestRetryAfterException:
+    def test_carries_seconds(self) -> None:
+        exc = _RetryAfter(7)
+        assert exc.seconds == 7
+        assert "7" in str(exc)
+
+
+class TestLongPollDriverIntegration:
+    async def test_driver_start_runs_real_client_and_dispatches(self, storage_root: Path) -> None:
+        sink = RecordingSink()
+        client = TelegramLongPollClient(channel_id="ch_tg_1", sink=sink)
+
+        seen = asyncio.Event()
+
+        original_dispatch = sink.dispatch
+
+        async def _dispatch(**kwargs: Any) -> None:
+            await original_dispatch(**kwargs)
+            seen.set()
+
+        sink.dispatch = _dispatch  # type: ignore[method-assign]
+
+        # First poll yields one update, subsequent polls hang until cancelled.
+        class _OneShotClient:
+            def __init__(self) -> None:
+                self._served = False
+
+            async def post(
+                self, url: str, *, json: dict[str, Any], timeout: float
+            ) -> httpx.Response:
+                if not self._served:
+                    self._served = True
+                    return _resp_updates([_update(1, "from-driver", chat_id=77)])
+                await asyncio.sleep(999)
+                raise AssertionError("unreachable")
+
+        client._http_client = _OneShotClient()  # type: ignore[assignment]
+
+        _make_channel_file(storage_root)
+        driver = _make_driver(storage_root, secret=_BOT_TOKEN, long_poll_client=client)
+
+        await driver.start(
+            StartRequest(channel_id="ch_tg_1", channel_kind=_TELEGRAM_KIND, session_id="s")
+        )
+        await asyncio.wait_for(seen.wait(), timeout=2.0)
+
+        assert sink.dispatched[0]["content"] == "from-driver"
+        assert sink.dispatched[0]["sender_id"] == "77"
+
+        await driver.stop(
+            StopRequest(channel_id="ch_tg_1", channel_kind=_TELEGRAM_KIND, session_id="s")
+        )
+        assert "ch_tg_1" not in driver._poll_tasks
