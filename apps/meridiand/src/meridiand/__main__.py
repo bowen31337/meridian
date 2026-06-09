@@ -13,6 +13,8 @@ from storage_repository import RepositoryFailure, SqliteRepositoryDriver
 import uvicorn
 
 from ._app import create_app
+from ._channel_factory import build_channel_runtime
+from ._channel_inbound_sink import AsgiInboundSink
 from ._config import load_config, resolve_config_location, validate_config
 from ._logging import LoggingConfigError, configure_json_logging, emit_early_error
 from ._provider_factory import ProviderFactoryError, build_model_router, build_provider_registry
@@ -142,6 +144,28 @@ def main(argv: list[str] | None = None) -> int:
             _LOG.error("provider init error: %s", exc.message)
             return 1
 
+    # Wire the Gateway: register every v1 channel driver in a ChannelRuntime so
+    # the system-channel router (outbound / inbound / pairing) is mounted and
+    # dispatches to a driver by kind. Channels need secret resolution even when
+    # no model providers are configured, so build a resolver here if needed.
+    channel_secret_ref_resolver = secret_resolver
+    if channel_secret_ref_resolver is None:
+        channel_secret_ref_resolver = SecretRefResolver(
+            storage_root=config.storage_root,
+            os_keychain_backend=OsKeychainVaultBackend(),
+            audit_log=services.audit_log,
+        )
+    # The inbound sink lets long-poll drivers (Telegram getUpdates) deliver
+    # decoded messages into the daemon's own inbound route. It is bound to the
+    # app after create_app to break the app <-> runtime <-> driver <-> sink cycle.
+    inbound_sink = AsgiInboundSink()
+    channel_bundle = build_channel_runtime(
+        storage_root=config.storage_root,
+        audit_log=services.audit_log,
+        secret_resolver=channel_secret_ref_resolver,
+        inbound_sink=inbound_sink,
+    )
+
     serve_ui = config.daemon.serve_ui if config.daemon is not None else False
     ui_dist_path = Path(__file__).parent / "ui" if serve_ui else None
 
@@ -155,9 +179,12 @@ def main(argv: list[str] | None = None) -> int:
         auth_config=config.auth,
         model_router=model_router,
         secret_resolver=secret_resolver,
+        channel_runtime=channel_bundle.runtime,
+        channel_secret_resolver=channel_bundle.secret_resolver,
         serve_ui=serve_ui,
         ui_dist_path=ui_dist_path,
     )
+    inbound_sink.bind(app)
 
     bind = config.bind
     if bind.socket:

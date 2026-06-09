@@ -304,12 +304,14 @@ class TelegramChannelDriver(ChannelDriver):
         audit_log: AuditLog | None = None,
         http_client: httpx.AsyncClient | None = None,
         long_poll_client: LongPollClient | None = None,
+        long_poll_client_factory: Callable[[str], LongPollClient] | None = None,
     ) -> None:
         self._storage_root = storage_root
         self._resolver = secret_resolver or NoopSecretResolver()
         self._audit_log = audit_log or NoopAuditLog()
         self._http_client = http_client
         self._long_poll_client: LongPollClient = long_poll_client or NoopLongPollClient()
+        self._long_poll_client_factory = long_poll_client_factory
         self._poll_tasks: dict[str, asyncio.Task[None]] = {}
 
     # ------------------------------------------------------------------
@@ -426,7 +428,11 @@ class TelegramChannelDriver(ChannelDriver):
             return
 
         poll_timeout: int = int(driver_config.get("poll_timeout", _DEFAULT_POLL_TIMEOUT))
-        lpc = self._long_poll_client
+        lpc = (
+            self._long_poll_client_factory(request.channel_id)
+            if self._long_poll_client_factory is not None
+            else self._long_poll_client
+        )
         _token = token
 
         async def _run_poll() -> None:

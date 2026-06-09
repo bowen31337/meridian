@@ -534,6 +534,43 @@ class TestDriverStart:
         token_used, timeout_used = received[0]
         assert token_used == _BOT_TOKEN
 
+    async def test_start_uses_per_channel_factory_when_provided(self, storage_root: Path) -> None:
+        built_for: list[str] = []
+        polled: list[str] = []
+
+        class _PerChannelClient:
+            def __init__(self, channel_id: str) -> None:
+                self._cid = channel_id
+
+            async def poll(self, token: str, timeout: int) -> None:
+                polled.append(self._cid)
+
+            async def stop(self) -> None:
+                pass
+
+        def _factory(channel_id: str) -> _PerChannelClient:
+            built_for.append(channel_id)
+            return _PerChannelClient(channel_id)
+
+        _make_channel_file(storage_root)
+        driver = TelegramChannelDriver(
+            storage_root=storage_root,
+            secret_resolver=FixedSecretResolver(_BOT_TOKEN),
+            long_poll_client_factory=_factory,
+        )
+        await driver.start(
+            StartRequest(channel_id="ch_tg_1", channel_kind=_TELEGRAM_KIND, session_id="s")
+        )
+        await asyncio.sleep(0)
+
+        assert built_for == ["ch_tg_1"]
+        assert polled == ["ch_tg_1"]
+
+        for task in driver._poll_tasks.values():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+
     async def test_start_uses_default_poll_timeout(self, storage_root: Path) -> None:
         received: list[int] = []
 

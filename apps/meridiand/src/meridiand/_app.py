@@ -27,6 +27,7 @@ from ._budget_overrun_discipline import make_budget_overrun_discipline_router
 from ._budgets_reports import make_router as make_budgets_reports_router
 from ._cancel import make_cancel_router
 from ._canvas_interactions import make_canvas_interactions_router
+from ._channel_factory import start_configured_channels, stop_channels
 from ._channels import make_channels_router
 from ._checkpoint import make_checkpoint_router
 from ._ci_regression import make_ci_regression_router
@@ -227,8 +228,23 @@ def create_app(
                         secret_resolver=secret_resolver,
                     )
 
+                started_channels: list[tuple[str, str]] = []
+                if channel_runtime is not None and storage_root is not None:
+                    started_channels = await start_configured_channels(
+                        runtime=channel_runtime,
+                        storage_root=storage_root,
+                        audit_log=audit_log,
+                    )
+
                 _LOG.info("meridiand ready")
                 yield
+
+                if channel_runtime is not None and started_channels:
+                    await stop_channels(
+                        runtime=channel_runtime,
+                        started=started_channels,
+                        audit_log=audit_log,
+                    )
 
                 if config_path is not None and model_router is not None:
                     remove_sighup_handler()
