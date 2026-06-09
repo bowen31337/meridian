@@ -1003,6 +1003,65 @@ class TestEventsHandlers:
                 chunks.append(chunk if isinstance(chunk, str) else chunk.decode())
             assert any("event: error" in c for c in chunks)
 
+    async def test_session_events_sse_live_event_yield(
+        self, tmp_path: Path
+    ) -> None:
+        """Covers _events.py 231-233 (live event with seq > watermark yielded)."""
+        import asyncio
+        from unittest.mock import MagicMock as _Mm
+
+        from core_errors import NoopAuditLog
+        from storage_event_log import SessionEvent, SubscriberBus
+
+        from meridiand._events import make_events_router
+
+        bus = SubscriberBus()
+        router = make_events_router(
+            audit_log=NoopAuditLog(),
+            storage_root=tmp_path,
+            subscriber_bus=bus,
+        )
+        handler = next(
+            r.endpoint
+            for r in router.routes
+            if r.path == "/v1/sessions/{session_id}/events" and "GET" in r.methods
+        )
+
+        async def _empty(*_a: Any, **_k: Any):
+            if False:
+                yield  # never; makes this an async generator
+            return
+
+        with patch(
+            "meridiand._events.LocalEventLogReader.read_events",
+            new=_empty,
+        ):
+            mock_request = _Mm()
+            mock_request.headers = {}
+            resp = await handler(
+                "s_live", mock_request, since=-1, type=None, stream=True
+            )
+
+            async def _consume():
+                chunks: list[str] = []
+                async for chunk in resp.body_iterator:
+                    chunks.append(
+                        chunk if isinstance(chunk, str) else chunk.decode()
+                    )
+                    if len(chunks) >= 1:
+                        break
+                return chunks
+
+            consume_task = asyncio.create_task(_consume())
+            await asyncio.sleep(0.01)
+            # Publish a live event with seq > watermark
+            bus.publish(
+                "s_live",
+                SessionEvent(seq=1, ts="t", type="test", data={"a": 1}),
+            )
+            chunks = await asyncio.wait_for(consume_task, timeout=2.0)
+            assert any("event: test" in c for c in chunks)
+
     async def test_sdk_events_typed_error_reraise(self, tmp_path: Path) -> None:
         """SessionEventsError raised inside SDK events is re-raised (line 379)."""
         from meridiand._events import SessionEventsError
