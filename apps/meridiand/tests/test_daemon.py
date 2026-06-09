@@ -360,3 +360,28 @@ class TestDaemonStartupFailure:
         main(["--config", str(cfg)])
         captured = capsys.readouterr()
         assert "bind failed" in captured.err
+
+
+# ---------------------------------------------------------------------------
+# Responder selection: providers + routing -> AgentResponder default model
+# ---------------------------------------------------------------------------
+
+
+class TestResponderSelection:
+    def test_providers_with_routing_rule_uses_rule_model(self, tmp_path: Path, monkeypatch) -> None:
+        cfg = tmp_path / "config.yaml"
+        cfg.write_text(
+            yaml.dump(
+                {
+                    "storage_root": str(tmp_path / "storage"),
+                    "bind": {"socket": None, "host": "127.0.0.1", "port": 8888},
+                    "providers": [{"name": "claude", "kind": "claude_code_oauth"}],
+                    "routing": {"default": {"rules": [{"model": "claude:claude-opus-4-7"}]}},
+                }
+            )
+        )
+        monkeypatch.setattr(uvicorn, "run", lambda *a, **kw: None)
+
+        from meridiand.__main__ import main
+
+        assert main(["--config", str(cfg)]) == 0
