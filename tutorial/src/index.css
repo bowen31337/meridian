@@ -1,0 +1,182 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #070a10;
+  --color-ink-2: #0c111b;
+  --color-surface: #11182589;
+  --color-line: #1e2735;
+  --color-line-bright: #2c3a4e;
+  --color-paper: #ece6d6;
+  --color-paper-dim: #b9b4a6;
+  --color-muted: #6f7b8e;
+  --color-faint: #424c5c;
+
+  --color-signal: #f6a623;
+  --color-signal-soft: #ffce7a;
+  --color-teal: #5fd4c4;
+  --color-teal-soft: #a7ede2;
+  --color-rose: #e8836b;
+
+  --font-display: "Fraunces", "Georgia", serif;
+  --font-sans: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  * {
+    border-color: var(--color-line);
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--color-ink);
+    color: var(--color-paper);
+    font-family: var(--font-sans);
+    font-weight: 400;
+    overflow-x: hidden;
+  }
+
+  ::selection {
+    background: var(--color-signal);
+    color: var(--color-ink);
+  }
+
+  /* Atmospheric base: a faint star-field grain + meridian glow */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background: radial-gradient(1100px 700px at 78% -8%, rgba(246, 166, 35, 0.1), transparent 60%),
+      radial-gradient(900px 600px at 8% 18%, rgba(95, 212, 196, 0.07), transparent 55%),
+      radial-gradient(1200px 900px at 50% 120%, rgba(95, 212, 196, 0.05), transparent 60%);
+  }
+
+  /* fine grid texture */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.5;
+    background-image: linear-gradient(to right, rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+    background-size: 88px 88px;
+    mask-image: radial-gradient(ellipse 90% 70% at 50% 30%, black, transparent 90%);
+  }
+
+  #root {
+    position: relative;
+    z-index: 1;
+  }
+}
+
+@layer components {
+  .display {
+    font-family: var(--font-display);
+    font-optical-sizing: auto;
+    letter-spacing: -0.02em;
+    line-height: 0.96;
+  }
+
+  .mono {
+    font-family: var(--font-mono);
+  }
+
+  .tick-label {
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    color: var(--color-muted);
+  }
+
+  .hairline {
+    background: linear-gradient(
+      to right,
+      transparent,
+      var(--color-line-bright) 12%,
+      var(--color-line-bright) 88%,
+      transparent
+    );
+  }
+
+  .glass {
+    background: linear-gradient(180deg, rgba(20, 28, 42, 0.66), rgba(11, 16, 26, 0.55));
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--color-line);
+  }
+
+  .card-glow:hover {
+    border-color: color-mix(in oklab, var(--color-signal) 45%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--color-signal) 25%, transparent), 0 20px 60px
+      -30px rgba(246, 166, 35, 0.45);
+  }
+
+  .signal-link {
+    position: relative;
+    color: var(--color-signal-soft);
+  }
+  .signal-link::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    bottom: -2px;
+    height: 1px;
+    width: 100%;
+    background: currentColor;
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 0.45s var(--ease-out-expo);
+  }
+  .signal-link:hover::after {
+    transform: scaleX(1);
+  }
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.scrollbar-none {
+  scrollbar-width: none;
+}
+
+@keyframes blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+.caret {
+  display: inline-block;
+  width: 0.6ch;
+  height: 1.05em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: var(--color-signal);
+  animation: blink 1.05s steps(1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
