@@ -24,12 +24,18 @@ dependencies = [
     "meridian-storage-blob>=0.1.0",
     "meridian-storage-event-log>=0.1.0",
     "meridian-storage-reposit>=0.1.0",
+    "meridian-storage-repository>=0.1.0",
     "meridian-sdk-channel>=0.1.0",
     "meridian-sdk-provider>=0.1.0",
+    "meridian-sdk-budget>=0.1.0",
+    "meridian-sdk-tool>=0.1.0",
+    "meridian-builtin-tools>=0.1.0",
     "meridian-provider-anthropic-apikey>=0.1.0",
+    "meridian-provider-claude-code-oauth>=0.1.0",
     "meridian-api-models>=0.1.0",
     "sqlite-vec>=0.1.6",
     "sqlean-py>=3.50.4",
+    "aiosqlite>=0.19",
     "jsonschema>=4.0",
     "pyrage>=1.0",
     "keyring>=24.0",
@@ -55,9 +61,14 @@ meridian-sdk-capabilities = { workspace = true }
 meridian-storage-blob = { workspace = true }
 meridian-storage-event-log = { workspace = true }
 meridian-storage-reposit = { workspace = true }
+meridian-storage-repository = { workspace = true }
 meridian-sdk-channel = { workspace = true }
 meridian-sdk-provider = { workspace = true }
+meridian-sdk-budget = { workspace = true }
+meridian-sdk-tool = { workspace = true }
+meridian-builtin-tools = { workspace = true }
 meridian-provider-anthropic-apikey = { workspace = true }
+meridian-provider-claude-code-oauth = { workspace = true }
 meridian-sdk-sandbox = { workspace = true }
 meridian-api-models = { workspace = true }
 

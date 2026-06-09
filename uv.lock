@@ -1680,6 +1680,7 @@ name = "meridiand"
 version = "0.1.0"
 source = { editable = "apps/meridiand" }
 dependencies = [
+    { name = "aiosqlite" },
     { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -1690,6 +1691,8 @@ dependencies = [
     { name = "meridian-kb-indexer" },
     { name = "meridian-plugin-loader" },
     { name = "meridian-provider-anthropic-apikey" },
+    { name = "meridian-provider-claude-code-oauth" },
+    { name = "meridian-sdk-budget" },
     { name = "meridian-sdk-capabilities" },
     { name = "meridian-sdk-channel" },
     { name = "meridian-sdk-provider" },
@@ -1697,6 +1700,7 @@ dependencies = [
     { name = "meridian-storage-blob" },
     { name = "meridian-storage-event-log" },
     { name = "meridian-storage-reposit" },
+    { name = "meridian-storage-repository" },
     { name = "opentelemetry-api" },
     { name = "prometheus-client" },
     { name = "pydantic" },
@@ -1718,6 +1722,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiosqlite", specifier = ">=0.19" },
     { name = "cryptography", specifier = ">=42.0" },
     { name = "fastapi", specifier = ">=0.110" },
     { name = "httpx", specifier = ">=0.27" },
@@ -1729,6 +1734,8 @@ requires-dist = [
     { name = "meridian-kb-indexer", editable = "packages/knowledge-base-indexer" },
     { name = "meridian-plugin-loader", editable = "packages/plugin-loader" },
     { name = "meridian-provider-anthropic-apikey", editable = "packages/provider-anthropic-apikey" },
+    { name = "meridian-provider-claude-code-oauth", editable = "packages/provider-claude-code-oauth" },
+    { name = "meridian-sdk-budget", editable = "packages/sdk-budget" },
     { name = "meridian-sdk-capabilities", editable = "packages/sdk-capabilities" },
     { name = "meridian-sdk-channel", editable = "packages/sdk-channel" },
     { name = "meridian-sdk-provider", editable = "packages/sdk-provider" },
@@ -1736,6 +1743,7 @@ requires-dist = [
     { name = "meridian-storage-blob", editable = "packages/storage-blob" },
     { name = "meridian-storage-event-log", editable = "packages/storage-event-log" },
     { name = "meridian-storage-reposit", editable = "packages/storage-reposit" },
+    { name = "meridian-storage-repository", editable = "packages/storage-repository" },
     { name = "opentelemetry-api", specifier = ">=1.24" },
     { name = "opentelemetry-sdk", marker = "extra == 'dev'", specifier = ">=1.24" },
     { name = "prometheus-client", specifier = ">=0.20" },

@@ -39,6 +39,7 @@ from meridian_sdk_provider import (
     RoutingCondition,
     TokenRange,
 )
+from meridian_sdk_provider.audit import AuditLog as SdkAuditLog, AuditLogEntry as SdkAuditLogEntry
 
 from ._config import MeridianConfig, ProviderConfig, RoutingConfig
 from ._secret_ref import SecretRefResolver
@@ -48,6 +49,45 @@ _DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+class _SdkProviderAuditBridge:
+    """Adapt meridian_sdk_provider AuditLogEntry writes to a core_errors AuditLog.
+
+    The ModelRouter and ProviderRegistry emit ``meridian_sdk_provider.audit``
+    entries (provider_name/provider_kind/model, no ``code``); core_errors audit
+    sinks expect a ``code`` field. Without this bridge a failure-path write
+    raises ``'AuditLogEntry' object has no attribute 'code'`` and masks the real
+    provider error.
+    """
+
+    def __init__(self, core_log: AuditLog) -> None:
+        self._core = core_log
+
+    def write(self, entry: SdkAuditLogEntry) -> None:
+        detail: dict[str, Any] = dict(entry.detail or {})
+        detail.setdefault("provider_name", entry.provider_name)
+        detail.setdefault("provider_kind", entry.provider_kind)
+        if entry.model is not None:
+            detail.setdefault("model", entry.model)
+        if entry.session_id is not None:
+            detail.setdefault("session_id", entry.session_id)
+        level = "warn" if entry.level == "warning" else entry.level
+        code = str(detail.get("error_type") or entry.event.replace(".", "_"))
+        self._core.write(
+            AuditLogEntry(
+                level=level,
+                event=entry.event,
+                code=code,
+                timestamp=entry.timestamp,
+                detail=detail or None,
+            )
+        )
+
+
+def _bridge_audit(audit_log: AuditLog | None) -> SdkAuditLog | None:
+    """Wrap a core_errors AuditLog so sdk-provider components can write to it."""
+    return _SdkProviderAuditBridge(audit_log) if audit_log is not None else None
 
 
 class ProviderFactoryError(MeridianError):
@@ -184,7 +224,7 @@ def build_provider_registry(
                         cause=exc,
                     ) from exc
 
-            return ProviderRegistry(providers=providers, audit_log=_audit)
+            return ProviderRegistry(providers=providers, audit_log=_bridge_audit(_audit))
 
         except ProviderFactoryError as err:
             record_error(span, err)
@@ -228,4 +268,4 @@ def build_model_router(
         if config.routing is not None
         else ModelRoutingPolicy(rules=[], fallbacks=[])
     )
-    return ModelRouter(policy=policy, registry=registry, audit_log=audit_log)
+    return ModelRouter(policy=policy, registry=registry, audit_log=_bridge_audit(audit_log))
