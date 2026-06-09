@@ -1444,6 +1444,49 @@ class TestSmallGapsSweep:
         assert result["model"] == "m"
         assert result["content"] == []
 
+    async def test_collect_message_start_no_model(self) -> None:
+        """Covers 103->105 (MessageStartEvent.model is None/empty branch)."""
+        from meridian_sdk_provider.types import MessageStartEvent
+
+        from meridiand._messages import _collect
+
+        async def _stream():
+            yield MessageStartEvent(model="", input_tokens=5, provider="p")
+
+        result = await _collect(_stream(), "fallback-model")
+        # When event.model is empty/falsey, falls through to input_tokens
+        # branch without setting model — _collect uses the fallback.
+        assert result["model"] == "fallback-model"
+
+    async def test_collect_message_delta_no_stop_reason(self) -> None:
+        """Covers 118->101 (MessageDeltaEvent.stop_reason is None)."""
+        from meridian_sdk_provider.types import (
+            MessageDeltaEvent,
+            MessageStopEvent,
+        )
+
+        from meridiand._messages import _collect
+
+        async def _stream():
+            yield MessageDeltaEvent(stop_reason=None)
+            yield MessageStopEvent(stop_reason="end_turn")
+
+        result = await _collect(_stream(), "m")
+        assert result["stop_reason"] == "end_turn"
+
+    async def test_collect_message_stop_no_stop_reason(self) -> None:
+        """Covers 120->101 (MessageStopEvent.stop_reason is None)."""
+        from meridian_sdk_provider.types import MessageStopEvent
+
+        from meridiand._messages import _collect
+
+        async def _stream():
+            yield MessageStopEvent(stop_reason=None)
+
+        result = await _collect(_stream(), "m")
+        # When MessageStopEvent.stop_reason is None, _collect leaves it None.
+        assert result["stop_reason"] is None
+
     async def test_messages_with_hooks_dir(self, tmp_path: Path) -> None:
         """Covers 180 (hooks_dir-not-None branch)."""
         from meridian_sdk_provider.types import TextDeltaEvent
