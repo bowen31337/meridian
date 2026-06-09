@@ -12,6 +12,7 @@ from core_errors import AuditLogEntry, StructuredEvent, record_invocation_event
 from storage_repository import RepositoryFailure, SqliteRepositoryDriver
 import uvicorn
 
+from ._agent_responder import AgentResponder
 from ._app import create_app
 from ._channel_factory import build_channel_runtime
 from ._channel_inbound_sink import AsgiInboundSink
@@ -158,7 +159,25 @@ def main(argv: list[str] | None = None) -> int:
     # The inbound sink lets long-poll drivers (Telegram getUpdates) deliver
     # decoded messages into the daemon's own inbound route. It is bound to the
     # app after create_app to break the app <-> runtime <-> driver <-> sink cycle.
-    inbound_sink = AsgiInboundSink()
+    # With a model router configured, use the AgentResponder so inbound messages
+    # get an LLM reply; otherwise fall back to plain session-creating inbound.
+    inbound_sink: AgentResponder | AsgiInboundSink
+    if model_router is not None:
+        default_model = "claude:claude-opus-4-7"
+        if (
+            config.routing is not None
+            and config.routing.default is not None
+            and config.routing.default.rules
+        ):
+            default_model = config.routing.default.rules[0].model
+        inbound_sink = AgentResponder(
+            model_router=model_router,
+            model=default_model,
+            storage_root=config.storage_root,
+            audit_log=services.audit_log,
+        )
+    else:
+        inbound_sink = AsgiInboundSink()
     channel_bundle = build_channel_runtime(
         storage_root=config.storage_root,
         audit_log=services.audit_log,
