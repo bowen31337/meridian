@@ -31,7 +31,6 @@ Coverage:
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -41,7 +40,6 @@ from meridian_sdk_provider.errors import ProviderCallError
 from meridian_sdk_provider.types import (
     Message,
     MessageStartEvent,
-    MessageStopEvent,
     ModelCallOpts,
     TextDeltaEvent,
 )
@@ -53,7 +51,6 @@ from meridian_provider_claude_code_oauth._lock import (
     read_lock,
 )
 from meridian_provider_claude_code_oauth._subprocess import (
-    CliCallTimeoutError,
     CliSubprocessError,
     CliSubprocessManager,
 )
@@ -222,254 +219,6 @@ class TestLockFile:
 
 
 # ---------------------------------------------------------------------------
-# CliSubprocessManager — integration tests with _cli_stub.py
-# ---------------------------------------------------------------------------
-
-
-class TestCliSubprocessManagerSpawn:
-    async def test_start_spawns_process(self) -> None:
-        import asyncio
-
-        mgr = CliSubprocessManager(sys.executable, "1.0.0", health_interval_s=9999)
-        mgr._proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            _STUB,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        assert mgr._proc is not None
-        assert mgr._proc.returncode is None
-        mgr._proc.terminate()
-        await mgr._proc.wait()
-
-    async def test_stop_terminates_process(self) -> None:
-        import asyncio
-
-        mgr = CliSubprocessManager(sys.executable, "1.0.0", health_interval_s=9999)
-        mgr._proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            _STUB,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        await mgr.stop()
-        assert mgr._proc is None
-
-
-class TestCliSubprocessManagerCall:
-    def _make_manager(self, *, env: dict | None = None) -> CliSubprocessManager:
-        import os
-
-        mgr = CliSubprocessManager(
-            sys.executable,
-            "1.0.0",
-            health_interval_s=9999,
-            call_timeout_s=5.0,
-        )
-        # Patch _spawn to use the stub
-        _env = {**os.environ, **(env or {})}
-
-        async def _stub_spawn() -> None:
-            import asyncio as _asyncio
-
-            mgr._proc = await _asyncio.create_subprocess_exec(
-                sys.executable,
-                _STUB,
-                stdin=_asyncio.subprocess.PIPE,
-                stdout=_asyncio.subprocess.PIPE,
-                stderr=_asyncio.subprocess.PIPE,
-                env=_env,
-            )
-
-        mgr._spawn = _stub_spawn  # type: ignore[method-assign]
-        return mgr
-
-    async def test_call_yields_message_start(self) -> None:
-        mgr = self._make_manager()
-        events = [e async for e in mgr.call(_SIMPLE_OPTS)]
-        assert any(isinstance(e, MessageStartEvent) for e in events)
-
-    async def test_call_yields_text_delta(self) -> None:
-        mgr = self._make_manager()
-        events = [e async for e in mgr.call(_SIMPLE_OPTS)]
-        assert any(isinstance(e, TextDeltaEvent) for e in events)
-        text_events = [e for e in events if isinstance(e, TextDeltaEvent)]
-        assert text_events[0].text == "Hello from stub!"
-
-    async def test_call_yields_message_stop(self) -> None:
-        mgr = self._make_manager()
-        events = [e async for e in mgr.call(_SIMPLE_OPTS)]
-        assert any(isinstance(e, MessageStopEvent) for e in events)
-
-    async def test_call_message_stop_has_token_counts(self) -> None:
-        mgr = self._make_manager()
-        events = [e async for e in mgr.call(_SIMPLE_OPTS)]
-        stop = next(e for e in events if isinstance(e, MessageStopEvent))
-        assert stop.input_tokens == 10
-        assert stop.output_tokens == 4
-        assert stop.stop_reason == "end_turn"
-
-    async def test_call_error_response_raises(self) -> None:
-        mgr = self._make_manager(env={"CLI_STUB_ERROR": "1"})
-        with pytest.raises(CliSubprocessError, match="cli_test_error"):
-            async for _ in mgr.call(_SIMPLE_OPTS):
-                pass
-
-    async def test_call_timeout_raises(self) -> None:
-        mgr = self._make_manager(env={"CLI_STUB_HANG": "1"})
-        mgr._call_timeout_s = 0.2
-        with pytest.raises(CliCallTimeoutError):
-            async for _ in mgr.call(_SIMPLE_OPTS):
-                pass
-
-    async def test_call_timeout_kills_process(self) -> None:
-        mgr = self._make_manager(env={"CLI_STUB_HANG": "1"})
-        mgr._call_timeout_s = 0.2
-        with pytest.raises(CliCallTimeoutError):
-            async for _ in mgr.call(_SIMPLE_OPTS):
-                pass
-        # After timeout the manager respawns; _proc is alive again
-        assert mgr._proc is not None
-        mgr._proc.terminate()
-        await mgr._proc.wait()
-
-    async def test_second_call_after_error_succeeds(self) -> None:
-        import asyncio
-        import os
-
-        # First call fails (error response), second call should succeed.
-        # Error responses don't kill the process, so we manually terminate it
-        # before the second call to force a fresh spawn.
-        mgr = self._make_manager(env={"CLI_STUB_ERROR": "1"})
-        with pytest.raises(CliSubprocessError):
-            async for _ in mgr.call(_SIMPLE_OPTS):
-                pass
-
-        # Terminate the erroring process so _ensure_alive respawns.
-        if mgr._proc is not None:
-            mgr._proc.terminate()
-            await mgr._proc.wait()
-            mgr._proc = None
-
-        _env = {**os.environ}
-
-        async def _clean_spawn() -> None:
-            mgr._proc = await asyncio.create_subprocess_exec(
-                sys.executable,
-                _STUB,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=_env,
-            )
-
-        mgr._spawn = _clean_spawn  # type: ignore[method-assign]
-        events = [e async for e in mgr.call(_SIMPLE_OPTS)]
-        assert any(isinstance(e, TextDeltaEvent) for e in events)
-
-    async def test_call_active_flag_cleared_after_success(self) -> None:
-        mgr = self._make_manager()
-        async for _ in mgr.call(_SIMPLE_OPTS):
-            pass
-        assert not mgr._call_active
-
-    async def test_call_active_flag_cleared_after_error(self) -> None:
-        mgr = self._make_manager(env={"CLI_STUB_ERROR": "1"})
-        with pytest.raises(CliSubprocessError):
-            async for _ in mgr.call(_SIMPLE_OPTS):
-                pass
-        assert not mgr._call_active
-
-
-class TestCliSubprocessManagerHealthCheck:
-    async def test_health_check_ok_keeps_process(self) -> None:
-        import asyncio
-
-        mgr = CliSubprocessManager(sys.executable, "1.0.0", health_interval_s=9999)
-        mgr._proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            _STUB,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        original_pid = mgr._proc.pid
-        await mgr._do_health_check()
-        assert mgr._proc is not None
-        assert mgr._proc.pid == original_pid
-        mgr._proc.terminate()
-        await mgr._proc.wait()
-
-    async def test_health_check_fail_spawns_new_process(self) -> None:
-        import asyncio
-        import os
-
-        mgr = CliSubprocessManager(
-            sys.executable, "1.0.0", health_interval_s=9999, health_timeout_s=0.1
-        )
-        # Spawn stub in no-pong mode so health check times out.
-        env = {**os.environ, "CLI_STUB_NO_PONG": "1"}
-        mgr._proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            _STUB,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-        )
-        old_pid = mgr._proc.pid
-
-        # Patch _spawn so we can detect it was called after the failure.
-        spawned: list[int] = []
-
-        async def _spawn() -> None:
-            import asyncio as _asyncio
-
-            mgr._proc = await _asyncio.create_subprocess_exec(
-                sys.executable,
-                _STUB,
-                stdin=_asyncio.subprocess.PIPE,
-                stdout=_asyncio.subprocess.PIPE,
-                stderr=_asyncio.subprocess.PIPE,
-            )
-            spawned.append(mgr._proc.pid)
-
-        mgr._spawn = _spawn  # type: ignore[method-assign]
-        await mgr._do_health_check()
-        assert spawned, "expected _spawn to be called after health-check failure"
-        assert mgr._proc is not None
-        assert mgr._proc.pid != old_pid
-        mgr._proc.terminate()
-        await mgr._proc.wait()
-
-    async def test_health_check_on_dead_process_respawns(self) -> None:
-
-        mgr = CliSubprocessManager(sys.executable, "1.0.0", health_interval_s=9999)
-        spawned: list[int] = []
-
-        async def _spawn() -> None:
-            import asyncio as _asyncio
-
-            mgr._proc = await _asyncio.create_subprocess_exec(
-                sys.executable,
-                _STUB,
-                stdin=_asyncio.subprocess.PIPE,
-                stdout=_asyncio.subprocess.PIPE,
-                stderr=_asyncio.subprocess.PIPE,
-            )
-            spawned.append(mgr._proc.pid)
-
-        mgr._spawn = _spawn  # type: ignore[method-assign]
-        # _proc is None → health check should spawn
-        await mgr._do_health_check()
-        assert spawned
-        mgr._proc.terminate()  # type: ignore[union-attr]
-        await mgr._proc.wait()  # type: ignore[union-attr]
-
-
-# ---------------------------------------------------------------------------
 # SystemOAuthProvider tests
 # ---------------------------------------------------------------------------
 
@@ -541,6 +290,23 @@ class TestSystemOAuthProviderCall:
         assert entry.event == "claude_code_oauth.call.failed"
         assert entry.provider_name == "claude_code_oauth"
         assert entry.provider_kind == "claude_code_oauth"
+
+    async def test_call_disallowed_tool_writes_attempt_audit(self) -> None:
+        from meridian_provider_claude_code_oauth._subprocess import DisallowedToolError
+
+        mgr = _FakeManager()
+        mgr.raise_on_call = DisallowedToolError("inner loop attempted Bash")
+        audit = _CapturingAuditLog()
+        provider = SystemOAuthProvider(_manager=mgr, audit_log=audit)
+
+        with pytest.raises(ProviderCallError):
+            async for _ in provider.call(_SIMPLE_OPTS):
+                pass
+
+        entry = audit.entries[0]
+        assert entry.event == "claude_code_oauth.disallowed_tool.attempted"
+        assert entry.level == "error"
+        assert entry.detail["error_type"] == "DisallowedToolError"
 
     async def test_call_unexpected_error_wrapped_as_provider_error(self) -> None:
         mgr = _FakeManager()

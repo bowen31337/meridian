@@ -1,468 +1,292 @@
-"""Unit tests for _subprocess helpers and CliSubprocessManager internals.
+"""
+Tests for the headless one-shot CliSubprocessManager (claude -p mode).
 
-These exercise branches not reachable through the integration-style stub:
-``_opts_to_dict`` block conversion, ``_parse_event`` variants, and the manager's
-internal I/O / lifecycle helpers driven with in-memory fakes (no real CLI).
+Covers:
+  - _build_prompt: single- and multi-message serialization, block flattening.
+  - _map_model: opus/sonnet/haiku aliases, default (None) for others.
+  - _build_args: base argv, Contract 1 disallowed built-ins, --model,
+    --append-system-prompt, and the MCP tool-bridge wiring (--mcp-config,
+    --allowed-tools, cwd) when opts.metadata carries meridian_tools.
+  - call(): success event stream, empty text, usage/model extraction,
+    non-zero exit, invalid JSON, is_error result, timeout, and cwd passthrough.
+  - start()/stop() are no-ops.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from meridian_sdk_provider.types import (
-    MessageStartEvent,
-    MessageStopEvent,
-    TextDeltaEvent,
-    ThinkingDeltaEvent,
-    ToolInputDeltaEvent,
-    ToolUseStartEvent,
-)
+from meridian_sdk_provider.types import Message, ModelCallOpts
 
+from meridian_provider_claude_code_oauth import _subprocess
+from meridian_provider_claude_code_oauth._disallowed_tools import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 from meridian_provider_claude_code_oauth._subprocess import (
     CliCallTimeoutError,
     CliSubprocessError,
     CliSubprocessManager,
-    _opts_to_dict,
-    _parse_event,
+    _build_prompt,
+    _flatten_content,
+    _map_model,
 )
 
-# ---------------------------------------------------------------------------
-# In-memory subprocess fakes
-# ---------------------------------------------------------------------------
+
+def _mgr(call_timeout_s: float = 120.0) -> CliSubprocessManager:
+    return CliSubprocessManager("claude", "v1", call_timeout_s=call_timeout_s)
 
 
-class _FakeStdin:
-    def __init__(self) -> None:
-        self.written: list[bytes] = []
+def _opts(
+    *,
+    model: str = "claude-sonnet-4-6",
+    content: str = "hi",
+    system: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> ModelCallOpts:
+    return ModelCallOpts(
+        model=model,
+        messages=[Message(role="user", content=content)],
+        system=system,
+        metadata=metadata or {},
+    )
 
-    def write(self, data: bytes) -> None:
-        self.written.append(data)
 
-    async def drain(self) -> None:
-        pass
-
-
-class _FakeStdout:
-    def __init__(self, lines: list[bytes]) -> None:
-        self._lines = list(lines)
-
-    async def readline(self) -> bytes:
-        if self._lines:
-            return self._lines.pop(0)
-        return b""
+def _result_json(
+    *,
+    text: str = "hello",
+    inp: int = 5,
+    out: int = 6,
+    stop: str = "end_turn",
+    model: str = "claude-opus-4-7",
+    is_error: bool = False,
+) -> bytes:
+    return json.dumps(
+        {
+            "type": "result",
+            "is_error": is_error,
+            "result": text,
+            "stop_reason": stop,
+            "usage": {"input_tokens": inp, "output_tokens": out},
+            "modelUsage": {model: {}},
+        }
+    ).encode()
 
 
 class _FakeProc:
-    def __init__(self, lines: list[bytes] | None = None, returncode: int | None = None) -> None:
-        self.stdin = _FakeStdin()
-        self.stdout = _FakeStdout(lines or [])
+    def __init__(
+        self, *, stdout: bytes = b"", stderr: bytes = b"", returncode: int = 0, hang: bool = False
+    ) -> None:
+        self._stdout = stdout
+        self._stderr = stderr
         self.returncode = returncode
-        self.terminated = False
+        self._hang = hang
         self.killed = False
 
-    def terminate(self) -> None:
-        self.terminated = True
+    async def communicate(self) -> tuple[bytes, bytes]:
+        if self._hang:
+            await asyncio.sleep(10)
+        return self._stdout, self._stderr
 
     def kill(self) -> None:
         self.killed = True
-        self.returncode = -9
 
     async def wait(self) -> int:
-        self.returncode = 0
-        return 0
+        return self.returncode
 
 
-def _line(obj: dict[str, Any]) -> bytes:
-    return (json.dumps(obj) + "\n").encode()
+def _patch_exec(monkeypatch: pytest.MonkeyPatch, proc: _FakeProc, captured: dict[str, Any]) -> None:
+    async def _fake(*args: Any, **kwargs: Any) -> _FakeProc:
+        captured["args"] = list(args)
+        captured["cwd"] = kwargs.get("cwd")
+        return proc
+
+    monkeypatch.setattr(_subprocess.asyncio, "create_subprocess_exec", _fake)
 
 
-# ---------------------------------------------------------------------------
-# _opts_to_dict — list-content block conversion + optional fields
-# ---------------------------------------------------------------------------
-
-
-def test_opts_to_dict_converts_blocks_and_optional_fields() -> None:
-    blocks = [
-        SimpleNamespace(type="text", text="plain", cache_control=None),
-        SimpleNamespace(type="text", text="cached", cache_control={"type": "ephemeral"}),
-        SimpleNamespace(type="tool_use", id="t1", name="fn", input={"a": 1}),
-        SimpleNamespace(type="tool_result", tool_use_id="t1", content="done"),
-        SimpleNamespace(type="tool_result", tool_use_id="t2", content=["a", "b"]),
-        SimpleNamespace(type="thinking", thinking="reason", signature="sig"),
-        SimpleNamespace(type="image"),  # unknown block — skipped
-    ]
-    msg = SimpleNamespace(role="user", content=blocks)
-    opts = SimpleNamespace(
-        model="claude-x",
-        messages=[msg],
-        max_tokens=256,
-        system="be terse",
-        tools=[SimpleNamespace(name="fn", description="d", input_schema={"type": "object"})],
-        temperature=0.3,
-        enable_thinking=True,
-        thinking_budget_tokens=2000,
-        session_id="sess-1",
-    )
-
-    d = _opts_to_dict(opts)  # type: ignore[arg-type]
-
-    content = d["messages"][0]["content"]
-    assert {"type": "text", "text": "plain"} in content
-    assert {"type": "text", "text": "cached", "cache_control": {"type": "ephemeral"}} in content
-    assert {"type": "tool_use", "id": "t1", "name": "fn", "input": {"a": 1}} in content
-    assert {"type": "tool_result", "tool_use_id": "t1", "content": "done"} in content
-    tr_list = next(b for b in content if b.get("tool_use_id") == "t2")
-    assert tr_list["content"] == [
-        {"type": "text", "text": "a"},
-        {"type": "text", "text": "b"},
-    ]
-    assert {"type": "thinking", "thinking": "reason", "signature": "sig"} in content
-
-    assert d["system"] == "be terse"
-    assert d["temperature"] == 0.3
-    assert d["thinking"] == {"type": "enabled", "budget_tokens": 2000}
-    assert d["session_id"] == "sess-1"
-    assert d["tools"][0]["name"] == "fn"
+async def _collect(mgr: CliSubprocessManager, opts: ModelCallOpts) -> list[Any]:
+    return [ev async for ev in mgr.call(opts)]
 
 
 # ---------------------------------------------------------------------------
-# _parse_event — all branches
+# Prompt + model mapping
 # ---------------------------------------------------------------------------
 
 
-def test_parse_event_message_start() -> None:
-    ev = _parse_event({"type": "message_start", "model": "m", "input_tokens": 3}, "p")
-    assert isinstance(ev, MessageStartEvent)
-    assert ev.model == "m"
-    assert ev.provider == "p"
+class TestPromptAndModel:
+    def test_single_message_prompt_is_content(self) -> None:
+        assert _build_prompt(_opts(content="hello there")) == "hello there"
 
+    def test_multi_message_prompt_is_role_tagged(self) -> None:
+        opts = ModelCallOpts(
+            model="m",
+            messages=[Message(role="user", content="a"), Message(role="assistant", content="b")],
+        )
+        assert _build_prompt(opts) == "user: a\n\nassistant: b"
 
-def test_parse_event_text_delta() -> None:
-    ev = _parse_event({"type": "text_delta", "text": "hi"}, "p")
-    assert isinstance(ev, TextDeltaEvent)
-    assert ev.text == "hi"
+    def test_flatten_content_str(self) -> None:
+        assert _flatten_content("plain") == "plain"
 
+    def test_flatten_content_blocks(self) -> None:
+        block = type("B", (), {"text": "block text"})()
+        assert _flatten_content([block]) == "block text"
 
-def test_parse_event_thinking_delta() -> None:
-    ev = _parse_event({"type": "thinking_delta", "thinking": "hmm"}, "p")
-    assert isinstance(ev, ThinkingDeltaEvent)
-    assert ev.thinking == "hmm"
+    def test_map_model_aliases(self) -> None:
+        assert _map_model("claude-opus-4-7") == "opus"
+        assert _map_model("claude:claude-sonnet-4-6") == "sonnet"
+        assert _map_model("claude-haiku-4-5") == "haiku"
 
-
-def test_parse_event_tool_use_start() -> None:
-    ev = _parse_event({"type": "tool_use_start", "id": "x", "name": "fn"}, "p")
-    assert isinstance(ev, ToolUseStartEvent)
-    assert ev.id == "x"
-    assert ev.name == "fn"
-
-
-def test_parse_event_tool_input_delta() -> None:
-    ev = _parse_event({"type": "tool_input_delta", "id": "x", "partial_json": "{}"}, "p")
-    assert isinstance(ev, ToolInputDeltaEvent)
-    assert ev.partial_json == "{}"
-
-
-def test_parse_event_message_stop() -> None:
-    ev = _parse_event(
-        {"type": "message_stop", "input_tokens": 1, "output_tokens": 2, "stop_reason": "end"},
-        "p",
-    )
-    assert isinstance(ev, MessageStopEvent)
-    assert ev.stop_reason == "end"
-
-
-def test_parse_event_unknown_returns_none() -> None:
-    assert _parse_event({"type": "pong"}, "p") is None
+    def test_map_model_unknown_is_none(self) -> None:
+        assert _map_model("gpt-4o") is None
+        assert _map_model(None) is None
 
 
 # ---------------------------------------------------------------------------
-# _read_events — stdout-level branches
+# _build_args
 # ---------------------------------------------------------------------------
 
 
-def _manager() -> CliSubprocessManager:
-    return CliSubprocessManager("claude", "1.0.0", health_interval_s=9999)
+class TestBuildArgs:
+    def test_base_argv_no_tools(self) -> None:
+        args, cwd = _mgr()._build_args(_opts(system="be brief"))
+        assert args[:5] == ["claude", "-p", "hi", "--output-format", "json"]
+        assert "--disallowed-tools" in args
+        assert "Bash" in args  # Contract 1: built-ins disabled
+        assert "--model" in args and "sonnet" in args
+        assert "--append-system-prompt" in args and "be brief" in args
+        assert "--mcp-config" not in args
+        assert cwd is None
 
+    def test_no_system_prompt_flag_when_absent(self) -> None:
+        args, _ = _mgr()._build_args(_opts(system=None))
+        assert "--append-system-prompt" not in args
 
-async def test_read_events_closed_stdout_raises() -> None:
-    mgr = _manager()
-    mgr._proc = _FakeProc(lines=[])  # readline → b"" → closed
-    with pytest.raises(CliSubprocessError, match="closed stdout"):
-        async for _ in mgr._read_events("cid"):
-            pass
+    def test_unknown_model_omits_model_flag(self) -> None:
+        args, _ = _mgr()._build_args(_opts(model="gpt-4o"))
+        assert "--model" not in args
 
+    def test_tool_metadata_adds_mcp_bridge(self) -> None:
+        meta = {
+            "meridian_tools": {
+                "agent_id": "agent_X",
+                "storage_root": "/root",
+                "tools": ["exec", "read"],
+                "workspace": "/ws",
+            }
+        }
+        args, cwd = _mgr()._build_args(_opts(metadata=meta))
+        assert "--mcp-config" in args
+        cfg = json.loads(args[args.index("--mcp-config") + 1])
+        bridge = cfg["mcpServers"]["meridian"]
+        assert bridge["args"][:2] == ["-m", "meridiand._agent_tool_server"]
+        assert "agent_X" in bridge["args"] and "/root" in bridge["args"]
+        assert "mcp__meridian__exec" in args
+        assert "mcp__meridian__read" in args
+        assert "Bash" in args  # built-ins still disabled alongside MCP tools
+        assert cwd == "/ws"
 
-async def test_read_events_invalid_json_raises() -> None:
-    mgr = _manager()
-    mgr._proc = _FakeProc(lines=[b"not json {{{\n"])
-    with pytest.raises(CliSubprocessError, match="invalid JSON"):
-        async for _ in mgr._read_events("cid"):
-            pass
-
-
-async def test_read_events_skips_none_events_until_done() -> None:
-    mgr = _manager()
-    mgr._proc = _FakeProc(
-        lines=[
-            _line({"type": "pong", "id": "x"}),  # parses to None → loop continues
-            _line({"type": "text_delta", "text": "hi"}),
-            _line({"type": "done"}),
-        ]
-    )
-    events = [e async for e in mgr._read_events("cid")]
-    assert len(events) == 1
-    assert isinstance(events[0], TextDeltaEvent)
-
-
-# ---------------------------------------------------------------------------
-# call() — cancellation kills and respawns
-# ---------------------------------------------------------------------------
-
-
-async def test_call_cancelled_kills_and_respawns() -> None:
-    mgr = _manager()
-    mgr._proc = _FakeProc()
-
-    async def _noop() -> None:
-        pass
-
-    mgr._ensure_alive = _noop  # type: ignore[method-assign]
-
-    async def _read(_cid: str) -> Any:
-        raise asyncio.CancelledError()
-        yield  # pragma: no cover - makes this an async generator
-
-    mgr._read_events = _read  # type: ignore[method-assign]
-
-    killed: list[int] = []
-
-    async def _ks() -> None:
-        killed.append(1)
-
-    mgr._kill_and_spawn = _ks  # type: ignore[method-assign]
-
-    opts = SimpleNamespace(
-        model="m",
-        messages=[SimpleNamespace(role="user", content="hi")],
-        max_tokens=10,
-        system=None,
-        tools=None,
-        temperature=None,
-        enable_thinking=False,
-        thinking_budget_tokens=None,
-        session_id=None,
-    )
-    with pytest.raises(asyncio.CancelledError):
-        async for _ in mgr.call(opts):  # type: ignore[arg-type]
-            pass
-    assert killed == [1]
-    assert not mgr._call_active
+    def test_empty_tools_list_is_no_bridge(self) -> None:
+        meta = {"meridian_tools": {"agent_id": "a", "storage_root": "/r", "tools": []}}
+        args, cwd = _mgr()._build_args(_opts(metadata=meta))
+        assert "--mcp-config" not in args
+        assert cwd is None
 
 
 # ---------------------------------------------------------------------------
-# I/O + lifecycle helper branches
+# call()
 # ---------------------------------------------------------------------------
 
 
-async def test_flush_stdin_noop_when_no_proc() -> None:
-    mgr = _manager()
-    mgr._proc = None
-    await mgr._flush_stdin()  # 318 false branch — no error
+class TestCall:
+    async def test_success_event_stream(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured: dict[str, Any] = {}
+        _patch_exec(monkeypatch, _FakeProc(stdout=_result_json(text="pong")), captured)
+        events = await _collect(_mgr(), _opts())
+        assert [e.type for e in events] == ["message_start", "text_delta", "message_stop"]
+        assert events[0].model == "claude-opus-4-7"
+        assert events[0].input_tokens == 5
+        assert events[1].text == "pong"
+        assert events[2].output_tokens == 6
+        assert events[2].stop_reason == "end_turn"
 
+    async def test_empty_text_yields_no_delta(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_exec(monkeypatch, _FakeProc(stdout=_result_json(text="")), {})
+        events = await _collect(_mgr(), _opts())
+        assert [e.type for e in events] == ["message_start", "message_stop"]
 
-async def test_ensure_alive_noop_when_alive() -> None:
-    mgr = _manager()
-    mgr._proc = _FakeProc(returncode=None)
-    called: list[int] = []
+    async def test_model_falls_back_to_opts_when_absent(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        payload = json.dumps({"result": "x", "usage": {}, "stop_reason": "end_turn"}).encode()
+        _patch_exec(monkeypatch, _FakeProc(stdout=payload), {})
+        events = await _collect(_mgr(), _opts(model="claude-sonnet-4-6"))
+        assert events[0].model == "claude-sonnet-4-6"
 
-    async def _spawn() -> None:
-        called.append(1)
+    async def test_nonzero_exit_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_exec(monkeypatch, _FakeProc(stderr=b"boom", returncode=2), {})
+        with pytest.raises(CliSubprocessError, match="exited with code 2"):
+            await _collect(_mgr(), _opts())
 
-    mgr._spawn = _spawn  # type: ignore[method-assign]
-    await mgr._ensure_alive()
-    assert called == []
+    async def test_invalid_json_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_exec(monkeypatch, _FakeProc(stdout=b"not json"), {})
+        with pytest.raises(CliSubprocessError, match="invalid JSON"):
+            await _collect(_mgr(), _opts())
 
+    async def test_is_error_result_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _patch_exec(monkeypatch, _FakeProc(stdout=_result_json(text="nope", is_error=True)), {})
+        with pytest.raises(CliSubprocessError, match="reported an error"):
+            await _collect(_mgr(), _opts())
 
-async def test_spawn_noop_when_already_alive() -> None:
-    mgr = _manager()
-    proc = _FakeProc(returncode=None)
-    mgr._proc = proc
-    await mgr._spawn()  # early return — must not replace the live process
-    assert mgr._proc is proc
+    async def test_timeout_raises_and_kills(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        proc = _FakeProc(hang=True)
+        _patch_exec(monkeypatch, proc, {})
+        with pytest.raises(CliCallTimeoutError):
+            await _collect(_mgr(call_timeout_s=0.01), _opts())
+        assert proc.killed is True
 
+    async def test_cwd_passthrough(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured: dict[str, Any] = {}
+        _patch_exec(monkeypatch, _FakeProc(stdout=_result_json()), captured)
+        meta = {
+            "meridian_tools": {
+                "agent_id": "a",
+                "storage_root": "/r",
+                "tools": ["exec"],
+                "workspace": "/ws",
+            }
+        }
+        await _collect(_mgr(), _opts(metadata=meta))
+        assert captured["cwd"] == "/ws"
 
-async def test_kill_noop_when_no_proc() -> None:
-    mgr = _manager()
-    mgr._proc = None
-    await mgr._kill()
-    assert mgr._proc is None
-
-
-async def test_kill_suppresses_shutdown_write_error() -> None:
-    mgr = CliSubprocessManager("claude", "1.0.0", health_interval_s=9999, sigkill_grace_s=0.5)
-    proc = _FakeProc(returncode=None)
-    mgr._proc = proc
-
-    def _boom(_line: str) -> None:
-        raise RuntimeError("stdin broken")
-
-    mgr._write_line = _boom  # type: ignore[method-assign]
-    await mgr._kill()
-    assert proc.terminated
-    assert mgr._proc is None
-
-
-class _HangThenKillProc(_FakeProc):
-    async def wait(self) -> int:
-        if self.killed:
-            return -9
-        await asyncio.sleep(10)
-        return 0  # pragma: no cover
-
-
-async def test_kill_escalates_to_sigkill_on_grace_timeout() -> None:
-    mgr = CliSubprocessManager("claude", "1.0.0", health_interval_s=9999, sigkill_grace_s=0.01)
-    proc = _HangThenKillProc(returncode=None)
-    mgr._proc = proc
-    await mgr._kill()
-    assert proc.terminated
-    assert proc.killed
-    assert mgr._proc is None
-
-
-# ---------------------------------------------------------------------------
-# start()/stop() — health task lifecycle
-# ---------------------------------------------------------------------------
-
-
-async def test_start_creates_health_task_and_stop_cancels_it() -> None:
-    mgr = _manager()
-
-    async def _spawn() -> None:
-        mgr._proc = _FakeProc(returncode=None)
-
-    mgr._spawn = _spawn  # type: ignore[method-assign]
-    await mgr.start()
-    assert mgr._health_task is not None
-    await mgr.stop()
-    assert mgr._health_task is None
-    assert mgr._proc is None
-
-
-async def test_start_keeps_existing_live_health_task() -> None:
-    mgr = _manager()
-
-    async def _spawn() -> None:
-        mgr._proc = _FakeProc(returncode=None)
-
-    mgr._spawn = _spawn  # type: ignore[method-assign]
-
-    async def _idle() -> None:
-        await asyncio.sleep(3600)
-
-    existing = asyncio.create_task(_idle())
-    mgr._health_task = existing
-    await mgr.start()  # 269->exit: task already alive → not replaced
-    assert mgr._health_task is existing
-    existing.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await existing
-
-
-async def test_spawn_invokes_create_subprocess_exec(monkeypatch: pytest.MonkeyPatch) -> None:
-    mgr = _manager()
-    mgr._proc = None
-    created = _FakeProc(returncode=None)
-    captured: list[tuple[Any, ...]] = []
-
-    async def _fake_exec(*args: Any, **_kw: Any) -> _FakeProc:
-        captured.append(args)
-        return created
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_exec)
-    await mgr._spawn()
-    assert mgr._proc is created
-    assert captured[0][0] == "claude"
-    assert "--server" in captured[0]
+    async def test_cancellation_kills_and_reraises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        proc = _FakeProc(hang=True)
+        _patch_exec(monkeypatch, proc, {})
+        agen = _mgr().call(_opts())
+        task = asyncio.ensure_future(agen.__anext__())
+        await asyncio.sleep(0.05)  # let the call reach communicate()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert proc.killed is True
 
 
 # ---------------------------------------------------------------------------
-# _health_loop — skip-when-active vs run-check, then cancel
+# Lifecycle no-ops + Contract 1 constant
 # ---------------------------------------------------------------------------
 
 
-async def test_health_loop_skips_when_call_active_then_runs_check(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    mgr = CliSubprocessManager("claude", "1.0.0", health_interval_s=5)
-    checks: list[int] = []
+class TestLifecycle:
+    async def test_start_stop_are_noops(self) -> None:
+        mgr = _mgr()
+        await mgr.start()
+        await mgr.stop()
 
-    async def _check() -> None:
-        checks.append(1)
+    def test_disallow_constant_has_builtins(self) -> None:
+        assert {"Bash", "Read", "Write", "Edit"} <= set(ALL_CLAUDE_CODE_BUILTIN_TOOLS)
 
-    mgr._do_health_check = _check  # type: ignore[method-assign]
+    def test_disallowed_tool_error_constructs(self) -> None:
+        from meridian_provider_claude_code_oauth._subprocess import DisallowedToolError
 
-    state = {"i": 0}
-
-    async def _fake_sleep(_secs: float) -> None:
-        state["i"] += 1
-        if state["i"] == 1:
-            mgr._call_active = True  # first cycle: skip
-        elif state["i"] == 2:
-            mgr._call_active = False  # second cycle: run check
-        else:
-            raise asyncio.CancelledError()
-
-    monkeypatch.setattr(asyncio, "sleep", _fake_sleep)
-    with pytest.raises(asyncio.CancelledError):
-        await mgr._health_loop()
-    assert checks == [1]
-
-
-# ---------------------------------------------------------------------------
-# _do_health_check — pong-mismatch and empty-read both respawn
-# ---------------------------------------------------------------------------
-
-
-async def test_health_check_respawns_when_no_pong_line() -> None:
-    mgr = CliSubprocessManager("claude", "1.0.0", health_interval_s=9999, health_timeout_s=1)
-    mgr._proc = _FakeProc(lines=[])  # readline → b"" (falsy)
-    spawned: list[int] = []
-
-    async def _ks() -> None:
-        spawned.append(1)
-
-    mgr._kill_and_spawn = _ks  # type: ignore[method-assign]
-    await mgr._do_health_check()
-    assert spawned == [1]
-
-
-async def test_health_check_respawns_on_non_pong_message() -> None:
-    mgr = CliSubprocessManager("claude", "1.0.0", health_interval_s=9999, health_timeout_s=1)
-    mgr._proc = _FakeProc(lines=[_line({"type": "garbage", "id": "x"})])
-    spawned: list[int] = []
-
-    async def _ks() -> None:
-        spawned.append(1)
-
-    mgr._kill_and_spawn = _ks  # type: ignore[method-assign]
-    await mgr._do_health_check()
-    assert spawned == [1]
-
-
-async def test_read_events_timeout_raises(monkeypatch: pytest.MonkeyPatch) -> None:
-    mgr = CliSubprocessManager("claude", "1.0.0", health_interval_s=9999, call_timeout_s=0.01)
-    mgr._proc = _FakeProc(lines=[])
-
-    async def _slow_readline() -> bytes:
-        await asyncio.sleep(10)
-        return b""  # pragma: no cover
-
-    mgr._proc.stdout.readline = _slow_readline  # type: ignore[method-assign]
-    with pytest.raises(CliCallTimeoutError):
-        async for _ in mgr._read_events("cid"):
-            pass
+        err = DisallowedToolError("nope")
+        assert isinstance(err, CliSubprocessError)
+        assert "nope" in str(err)
