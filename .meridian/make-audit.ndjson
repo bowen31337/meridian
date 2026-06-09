@@ -1,0 +1,78 @@
+{"ts": "2026-06-04T10:18:48.046488+00:00", "level": "info", "event": "make.test.invoked", "detail": {"target": "test"}}
+{"ts": "2026-06-04T12:28:13.100109+00:00", "level": "info", "event": "make.codegen.invoked", "detail": {"target": "codegen"}}
+{"ts": "2026-06-04T12:28:13.194134+00:00", "level": "info", "event": "openapi.export.invoked"}
+{"ts": "2026-06-04T12:28:14.162416+00:00", "level": "info", "event": "openapi.export.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/schemas/openapi.yaml", "bytes": 87933}}
+{"ts": "2026-06-04T12:28:14.416950+00:00", "level": "info", "event": "sdk_ts.gen.invoked"}
+{"ts": "2026-06-04T12:28:14.417282+00:00", "level": "error", "event": "sdk_ts.gen.failed", "detail": {"error": "openapi-typescript not found at /Users/bowen.li/projects/meridian/node_modules/.bin/openapi-typescript \u2014 run 'pnpm install' first"}}
+{"ts": "2026-06-04T12:28:14.505897+00:00", "level": "info", "event": "sdk_py.gen.invoked"}
+{"ts": "2026-06-04T12:28:16.598298+00:00", "level": "error", "event": "sdk_py.gen.failed", "detail": {"error": "/Users/bowen.li/projects/meridian/.venv/lib/python3.14/site-packages/datamodel_code_generator/parser/base.py:3136: FutureWarning: The default formatters (black, isort) will be replaced by ruff in a future version. To prepare for this change, consider using: formatters=[Formatter.RUFF_FORMAT, Formatter.RUFF_CHECK]. Install ruff with: pip install 'datamodel-code-generator[ruff]'. To suppress this warning, specify formatters explicitly.\n  return CodeFormatter(\nTraceback (most recent call last):\n  File \"/Users/bowen.li/projects/meridian/.venv/lib/python3.14/site-packages/datamodel_code_generator/__main__.py\", line 1287, in main\n    run_generate_from_config(\n    ~~~~~~~~~~~~~~~~~~~~~~~~^\n        config=config,\n        ^^^^^^^^^^^^^^\n    ...<8 lines>...\n        default_value_overrides=default_value_overrides,\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"/Users/bowen.li/projects/meridian/.venv/lib/python3.14/site-packages/datamodel_code_generator/__main__.py\", line 874, in run_generate_from_config\n    result = generate(\n        input_=input_,\n    ...<133 lines>...\n        external_ref_mapping=config.external_ref_mapping,\n    )\n  File \"/Users/bowen.li/projects/meridian/.venv/lib/python3.14/site-packages/datamodel_code_generator/__init__.py\", line 874, in generate\n    file = path.open(\"wt\", encoding=config.encoding)\n  File \"/opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py\", line 771, in open\n    return io.open(self, mode, buffering, encoding, errors, newline)\n           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nIsADirectoryError: [Errno 21] Is a directory: '/Users/bowen.li/projects/meridian/packages/sdk-py/src/meridian_sdk_py'\n\n", "cmd": "uv run datamodel-codegen --input /Users/bowen.li/projects/meridian/packages/schemas/openapi.yaml --input-file-type openapi --output /Users/bowen.li/projects/meridian/packages/sdk-py/src/meridian_sdk_py --output-model-type pydantic_v2.BaseModel --target-python-version 3.11"}}
+{"ts": "2026-06-04T12:28:16.608385+00:00", "level": "error", "event": "make.codegen.failed", "detail": {"target": "codegen", "failed_stages": ["codegen:sdk-ts", "codegen:sdk-py"], "message": "STAGE FAILED: codegen:sdk-ts, codegen:sdk-py\n  codegen:sdk-ts: fix openapi-typescript errors shown above\n  codegen:sdk-py: fix datamodel-codegen errors shown above"}}
+{"ts": "2026-06-04T15:59:53.396532+00:00", "level": "info", "event": "openapi.export.invoked"}
+{"ts": "2026-06-04T15:59:54.418360+00:00", "level": "info", "event": "openapi.export.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/schemas/openapi.yaml", "bytes": 87933}}
+{"ts": "2026-06-04T16:00:02.199622+00:00", "level": "info", "event": "sdk_py.gen.invoked"}
+{"ts": "2026-06-04T16:00:02.877223+00:00", "level": "error", "event": "sdk_py.gen.failed", "detail": {"error": "/Users/bowen.li/projects/meridian/.venv/lib/python3.14/site-packages/datamodel_code_generator/parser/base.py:3136: FutureWarning: The default formatters (black, isort) will be replaced by ruff in a future version. To prepare for this change, consider using: formatters=[Formatter.RUFF_FORMAT, Formatter.RUFF_CHECK]. Install ruff with: pip install 'datamodel-code-generator[ruff]'. To suppress this warning, specify formatters explicitly.\n  return CodeFormatter(\nTraceback (most recent call last):\n  File \"/Users/bowen.li/projects/meridian/.venv/lib/python3.14/site-packages/datamodel_code_generator/__main__.py\", line 1287, in main\n    run_generate_from_config(\n    ~~~~~~~~~~~~~~~~~~~~~~~~^\n        config=config,\n        ^^^^^^^^^^^^^^\n    ...<8 lines>...\n        default_value_overrides=default_value_overrides,\n        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n    )\n    ^\n  File \"/Users/bowen.li/projects/meridian/.venv/lib/python3.14/site-packages/datamodel_code_generator/__main__.py\", line 874, in run_generate_from_config\n    result = generate(\n        input_=input_,\n    ...<133 lines>...\n        external_ref_mapping=config.external_ref_mapping,\n    )\n  File \"/Users/bowen.li/projects/meridian/.venv/lib/python3.14/site-packages/datamodel_code_generator/__init__.py\", line 874, in generate\n    file = path.open(\"wt\", encoding=config.encoding)\n  File \"/opt/homebrew/Cellar/python@3.14/3.14.5/Frameworks/Python.framework/Versions/3.14/lib/python3.14/pathlib/__init__.py\", line 771, in open\n    return io.open(self, mode, buffering, encoding, errors, newline)\n           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nIsADirectoryError: [Errno 21] Is a directory: '/Users/bowen.li/projects/meridian/packages/sdk-py/src/meridian_sdk_py'\n\n", "cmd": "uv run datamodel-codegen --input /Users/bowen.li/projects/meridian/packages/schemas/openapi.yaml --input-file-type openapi --output /Users/bowen.li/projects/meridian/packages/sdk-py/src/meridian_sdk_py --output-model-type pydantic_v2.BaseModel --target-python-version 3.11"}}
+{"ts": "2026-06-04T16:01:25.029453+00:00", "level": "info", "event": "sdk_py.gen.invoked"}
+{"ts": "2026-06-04T16:01:25.636211+00:00", "level": "info", "event": "sdk_py.gen.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/sdk-py/src/meridian_sdk_py", "files": 1, "bytes": 18345}}
+{"ts": "2026-06-04T16:01:52.089294+00:00", "level": "info", "event": "sdk_py.gen.invoked"}
+{"ts": "2026-06-04T16:01:52.680680+00:00", "level": "info", "event": "sdk_py.gen.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/sdk-py/src/meridian_sdk_py", "files": 1, "bytes": 18304}}
+{"ts": "2026-06-04T16:01:52.777543+00:00", "level": "info", "event": "sdk_py.gen.invoked"}
+{"ts": "2026-06-04T16:01:53.323266+00:00", "level": "info", "event": "sdk_py.gen.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/sdk-py/src/meridian_sdk_py", "files": 1, "bytes": 18304}}
+{"ts": "2026-06-04T16:02:39.717845+00:00", "level": "info", "event": "sdk_ts.gen.invoked"}
+{"ts": "2026-06-04T16:02:40.332999+00:00", "level": "info", "event": "sdk_ts.gen.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/sdk-ts/src/index.ts", "bytes": 127708}}
+{"ts": "2026-06-04T16:02:46.819427+00:00", "level": "info", "event": "make.codegen.invoked", "detail": {"target": "codegen"}}
+{"ts": "2026-06-04T16:02:46.908092+00:00", "level": "info", "event": "openapi.export.invoked"}
+{"ts": "2026-06-04T16:02:47.890816+00:00", "level": "info", "event": "openapi.export.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/schemas/openapi.yaml", "bytes": 87933}}
+{"ts": "2026-06-04T16:02:48.147079+00:00", "level": "info", "event": "sdk_ts.gen.invoked"}
+{"ts": "2026-06-04T16:02:48.607978+00:00", "level": "info", "event": "sdk_ts.gen.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/sdk-ts/src/index.ts", "bytes": 127708}}
+{"ts": "2026-06-04T16:02:48.699095+00:00", "level": "info", "event": "sdk_py.gen.invoked"}
+{"ts": "2026-06-04T16:02:49.279835+00:00", "level": "info", "event": "sdk_py.gen.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/sdk-py/src/meridian_sdk_py", "files": 1, "bytes": 18304}}
+{"ts": "2026-06-04T16:02:49.289893+00:00", "level": "info", "event": "make.codegen.ok", "detail": {"target": "codegen"}}
+{"ts": "2026-06-04T16:02:56.750644+00:00", "level": "info", "event": "make.codegen.invoked", "detail": {"target": "codegen"}}
+{"ts": "2026-06-04T16:02:56.836420+00:00", "level": "info", "event": "openapi.export.invoked"}
+{"ts": "2026-06-04T16:02:57.700654+00:00", "level": "info", "event": "openapi.export.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/schemas/openapi.yaml", "bytes": 87933}}
+{"ts": "2026-06-04T16:02:57.992066+00:00", "level": "info", "event": "sdk_ts.gen.invoked"}
+{"ts": "2026-06-04T16:02:58.444740+00:00", "level": "info", "event": "sdk_ts.gen.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/sdk-ts/src/index.ts", "bytes": 127708}}
+{"ts": "2026-06-04T16:02:58.536116+00:00", "level": "info", "event": "sdk_py.gen.invoked"}
+{"ts": "2026-06-04T16:02:59.114823+00:00", "level": "info", "event": "sdk_py.gen.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/sdk-py/src/meridian_sdk_py", "files": 1, "bytes": 18304}}
+{"ts": "2026-06-04T16:02:59.125259+00:00", "level": "info", "event": "make.codegen.ok", "detail": {"target": "codegen"}}
+{"ts": "2026-06-04T16:03:09.767475+00:00", "level": "info", "event": "make.codegen.invoked", "detail": {"target": "codegen"}}
+{"ts": "2026-06-04T16:03:09.852453+00:00", "level": "info", "event": "openapi.export.invoked"}
+{"ts": "2026-06-04T16:03:10.685751+00:00", "level": "info", "event": "openapi.export.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/schemas/openapi.yaml", "bytes": 87933}}
+{"ts": "2026-06-04T16:03:10.928056+00:00", "level": "info", "event": "sdk_ts.gen.invoked"}
+{"ts": "2026-06-04T16:03:11.368348+00:00", "level": "info", "event": "sdk_ts.gen.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/sdk-ts/src/index.ts", "bytes": 127708}}
+{"ts": "2026-06-04T16:03:11.457710+00:00", "level": "info", "event": "sdk_py.gen.invoked"}
+{"ts": "2026-06-04T16:03:12.021517+00:00", "level": "info", "event": "sdk_py.gen.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/sdk-py/src/meridian_sdk_py", "files": 1, "bytes": 18304}}
+{"ts": "2026-06-04T16:03:12.031815+00:00", "level": "info", "event": "make.codegen.ok", "detail": {"target": "codegen"}}
+{"ts": "2026-06-04T19:16:13.212505+00:00", "level": "info", "event": "make.ci.invoked", "detail": {"target": "ci"}}
+{"ts": "2026-06-04T19:16:13.302701+00:00", "level": "info", "event": "openapi.export.invoked"}
+{"ts": "2026-06-04T19:16:14.420481+00:00", "level": "info", "event": "openapi.export.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/schemas/openapi.yaml", "bytes": 87933}}
+{"ts": "2026-06-04T19:16:14.658724+00:00", "level": "info", "event": "sdk_ts.gen.invoked"}
+{"ts": "2026-06-04T19:16:15.447599+00:00", "level": "info", "event": "sdk_ts.gen.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/sdk-ts/src/index.ts", "bytes": 127708}}
+{"ts": "2026-06-04T19:16:15.536246+00:00", "level": "info", "event": "sdk_py.gen.invoked"}
+{"ts": "2026-06-04T19:16:16.148477+00:00", "level": "info", "event": "sdk_py.gen.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/sdk-py/src/meridian_sdk_py", "files": 1, "bytes": 18304}}
+{"ts": "2026-06-04T19:17:03.263373+00:00", "level": "info", "event": "make.ci.invoked", "detail": {"target": "ci"}}
+{"ts": "2026-06-04T19:17:03.351867+00:00", "level": "info", "event": "openapi.export.invoked"}
+{"ts": "2026-06-04T19:17:04.350227+00:00", "level": "info", "event": "openapi.export.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/schemas/openapi.yaml", "bytes": 87933}}
+{"ts": "2026-06-04T19:17:04.633073+00:00", "level": "info", "event": "sdk_ts.gen.invoked"}
+{"ts": "2026-06-04T19:17:05.119917+00:00", "level": "info", "event": "sdk_ts.gen.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/sdk-ts/src/index.ts", "bytes": 127708}}
+{"ts": "2026-06-04T19:17:05.209750+00:00", "level": "info", "event": "sdk_py.gen.invoked"}
+{"ts": "2026-06-04T19:17:05.777964+00:00", "level": "info", "event": "sdk_py.gen.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/sdk-py/src/meridian_sdk_py", "files": 1, "bytes": 18304}}
+{"ts": "2026-06-04T19:42:26.438394+00:00", "level": "error", "event": "make.ci.failed", "detail": {"target": "ci", "failed_stages": ["lint:ruff-format"], "message": "STAGE FAILED: lint:ruff-format\n  lint:ruff-format: run 'uv run ruff format .' to auto-fix"}}
+{"ts": "2026-06-04T19:59:08.591245+00:00", "level": "info", "event": "sdk_py.gen.invoked"}
+{"ts": "2026-06-04T19:59:09.280557+00:00", "level": "info", "event": "sdk_py.gen.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/sdk-py/src/meridian_sdk_py", "files": 1, "bytes": 18276}}
+{"ts": "2026-06-04T19:59:16.714062+00:00", "level": "info", "event": "make.ci.invoked", "detail": {"target": "ci"}}
+{"ts": "2026-06-04T19:59:16.802932+00:00", "level": "info", "event": "openapi.export.invoked"}
+{"ts": "2026-06-04T19:59:17.833936+00:00", "level": "info", "event": "openapi.export.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/schemas/openapi.yaml", "bytes": 87933}}
+{"ts": "2026-06-04T19:59:18.112564+00:00", "level": "info", "event": "sdk_ts.gen.invoked"}
+{"ts": "2026-06-04T19:59:18.723751+00:00", "level": "info", "event": "sdk_ts.gen.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/sdk-ts/src/index.ts", "bytes": 127708}}
+{"ts": "2026-06-04T19:59:18.813022+00:00", "level": "info", "event": "sdk_py.gen.invoked"}
+{"ts": "2026-06-04T19:59:19.453209+00:00", "level": "info", "event": "sdk_py.gen.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/sdk-py/src/meridian_sdk_py", "files": 1, "bytes": 18276}}
+{"ts": "2026-06-04T20:34:55.920963+00:00", "level": "info", "event": "make.ci.ok", "detail": {"target": "ci"}}
+{"ts": "2026-06-04T20:36:44.169977+00:00", "level": "info", "event": "make.ci.invoked", "detail": {"target": "ci"}}
+{"ts": "2026-06-04T20:36:44.266131+00:00", "level": "info", "event": "openapi.export.invoked"}
+{"ts": "2026-06-04T20:36:45.235765+00:00", "level": "info", "event": "openapi.export.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/schemas/openapi.yaml", "bytes": 87933}}
+{"ts": "2026-06-04T20:36:45.491671+00:00", "level": "info", "event": "sdk_ts.gen.invoked"}
+{"ts": "2026-06-04T20:36:46.110043+00:00", "level": "info", "event": "sdk_ts.gen.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/sdk-ts/src/index.ts", "bytes": 127708}}
+{"ts": "2026-06-04T20:36:46.207573+00:00", "level": "info", "event": "sdk_py.gen.invoked"}
+{"ts": "2026-06-04T20:36:46.848971+00:00", "level": "info", "event": "sdk_py.gen.ok", "detail": {"dest": "/Users/bowen.li/projects/meridian/packages/sdk-py/src/meridian_sdk_py", "files": 1, "bytes": 18276}}
+{"ts": "2026-06-04T21:43:01.294095+00:00", "level": "info", "event": "make.ci.ok", "detail": {"target": "ci"}}
