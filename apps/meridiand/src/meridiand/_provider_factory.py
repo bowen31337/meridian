@@ -28,6 +28,7 @@ from meridian_provider_anthropic_apikey import AnthropicApiKeyProvider
 from meridian_provider_claude_code_oauth import SystemOAuthProvider
 from meridian_sdk_provider import (
     FallbackRule,
+    LoadBalancedProvider,
     ModelProvider,
     ModelRouter,
     ModelRoutingPolicy,
@@ -112,6 +113,22 @@ def _resolve_auth(cfg: ProviderConfig, resolver: SecretRefResolver | None) -> st
     if cfg.auth.startswith("secret_ref://") and resolver is not None:
         return resolver.resolve(cfg.auth)
     return cfg.auth  # plaintext (already warned in validate_config)
+
+
+def _build_pool(cfg: ProviderConfig, resolver: SecretRefResolver | None) -> ModelProvider:
+    """Build a round-robin LoadBalancedProvider — one member per auth_pool token.
+
+    Each member shares the pool's kind/base_url but authenticates with its own
+    resolved secret, so requests are spread across the keys and a throttled key
+    fails over to the next within a single call.
+    """
+    members: list[ModelProvider] = []
+    for i, ref in enumerate(cfg.auth_pool or []):
+        member_cfg = cfg.model_copy(
+            update={"name": f"{cfg.name}#{i}", "auth": ref, "auth_pool": None}
+        )
+        members.append(_build_provider(member_cfg, _resolve_auth(member_cfg, resolver)))
+    return LoadBalancedProvider(name=cfg.name, kind=cfg.kind, members=members)
 
 
 def _build_provider(cfg: ProviderConfig, resolved_auth: str | None) -> ModelProvider:
@@ -210,8 +227,10 @@ def build_provider_registry(
             providers: dict[str, ModelProvider] = {}
             for cfg in config.providers:
                 try:
-                    resolved_auth = _resolve_auth(cfg, secret_resolver)
-                    provider = _build_provider(cfg, resolved_auth)
+                    if cfg.auth_pool:
+                        provider = _build_pool(cfg, secret_resolver)
+                    else:
+                        provider = _build_provider(cfg, _resolve_auth(cfg, secret_resolver))
                     providers[cfg.name] = provider
                 except ProviderFactoryError:
                     raise

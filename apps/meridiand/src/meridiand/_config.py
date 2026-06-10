@@ -41,6 +41,25 @@ _VALID_PROVIDER_KINDS = {
 }
 _SECRET_REF_VAULT_PREFIX = "secret_ref://vault/"
 
+# Provider kinds that authenticate with a resolvable API key, and so can be
+# pooled (auth_pool) across multiple tokens.
+_API_KEY_PROVIDER_KINDS = {"anthropic", "openai", "openrouter"}
+
+
+def _is_malformed_secret_ref(value: str) -> bool:
+    """True when *value* is a secret_ref:// URI that is NOT well-formed.
+
+    Plaintext values (no secret_ref:// scheme) return False — they're warned
+    about elsewhere, not rejected here.
+    """
+    if not value.startswith("secret_ref://"):
+        return False
+    if not value.startswith(_SECRET_REF_VAULT_PREFIX):
+        return True
+    remainder = value[len(_SECRET_REF_VAULT_PREFIX) :]
+    slash_pos = remainder.find("/")
+    return slash_pos <= 0 or slash_pos == len(remainder) - 1
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -238,6 +257,10 @@ class ProviderConfig(BaseModel):
     mode: str | None = None
     base_url: str | None = None
     auth: str | None = None
+    # When set, the provider becomes a round-robin load-balancing pool over these
+    # secret_refs (one member per token), sharing name/kind/base_url. Mutually
+    # exclusive with `auth`.
+    auth_pool: list[str] | None = None
 
 
 class DaemonConfig(BaseModel):
@@ -534,18 +557,25 @@ def validate_config(config: MeridianConfig, audit_log: AuditLog | None = None) -
                     f"{prefix}.kind: {provider.kind!r} is not valid; "
                     f"expected one of {sorted(_VALID_PROVIDER_KINDS)}"
                 )
-            if provider.auth is not None and provider.auth.startswith("secret_ref://"):
-                if not provider.auth.startswith(_SECRET_REF_VAULT_PREFIX):
+            if provider.auth is not None and provider.auth_pool is not None:
+                errors.append(f"{prefix}: set either 'auth' or 'auth_pool', not both")
+            if provider.auth is not None and _is_malformed_secret_ref(provider.auth):
+                errors.append(
+                    f"{prefix}.auth: invalid secret_ref format; "
+                    f"expected secret_ref://vault/{{vault_id}}/{{key}}"
+                )
+            if provider.auth_pool is not None:
+                if not provider.auth_pool:
+                    errors.append(f"{prefix}.auth_pool must not be empty")
+                if provider.kind not in _API_KEY_PROVIDER_KINDS:
                     errors.append(
-                        f"{prefix}.auth: invalid secret_ref format; "
-                        f"expected secret_ref://vault/{{vault_id}}/{{key}}"
+                        f"{prefix}.auth_pool: not supported for kind {provider.kind!r}; "
+                        f"pooling requires one of {sorted(_API_KEY_PROVIDER_KINDS)}"
                     )
-                else:
-                    remainder = provider.auth[len(_SECRET_REF_VAULT_PREFIX) :]
-                    slash_pos = remainder.find("/")
-                    if slash_pos <= 0 or slash_pos == len(remainder) - 1:
+                for j, ref in enumerate(provider.auth_pool):
+                    if _is_malformed_secret_ref(ref):
                         errors.append(
-                            f"{prefix}.auth: invalid secret_ref format; "
+                            f"{prefix}.auth_pool[{j}]: invalid secret_ref format; "
                             f"expected secret_ref://vault/{{vault_id}}/{{key}}"
                         )
 

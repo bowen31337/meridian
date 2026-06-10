@@ -586,6 +586,59 @@ class TestProviderFactory:
         registry = build_provider_registry(config)
         assert registry is not None
 
+    def test_build_provider_registry_auth_pool_builds_load_balancer(self) -> None:
+        from meridian_sdk_provider import LoadBalancedProvider
+
+        from meridiand._config import MeridianConfig
+        from meridiand._provider_factory import build_provider_registry
+
+        class _Resolver:
+            def resolve(self, ref: str) -> str:
+                return f"resolved:{ref.rsplit('/', 1)[-1]}"
+
+        config = MeridianConfig.model_validate(
+            {
+                "version": 2,
+                "storage_root": "/tmp/m",
+                "providers": [
+                    {
+                        "name": "zai",
+                        "kind": "anthropic",
+                        "base_url": "https://api.z.ai/api/anthropic",
+                        "auth_pool": [
+                            "secret_ref://vault/default/k1",
+                            "secret_ref://vault/default/k2",
+                        ],
+                    }
+                ],
+            }
+        )
+        registry = build_provider_registry(config, secret_resolver=_Resolver())  # type: ignore[arg-type]
+        slot = registry.get_slot("zai")
+        assert slot is not None
+        pool = slot.provider
+        assert isinstance(pool, LoadBalancedProvider)
+        assert pool.name == "zai"
+        assert len(pool._members) == 2  # one member per token
+
+    def test_build_pool_members_resolve_distinct_tokens(self) -> None:
+        from meridiand._config import ProviderConfig
+        from meridiand._provider_factory import _build_pool
+
+        class _Resolver:
+            def resolve(self, ref: str) -> str:
+                return f"key-{ref.rsplit('/', 1)[-1]}"
+
+        cfg = ProviderConfig(
+            name="zai",
+            kind="anthropic",
+            base_url="https://api.z.ai/api/anthropic",
+            auth_pool=["secret_ref://vault/v/a", "secret_ref://vault/v/b"],
+        )
+        pool = _build_pool(cfg, _Resolver())  # type: ignore[arg-type]
+        assert pool.name == "zai" and pool.kind == "anthropic"
+        assert [m.name for m in pool._members] == ["zai#0", "zai#1"]
+
     def test_build_provider_registry_typed_error_reraise(self) -> None:
         from meridiand._config import MeridianConfig
         from meridiand._provider_factory import ProviderFactoryError, build_provider_registry

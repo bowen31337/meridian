@@ -32,6 +32,7 @@ from .fake import FakeModelAdapter, write_model_fixture
 from .ollama import OllamaProvider
 from .openai import OpenAIProvider
 from .openrouter import OpenRouterProvider
+from .pool import LoadBalancedProvider
 from .protocol import ModelCapabilities, ModelEntry, ModelProvider, ProviderCapabilities
 from .registry import ProviderRegistry
 from .router import (
@@ -122,6 +123,7 @@ __all__ = [
     "OllamaProvider",
     "OpenAIProvider",
     "OpenRouterProvider",
+    "LoadBalancedProvider",
     # Telemetry helpers
     "get_tracer",
     "record_cache_metrics",

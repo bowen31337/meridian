@@ -891,6 +891,74 @@ class TestValidateConfigProviders:
         with pytest.raises(ConfigValidateError):
             validate_config(config)
 
+    def test_auth_pool_valid_passes(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[
+                ProviderConfig(
+                    name="zai",
+                    kind="anthropic",
+                    base_url="https://api.z.ai/api/anthropic",
+                    auth_pool=[
+                        "secret_ref://vault/default/k1",
+                        "secret_ref://vault/default/k2",
+                    ],
+                )
+            ],
+        )
+        validate_config(config)
+
+    def test_auth_pool_empty_raises(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[ProviderConfig(name="zai", kind="anthropic", auth_pool=[])],
+        )
+        with pytest.raises(ConfigValidateError):
+            validate_config(config)
+
+    def test_auth_pool_with_auth_is_mutually_exclusive(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[
+                ProviderConfig(
+                    name="zai",
+                    kind="anthropic",
+                    auth="secret_ref://vault/default/k1",
+                    auth_pool=["secret_ref://vault/default/k2"],
+                )
+            ],
+        )
+        with pytest.raises(ConfigValidateError):
+            validate_config(config)
+
+    def test_auth_pool_unsupported_kind_raises(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[
+                ProviderConfig(
+                    name="local",
+                    kind="ollama",
+                    auth_pool=["secret_ref://vault/default/k1"],
+                )
+            ],
+        )
+        with pytest.raises(ConfigValidateError):
+            validate_config(config)
+
+    def test_auth_pool_malformed_ref_raises(self, tmp_path: Path) -> None:
+        config = MeridianConfig(
+            storage_root=tmp_path,
+            providers=[
+                ProviderConfig(
+                    name="zai",
+                    kind="anthropic",
+                    auth_pool=["secret_ref://vault/default/"],  # missing key
+                )
+            ],
+        )
+        with pytest.raises(ConfigValidateError):
+            validate_config(config)
+
     def test_multiple_valid_providers_pass(self, tmp_path: Path) -> None:
         config = MeridianConfig(
             storage_root=tmp_path,
