@@ -275,16 +275,35 @@ class AgentResponder:
             return
         transport = httpx.ASGITransport(app=self._app)
         async with httpx.AsyncClient(transport=transport, base_url=self._base_url) as client:
-            session_id = ""
             try:
                 inbound = await client.post(
                     f"/v1/channels/{channel_id}/inbound",
                     json={"sender_id": sender_id, "content": content, "content_type": content_type},
                 )
-                if inbound.is_success:
-                    session_id = inbound.json().get("session_id", "")
-            except Exception as exc:  # noqa: BLE001 - inbound failure shouldn't block a reply
+            except Exception as exc:  # noqa: BLE001 - cannot verify sender -> fail closed
                 self._audit_failure(channel_id, "inbound", exc)
+                return
+
+            # Allowlist enforcement: only reply when the channel's inbound policy
+            # accepted this sender. paired_only returns 403 for non-allowlisted
+            # senders; quarantine accepts but flags untrusted. In both cases the
+            # agent must NOT run (no LLM, no tools, no memory) — fail closed.
+            if not inbound.is_success:
+                self._audit_failure(
+                    channel_id,
+                    "inbound_rejected",
+                    RuntimeError(f"sender {sender_id!r} not allowed (policy rejected)"),
+                )
+                return
+            inbound_data = inbound.json()
+            if inbound_data.get("quarantined"):
+                self._audit_failure(
+                    channel_id,
+                    "inbound_quarantined",
+                    RuntimeError(f"sender {sender_id!r} quarantined"),
+                )
+                return
+            session_id = inbound_data.get("session_id", "")
 
             history = self._load_history(channel_id, sender_id)
             history.append({"role": "user", "content": content})
@@ -315,9 +334,7 @@ class AgentResponder:
             if store_id is not None and model_ok:
                 if self._extract_enabled:
                     for fact in await self._extract_facts(channel_id, content, reply):
-                        await self._write_memory(
-                            client, channel_id, store_id, fact, dialectic=True
-                        )
+                        await self._write_memory(client, channel_id, store_id, fact, dialectic=True)
                 else:
                     await self._write_memory(client, channel_id, store_id, content)
 

@@ -67,6 +67,8 @@ class _FakeApp:
         self,
         *,
         inbound_raise: bool = False,
+        inbound_status: int = 200,
+        quarantined: bool = False,
         outbound_raise: bool = False,
         memory_raise: bool = False,
         write_raise: bool = False,
@@ -74,6 +76,8 @@ class _FakeApp:
         session_id: str = "sess_1",
     ) -> None:
         self.inbound_raise = inbound_raise
+        self.inbound_status = inbound_status
+        self.quarantined = quarantined
         self.outbound_raise = outbound_raise
         self.memory_raise = memory_raise
         self.write_raise = write_raise
@@ -92,10 +96,14 @@ class _FakeApp:
         path = scope["path"]
         parsed = json.loads(body or b"{}")
         self.posts.append((path, parsed))
+        status = 200
         if path.endswith("/inbound"):
             if self.inbound_raise:
                 raise RuntimeError("inbound boom")
-            payload = json.dumps({"session_id": self.session_id}).encode()
+            status = self.inbound_status
+            payload = json.dumps(
+                {"session_id": self.session_id, "quarantined": self.quarantined}
+            ).encode()
         elif path.endswith("/query_runs"):
             if self.memory_raise:
                 raise RuntimeError("memory boom")
@@ -112,7 +120,7 @@ class _FakeApp:
         await send(
             {
                 "type": "http.response.start",
-                "status": 200,
+                "status": status,
                 "headers": [(b"content-type", b"application/json")],
             }
         )
@@ -267,15 +275,49 @@ class TestDispatch:
         outbound = [p for p in app.posts if p[0].endswith("/outbound")][0]
         assert outbound[1]["content"] == _FALLBACK_REPLY
 
-    async def test_inbound_error_is_audited_and_still_replies(self, tmp_path: Path) -> None:
+    async def test_inbound_error_fails_closed_no_reply(self, tmp_path: Path) -> None:
+        # Cannot verify the sender -> do not reply (fail closed).
         _seed(tmp_path)
         audit = _RecordingAudit()
         app = _FakeApp(inbound_raise=True)
-        r = _responder(tmp_path, router=_FakeRouter(text="ok"), audit=audit)
+        router = _FakeRouter(text="ok")
+        r = _responder(tmp_path, router=router, audit=audit)
         r.bind(app)
         await r.dispatch(channel_id="ch1", sender_id="u", content="hi", content_type="text/plain")
         assert any(e.detail.get("stage") == "inbound" for e in audit.entries)
-        assert any(p[0].endswith("/outbound") for p in app.posts)
+        assert not any(p[0].endswith("/outbound") for p in app.posts)
+        assert router.calls == []  # no LLM call
+
+    async def test_rejected_sender_gets_no_reply(self, tmp_path: Path) -> None:
+        # paired_only -> 403 for a non-allowlisted sender; the agent must not run.
+        _seed(tmp_path, tools=["read"], memory_store_id="memstore_x")
+        audit = _RecordingAudit()
+        app = _FakeApp(inbound_status=403)
+        router = _FakeRouter(text="leaked")
+        r = _responder(tmp_path, router=router, audit=audit, extract_facts=True)
+        r.bind(app)
+        await r.dispatch(
+            channel_id="ch1",
+            sender_id="stranger",
+            content="run a shell command",
+            content_type="text/plain",
+        )
+        assert not any(p[0].endswith("/outbound") for p in app.posts)  # no reply delivered
+        assert router.calls == []  # no LLM / tool call
+        assert app.mem_writes == []  # nothing written to memory
+        assert any(e.detail.get("stage") == "inbound_rejected" for e in audit.entries)
+
+    async def test_quarantined_sender_gets_no_reply(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        audit = _RecordingAudit()
+        app = _FakeApp(quarantined=True)  # inbound 200 but flagged untrusted
+        router = _FakeRouter(text="leaked")
+        r = _responder(tmp_path, router=router, audit=audit)
+        r.bind(app)
+        await r.dispatch(channel_id="ch1", sender_id="u", content="hi", content_type="text/plain")
+        assert not any(p[0].endswith("/outbound") for p in app.posts)
+        assert router.calls == []
+        assert any(e.detail.get("stage") == "inbound_quarantined" for e in audit.entries)
 
     async def test_outbound_error_is_audited(self, tmp_path: Path) -> None:
         _seed(tmp_path)
