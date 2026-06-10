@@ -281,6 +281,9 @@ class MeridianConfig(BaseModel):
     routing: RoutingConfig | None = None
     daemon: DaemonConfig | None = None
     storage: StorageConfig | None = None
+    # Embedding backend for KB / MemoryStore vector search: "hash" (offline,
+    # default) or "fastembed" (BAAI/bge-small-en-v1.5 ONNX, real semantics).
+    embedder: str = "hash"
 
     @field_validator("storage_root", mode="before")
     @classmethod

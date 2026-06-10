@@ -5,6 +5,7 @@ import asyncio
 import contextlib
 from datetime import UTC, datetime
 import logging
+import os
 from pathlib import Path
 import sys
 
@@ -66,6 +67,10 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         emit_early_error("meridiand", f"config error: {exc}")
         return 1
+
+    # Select the embedding backend (KB / MemoryStore vector search) before any
+    # store is opened; _kb reads MERIDIAN_EMBEDDER lazily on first use.
+    os.environ.setdefault("MERIDIAN_EMBEDDER", config.embedder)
 
     try:
         services = init_services(config)

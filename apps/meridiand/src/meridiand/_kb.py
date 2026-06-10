@@ -148,6 +148,57 @@ def _hash_embed(text: str) -> bytes:
 
 
 # ---------------------------------------------------------------------------
+# Pluggable embedder: "hash" (default, offline, 128-dim) or "fastembed"
+# (BAAI/bge-small-en-v1.5 ONNX, 384-dim, real semantics). Selected via the
+# MERIDIAN_EMBEDDER env var (set from config at daemon start). Read lazily so the
+# env is in place before the first store access; the vec0 dimension follows it.
+# ---------------------------------------------------------------------------
+
+_FASTEMBED_DIM = 384
+_DEFAULT_FASTEMBED_MODEL = "BAAI/bge-small-en-v1.5"
+
+_embedder_kind_cache: str | None = None
+_fastembed_model: Any = None
+
+
+def _embedder_kind() -> str:
+    global _embedder_kind_cache
+    if _embedder_kind_cache is None:
+        _embedder_kind_cache = os.environ.get("MERIDIAN_EMBEDDER", "hash").strip().lower()
+    return _embedder_kind_cache
+
+
+def _embed_dim() -> int:
+    return _FASTEMBED_DIM if _embedder_kind() == "fastembed" else _EMBED_DIM
+
+
+def _get_fastembed() -> Any:
+    global _fastembed_model
+    if _fastembed_model is None:
+        from fastembed import TextEmbedding  # lazy: heavy ONNX dependency
+
+        model_name = os.environ.get("MERIDIAN_EMBEDDER_MODEL", _DEFAULT_FASTEMBED_MODEL)
+        _fastembed_model = TextEmbedding(model_name)
+    return _fastembed_model
+
+
+def _embed_document(text: str) -> bytes:
+    """Embed a stored document/memory."""
+    if _embedder_kind() == "fastembed":
+        vec = next(iter(_get_fastembed().embed([text])))
+        return sqlite_vec.serialize_float32([float(x) for x in vec])
+    return _hash_embed(text)
+
+
+def _embed_query(text: str) -> bytes:
+    """Embed a search query (uses the model's query-side encoding when available)."""
+    if _embedder_kind() == "fastembed":
+        vec = next(iter(_get_fastembed().query_embed([text])))
+        return sqlite_vec.serialize_float32([float(x) for x in vec])
+    return _hash_embed(text)
+
+
+# ---------------------------------------------------------------------------
 # RRF fusion
 # ---------------------------------------------------------------------------
 
@@ -202,9 +253,12 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
 )
 """
 
-_CREATE_VEC = (
-    f"CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0(embedding FLOAT[{_EMBED_DIM}])"
-)
+
+def _create_vec_sql() -> str:
+    return (
+        f"CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0(embedding FLOAT[{_embed_dim()}])"
+    )
+
 
 _INSERT_SQL = f"INSERT INTO chunks_fts ({', '.join(_COLS)}) VALUES ({', '.join('?' * len(_COLS))})"
 
@@ -221,7 +275,7 @@ def _open_conn(db_path: Path) -> sqlean.Connection:
     sqlite_vec.load(conn)
     conn.enable_load_extension(False)
     conn.execute(_CREATE_FTS5)
-    conn.execute(_CREATE_VEC)
+    conn.execute(_create_vec_sql())
     conn.commit()
     return conn
 
@@ -274,7 +328,7 @@ class KbStore:
                 rowid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
                 conn.execute(
                     "INSERT INTO chunks_vec(rowid, embedding) VALUES (?, ?)",
-                    [rowid, _hash_embed(c.content)],
+                    [rowid, _embed_document(c.content)],
                 )
 
     def has_key(self, file_path: str) -> bool:
@@ -327,7 +381,7 @@ class KbStore:
     def vector_search(self, query: str, scope: str | None, limit: int) -> list[dict[str, Any]]:
         """KNN search via sqlite-vec, filtered by scope."""
         conn = self._get_conn()
-        q_embed = _hash_embed(query)
+        q_embed = _embed_query(query)
         candidates_per_scope = limit * 10
 
         # Retrieve top-K candidates from the vec0 table, then join to get scope + metadata.
