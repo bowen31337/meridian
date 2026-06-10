@@ -154,11 +154,11 @@ def _hash_embed(text: str) -> bytes:
 # env is in place before the first store access; the vec0 dimension follows it.
 # ---------------------------------------------------------------------------
 
-_FASTEMBED_DIM = 384
 _DEFAULT_FASTEMBED_MODEL = "BAAI/bge-small-en-v1.5"
 
 _embedder_kind_cache: str | None = None
 _fastembed_model: Any = None
+_fastembed_dim_cache: int | None = None
 
 
 def _embedder_kind() -> str:
@@ -169,7 +169,15 @@ def _embedder_kind() -> str:
 
 
 def _embed_dim() -> int:
-    return _FASTEMBED_DIM if _embedder_kind() == "fastembed" else _EMBED_DIM
+    """Active vector dimension. For fastembed it is derived from the loaded model
+    (a one-off probe), so any model — bge-small, bge-large, mxbai — just works."""
+    global _fastembed_dim_cache
+    if _embedder_kind() != "fastembed":
+        return _EMBED_DIM
+    if _fastembed_dim_cache is None:
+        probe = next(iter(_get_fastembed().embed(["dimension probe"])))
+        _fastembed_dim_cache = len(list(probe))
+    return _fastembed_dim_cache
 
 
 def _get_fastembed() -> Any:

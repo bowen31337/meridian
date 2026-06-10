@@ -282,8 +282,10 @@ class MeridianConfig(BaseModel):
     daemon: DaemonConfig | None = None
     storage: StorageConfig | None = None
     # Embedding backend for KB / MemoryStore vector search: "hash" (offline,
-    # default) or "fastembed" (BAAI/bge-small-en-v1.5 ONNX, real semantics).
+    # default) or "fastembed" (ONNX, real semantics). embedder_model overrides
+    # the fastembed model (e.g. "mixedbread-ai/mxbai-embed-large-v1").
     embedder: str = "hash"
+    embedder_model: str | None = None
 
     @field_validator("storage_root", mode="before")
     @classmethod

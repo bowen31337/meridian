@@ -71,6 +71,8 @@ def main(argv: list[str] | None = None) -> int:
     # Select the embedding backend (KB / MemoryStore vector search) before any
     # store is opened; _kb reads MERIDIAN_EMBEDDER lazily on first use.
     os.environ.setdefault("MERIDIAN_EMBEDDER", config.embedder)
+    if config.embedder_model:
+        os.environ.setdefault("MERIDIAN_EMBEDDER_MODEL", config.embedder_model)
 
     try:
         services = init_services(config)
