@@ -218,7 +218,8 @@ class AgentResponder:
             system=system,
             temperature=None,
             tools=[],
-            metadata={},
+            # Tag so a routing rule can send extraction to a cheap model.
+            metadata={"memory_op": "extract"},
             stream=False,
         )
         parts: list[str] = []
