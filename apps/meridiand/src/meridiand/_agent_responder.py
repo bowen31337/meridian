@@ -30,6 +30,10 @@ _DEFAULT_SYSTEM_PROMPT = (
 )
 _FALLBACK_REPLY = "Sorry — I couldn't reach the model just now. Please try again."
 
+# Conversation memory: keep the last N turns (user+assistant) per sender so the
+# agent has continuity within a chat. Trimmed to bound token usage.
+_MAX_HISTORY_MESSAGES = 20
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -109,15 +113,45 @@ class AgentResponder:
         except Exception:  # noqa: BLE001 - no tool context -> plain text reply
             return None
 
+    def _history_path(self, channel_id: str, sender_id: str) -> Path:
+        assert self._storage_root is not None
+        return self._storage_root / "conversations" / channel_id / f"{sender_id}.json"
+
+    def _load_history(self, channel_id: str, sender_id: str) -> list[dict[str, str]]:
+        """Load this sender's recent conversation turns (oldest first)."""
+        if self._storage_root is None:
+            return []
+        try:
+            path = self._history_path(channel_id, sender_id)
+            if path.exists():
+                data = json.loads(path.read_text())
+                return data if isinstance(data, list) else []
+        except Exception:  # noqa: BLE001 - corrupt/missing history -> start fresh
+            return []
+        return []
+
+    def _save_history(self, channel_id: str, sender_id: str, history: list[dict[str, str]]) -> None:
+        if self._storage_root is None:
+            return
+        try:
+            path = self._history_path(channel_id, sender_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(history[-_MAX_HISTORY_MESSAGES:]))
+        except Exception as exc:  # noqa: BLE001 - persistence failure is non-fatal
+            self._audit_failure(channel_id, "memory", exc)
+
     async def _generate_reply(
-        self, content: str, system_prompt: str, tool_context: dict[str, Any] | None
+        self,
+        messages: list[dict[str, str]],
+        system_prompt: str,
+        tool_context: dict[str, Any] | None,
     ) -> str:
         metadata: dict[str, Any] = {}
         if tool_context is not None:
             metadata["meridian_tools"] = tool_context
         opts = ModelCallOpts(
             model=self._model,
-            messages=[{"role": "user", "content": content}],
+            messages=messages,
             max_tokens=self._max_tokens,
             system=system_prompt,
             temperature=None,
@@ -149,17 +183,28 @@ class AgentResponder:
             except Exception as exc:  # noqa: BLE001 - inbound failure shouldn't block a reply
                 self._audit_failure(channel_id, "inbound", exc)
 
+            history = self._load_history(channel_id, sender_id)
+            history.append({"role": "user", "content": content})
+            model_ok = True
             try:
                 reply = await self._generate_reply(
-                    content,
+                    history,
                     self._load_persona(channel_id),
                     self._load_agent_context(channel_id),
                 )
             except Exception as exc:  # noqa: BLE001 - model failure -> fallback reply
                 self._audit_failure(channel_id, "model", exc)
                 reply = _FALLBACK_REPLY
+                model_ok = False
             if not reply:
                 reply = _FALLBACK_REPLY
+                model_ok = False
+
+            # Persist the user turn always; the assistant turn only on a real reply,
+            # so a transient failure can be retried next turn with context intact.
+            if model_ok:
+                history.append({"role": "assistant", "content": reply})
+            self._save_history(channel_id, sender_id, history)
 
             try:
                 await client.post(

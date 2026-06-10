@@ -245,3 +245,86 @@ class TestDispatch:
         r.bind(app)
         await r.dispatch(channel_id="ch1", sender_id="u", content="hi", content_type="text/plain")
         assert any(e.detail.get("stage") == "outbound" for e in audit.entries)
+
+
+# ---------------------------------------------------------------------------
+# Conversation memory
+# ---------------------------------------------------------------------------
+
+
+class TestConversationMemory:
+    def _history(self, root: Path, channel_id: str = "ch1", sender_id: str = "u") -> list[Any]:
+        path = root / "conversations" / channel_id / f"{sender_id}.json"
+        return json.loads(path.read_text()) if path.exists() else []
+
+    async def test_persists_user_and_assistant_turns(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        r = _responder(tmp_path, router=_FakeRouter(text="hello"))
+        r.bind(_FakeApp())
+        await r.dispatch(channel_id="ch1", sender_id="u", content="hi", content_type="text/plain")
+        hist = self._history(tmp_path)
+        assert [m["role"] for m in hist] == ["user", "assistant"]
+        assert hist[0]["content"] == "hi"
+        assert hist[1]["content"] == "hello"
+
+    async def test_prior_turns_passed_to_next_call(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        router = _FakeRouter(text="ack")
+        r = _responder(tmp_path, router=router)
+        r.bind(_FakeApp())
+        await r.dispatch(
+            channel_id="ch1", sender_id="u", content="first", content_type="text/plain"
+        )
+        await r.dispatch(
+            channel_id="ch1", sender_id="u", content="second", content_type="text/plain"
+        )
+        msgs = router.last_opts.messages  # ModelCallOpts coerces dicts to Message objects
+        assert [m.role for m in msgs] == ["user", "assistant", "user"]
+        assert msgs[0].content == "first"
+        assert msgs[2].content == "second"
+
+    async def test_history_trimmed(self, tmp_path: Path) -> None:
+        from meridiand._agent_responder import _MAX_HISTORY_MESSAGES
+
+        _seed(tmp_path)
+        r = _responder(tmp_path, router=_FakeRouter(text="x"))
+        r.bind(_FakeApp())
+        for i in range(_MAX_HISTORY_MESSAGES):  # each dispatch adds 2 messages
+            await r.dispatch(
+                channel_id="ch1", sender_id="u", content=f"m{i}", content_type="text/plain"
+            )
+        assert len(self._history(tmp_path)) == _MAX_HISTORY_MESSAGES
+
+    async def test_model_failure_keeps_user_turn_only(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        r = _responder(tmp_path, router=_FakeRouter(raise_exc=RuntimeError("down")))
+        r.bind(_FakeApp())
+        await r.dispatch(channel_id="ch1", sender_id="u", content="hi", content_type="text/plain")
+        hist = self._history(tmp_path)
+        assert [m["role"] for m in hist] == ["user"]
+
+    async def test_corrupt_history_starts_fresh(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        conv = tmp_path / "conversations" / "ch1"
+        conv.mkdir(parents=True)
+        (conv / "u.json").write_text("{ not a list")
+        r = _responder(tmp_path, router=_FakeRouter(text="ok"))
+        r.bind(_FakeApp())
+        await r.dispatch(channel_id="ch1", sender_id="u", content="hi", content_type="text/plain")
+        assert [m["role"] for m in self._history(tmp_path)] == ["user", "assistant"]
+
+    def test_no_history_without_storage(self) -> None:
+        r = _responder(None)
+        assert r._load_history("ch1", "u") == []
+        r._save_history("ch1", "u", [{"role": "user", "content": "x"}])  # no-op, no error
+
+    async def test_save_failure_is_audited(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        # Make the per-sender history dir path collide with a file so mkdir fails.
+        (tmp_path / "conversations").mkdir()
+        (tmp_path / "conversations" / "ch1").write_text("not a dir")
+        audit = _RecordingAudit()
+        r = _responder(tmp_path, router=_FakeRouter(text="ok"), audit=audit)
+        r.bind(_FakeApp())
+        await r.dispatch(channel_id="ch1", sender_id="u", content="hi", content_type="text/plain")
+        assert any(e.detail.get("stage") == "memory" for e in audit.entries)
