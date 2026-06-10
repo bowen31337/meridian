@@ -26,17 +26,30 @@ class _Event:
 
 
 class _FakeRouter:
-    def __init__(self, *, text: str = "reply", raise_exc: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        text: str = "reply",
+        facts_json: str | None = None,
+        raise_exc: Exception | None = None,
+        extract_raise: bool = False,
+    ) -> None:
         self._text = text
+        self._facts = facts_json
         self._raise = raise_exc
+        self._extract_raise = extract_raise
         self.last_opts: Any = None
+        self.calls: list[Any] = []
 
     async def call(self, opts: Any) -> Any:
         self.last_opts = opts
-        if self._raise is not None:
-            raise self._raise
-        if self._text:
-            yield _Event(self._text)
+        self.calls.append(opts)
+        is_extract = "haiku" in (opts.model or "")
+        if self._raise is not None or (is_extract and self._extract_raise):
+            raise self._raise or RuntimeError("extract boom")
+        text = self._facts if (is_extract and self._facts is not None) else self._text
+        if text:
+            yield _Event(text)
 
 
 class _RecordingAudit:
@@ -141,12 +154,15 @@ def _seed(
     (root / "channels" / "ch1.json").write_text(json.dumps(channel))
 
 
-def _responder(root: Path | None, router: Any = None, audit: Any = None) -> AgentResponder:
+def _responder(
+    root: Path | None, router: Any = None, audit: Any = None, extract_facts: bool = False
+) -> AgentResponder:
     return AgentResponder(
         model_router=router or _FakeRouter(),
         model="claude:claude-opus-4-7",
         storage_root=root,
         audit_log=audit,
+        extract_facts=extract_facts,
     )
 
 
@@ -440,3 +456,80 @@ class TestLongTermMemory:
         (tmp_path / "agents").mkdir(parents=True, exist_ok=True)
         (tmp_path / "agents" / "agent_bad.json").write_text("{ broken")
         assert _responder(tmp_path)._load_memory_store_id("ch1") is None
+
+
+# ---------------------------------------------------------------------------
+# Fact extraction + dialectic reconciliation
+# ---------------------------------------------------------------------------
+
+
+class TestFactExtraction:
+    def test_parse_facts_valid(self) -> None:
+        r = _responder(None)
+        assert r._parse_facts('["a", "b"]') == ["a", "b"]
+
+    def test_parse_facts_with_surrounding_prose(self) -> None:
+        r = _responder(None)
+        assert r._parse_facts('Sure! ["x", "y"] done') == ["x", "y"]
+
+    def test_parse_facts_non_json(self) -> None:
+        r = _responder(None)
+        assert r._parse_facts("no array here") == []
+
+    def test_parse_facts_non_list(self) -> None:
+        r = _responder(None)
+        assert r._parse_facts('{"not": "a list"}') == []
+
+    def test_parse_facts_invalid_json_in_brackets(self) -> None:
+        r = _responder(None)
+        assert r._parse_facts("[not, valid, json]") == []
+
+    def test_parse_facts_filters_and_caps(self) -> None:
+        r = AgentResponder(model_router=_FakeRouter(), model="m", max_facts=2)
+        assert r._parse_facts('["a", "", 5, "b", "c"]') == ["a", "b"]
+
+    async def test_extracts_and_dialectic_writes(self, tmp_path: Path) -> None:
+        _seed(tmp_path, memory_store_id="memstore_x")
+        router = _FakeRouter(
+            text="ok", facts_json='["Bowen prefers Rust", "Bowen builds Meridian"]'
+        )
+        app = _FakeApp()
+        r = _responder(tmp_path, router=router, extract_facts=True)
+        r.bind(app)
+        await r.dispatch(channel_id="ch1", sender_id="u", content="hey", content_type="text/plain")
+        assert [w["content"] for w in app.mem_writes] == [
+            "Bowen prefers Rust",
+            "Bowen builds Meridian",
+        ]
+        assert all(w["dialectic"] is True for w in app.mem_writes)
+
+    async def test_no_facts_no_writes(self, tmp_path: Path) -> None:
+        _seed(tmp_path, memory_store_id="memstore_x")
+        router = _FakeRouter(text="ok", facts_json="[]")
+        app = _FakeApp()
+        r = _responder(tmp_path, router=router, extract_facts=True)
+        r.bind(app)
+        await r.dispatch(channel_id="ch1", sender_id="u", content="hi", content_type="text/plain")
+        assert app.mem_writes == []
+
+    async def test_extraction_failure_is_audited(self, tmp_path: Path) -> None:
+        _seed(tmp_path, memory_store_id="memstore_x")
+        audit = _RecordingAudit()
+        router = _FakeRouter(text="ok", extract_raise=True)
+        app = _FakeApp()
+        r = _responder(tmp_path, router=router, audit=audit, extract_facts=True)
+        r.bind(app)
+        await r.dispatch(channel_id="ch1", sender_id="u", content="hi", content_type="text/plain")
+        assert any(e.detail.get("stage") == "memory_extract" for e in audit.entries)
+        assert app.mem_writes == []
+
+    async def test_reply_uses_default_model_not_extract_model(self, tmp_path: Path) -> None:
+        _seed(tmp_path, memory_store_id="memstore_x")
+        router = _FakeRouter(text="hello", facts_json="[]")
+        app = _FakeApp()
+        r = _responder(tmp_path, router=router, extract_facts=True)
+        r.bind(app)
+        await r.dispatch(channel_id="ch1", sender_id="u", content="hi", content_type="text/plain")
+        # reply call used opus; extraction call used haiku
+        assert "opus" in router.calls[0].model
+        assert "haiku" in router.calls[1].model

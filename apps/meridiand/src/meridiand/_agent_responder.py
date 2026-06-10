@@ -52,6 +52,9 @@ class AgentResponder:
         system_prompt: str = _DEFAULT_SYSTEM_PROMPT,
         max_tokens: int = 1024,
         memory_top_k: int = 5,
+        extract_facts: bool = True,
+        extract_model: str = "claude:claude-haiku-4-5",
+        max_facts: int = 3,
         audit_log: AuditLog | None = None,
         base_url: str = "http://meridian.internal",
     ) -> None:
@@ -61,6 +64,9 @@ class AgentResponder:
         self._system_prompt = system_prompt
         self._max_tokens = max_tokens
         self._memory_top_k = memory_top_k
+        self._extract_enabled = extract_facts
+        self._extract_model = extract_model
+        self._max_facts = max_facts
         self._audit = audit_log or NoopAuditLog()
         self._base_url = base_url
         self._app: ASGIApp | None = None
@@ -178,17 +184,63 @@ class AgentResponder:
         return []
 
     async def _write_memory(
-        self, client: httpx.AsyncClient, channel_id: str, store_id: str, content: str
+        self,
+        client: httpx.AsyncClient,
+        channel_id: str,
+        store_id: str,
+        content: str,
+        *,
+        dialectic: bool = False,
     ) -> None:
-        """Persist the user's message as a durable memory (content-keyed for dedup)."""
+        """Persist a durable memory (content-keyed for dedup; optional dialectic reconcile)."""
         try:
             key = "tg-" + hashlib.sha1(content.encode("utf-8")).hexdigest()[:16]
             await client.post(
                 f"/v1/memory_stores/{store_id}/write",
-                json={"key": key, "content": content, "dialectic": False},
+                json={"key": key, "content": content, "dialectic": dialectic},
             )
         except Exception as exc:  # noqa: BLE001 - write failure is audited, not fatal
             self._audit_failure(channel_id, "memory_write", exc)
+
+    async def _extract_facts(self, channel_id: str, user_content: str, reply: str) -> list[str]:
+        """Use a cheap model to extract durable facts about the user from the exchange."""
+        system = (
+            "You extract durable, long-term facts about the user worth remembering across "
+            "conversations — identity, stable preferences, projects, goals, constraints. "
+            f"Output ONLY a JSON array of at most {self._max_facts} short standalone fact "
+            "strings about the user. If there is nothing durable, output []. No prose, no fences."
+        )
+        prompt = f"User message: {user_content}\nAssistant reply: {reply}\n\nReturn the JSON array."
+        opts = ModelCallOpts(
+            model=self._extract_model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=256,
+            system=system,
+            temperature=None,
+            tools=[],
+            metadata={},
+            stream=False,
+        )
+        parts: list[str] = []
+        try:
+            async for event in self._router.call(opts):
+                if getattr(event, "type", None) == "text_delta":
+                    parts.append(event.text)
+        except Exception as exc:  # noqa: BLE001 - extraction failure -> remember nothing
+            self._audit_failure(channel_id, "memory_extract", exc)
+            return []
+        return self._parse_facts("".join(parts))
+
+    def _parse_facts(self, text: str) -> list[str]:
+        start, end = text.find("["), text.rfind("]")
+        if start == -1 or end == -1 or end < start:
+            return []
+        try:
+            data = json.loads(text[start : end + 1])  # always a list when valid (starts with [)
+        except Exception:  # noqa: BLE001 - non-JSON output -> no facts
+            return []
+        facts = [str(f).strip() for f in data if isinstance(f, str) and str(f).strip()]
+        return facts[: self._max_facts]
 
     async def _generate_reply(
         self,
@@ -260,7 +312,13 @@ class AgentResponder:
                 model_ok = False
 
             if store_id is not None and model_ok:
-                await self._write_memory(client, channel_id, store_id, content)
+                if self._extract_enabled:
+                    for fact in await self._extract_facts(channel_id, content, reply):
+                        await self._write_memory(
+                            client, channel_id, store_id, fact, dialectic=True
+                        )
+                else:
+                    await self._write_memory(client, channel_id, store_id, content)
 
             # Persist the user turn always; the assistant turn only on a real reply,
             # so a transient failure can be retried next turn with context intact.
