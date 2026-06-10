@@ -163,6 +163,49 @@ def _seed(
     (root / "channels" / "ch1.json").write_text(json.dumps(channel))
 
 
+def _seed_skill(
+    root: Path,
+    *,
+    skill_id: str = "skill_1",
+    name: str = "Changelog Writer",
+    instructions: str = "Write crisp changelogs.",
+    agent_id: str = "agent_t",
+    status: str = "active",
+    version_id: str | None = None,
+    version_instructions: str | None = None,
+) -> None:
+    """Create a skill record + (optionally pinned version) + an activation."""
+    (root / "skills").mkdir(parents=True, exist_ok=True)
+    (root / "skill_activations").mkdir(parents=True, exist_ok=True)
+    (root / "skills" / f"{skill_id}.json").write_text(
+        json.dumps(
+            {
+                "id": skill_id,
+                "name": name,
+                "description": "d",
+                "version": {"id": f"{skill_id}_v1", "instructions": instructions},
+            }
+        )
+    )
+    if version_id is not None and version_instructions is not None:
+        (root / "skill_versions").mkdir(parents=True, exist_ok=True)
+        (root / "skill_versions" / f"{version_id}.json").write_text(
+            json.dumps({"id": version_id, "instructions": version_instructions})
+        )
+    (root / "skill_activations" / f"act_{skill_id}.json").write_text(
+        json.dumps(
+            {
+                "id": f"act_{skill_id}",
+                "agent_id": agent_id,
+                "skill_id": skill_id,
+                "skill_version_id": version_id,
+                "status": status,
+                "requested_at": "2026-06-10T00:00:00+00:00",
+            }
+        )
+    )
+
+
 def _responder(
     root: Path | None, router: Any = None, audit: Any = None, extract_facts: bool = False
 ) -> AgentResponder:
@@ -792,3 +835,119 @@ class TestQuoteContext:
         )
         hist = json.loads((tmp_path / "conversations" / "ch1" / "u.json").read_text())
         assert "some earlier note" in hist[0]["content"]
+
+
+# ---------------------------------------------------------------------------
+# Active skills (Meridian Skill resource injection)
+# ---------------------------------------------------------------------------
+
+
+class TestActiveSkills:
+    def test_active_skill_resolved(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        _seed_skill(tmp_path, name="Changelog Writer", instructions="Write crisp changelogs.")
+        skills = _responder(tmp_path)._load_active_skills("ch1")
+        assert skills == [("Changelog Writer", "Write crisp changelogs.")]
+
+    def test_pending_skill_ignored(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        _seed_skill(tmp_path, status="pending")
+        assert _responder(tmp_path)._load_active_skills("ch1") == []
+
+    def test_revoked_skill_ignored(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        _seed_skill(tmp_path, status="revoked")
+        assert _responder(tmp_path)._load_active_skills("ch1") == []
+
+    def test_activation_for_other_agent_ignored(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        _seed_skill(tmp_path, agent_id="someone_else")
+        assert _responder(tmp_path)._load_active_skills("ch1") == []
+
+    def test_pinned_version_instructions_preferred(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        _seed_skill(
+            tmp_path,
+            instructions="old text",
+            version_id="skillver_pinned",
+            version_instructions="pinned version text",
+        )
+        skills = _responder(tmp_path)._load_active_skills("ch1")
+        assert skills[0][1] == "pinned version text"
+
+    def test_missing_pinned_version_falls_back_to_skill_record(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        # activation pins a version_id whose file does not exist -> use skill record
+        _seed_skill(tmp_path, instructions="fallback text", version_id="skillver_gone")
+        skills = _responder(tmp_path)._load_active_skills("ch1")
+        assert skills[0][1] == "fallback text"
+
+    def test_skill_without_instructions_skipped(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        _seed_skill(tmp_path, instructions="   ")  # blank
+        assert _responder(tmp_path)._load_active_skills("ch1") == []
+
+    def test_corrupt_activation_skipped(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        _seed_skill(tmp_path, skill_id="skill_ok", instructions="good")
+        (tmp_path / "skill_activations" / "act_bad.json").write_text("{ not json")
+        skills = _responder(tmp_path)._load_active_skills("ch1")
+        assert skills == [("Changelog Writer", "good")]
+
+    def test_no_activations_dir(self, tmp_path: Path) -> None:
+        _seed(tmp_path)  # no skills seeded
+        assert _responder(tmp_path)._load_active_skills("ch1") == []
+
+    def test_no_storage_returns_empty(self) -> None:
+        assert _responder(None)._load_active_skills("ch1") == []
+
+    def test_no_agent_id_returns_empty(self, tmp_path: Path) -> None:
+        _seed(tmp_path, agent_id=None)
+        _seed_skill(tmp_path)
+        assert _responder(tmp_path)._load_active_skills("ch1") == []
+
+    def test_missing_channel_returns_empty(self, tmp_path: Path) -> None:
+        # no channel file at all -> outer guard returns []
+        assert _responder(tmp_path)._load_active_skills("ch1") == []
+
+    def test_activation_without_skill_id_skipped(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        (tmp_path / "skill_activations").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "skill_activations" / "act_x.json").write_text(
+            json.dumps({"id": "act_x", "agent_id": "agent_t", "status": "active"})
+        )
+        assert _responder(tmp_path)._load_active_skills("ch1") == []
+
+    def test_pinned_version_only_no_skill_record(self, tmp_path: Path) -> None:
+        # version file exists but skill record absent -> name falls back to skill_id
+        _seed(tmp_path)
+        (tmp_path / "skill_versions").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "skill_versions" / "skillver_x.json").write_text(
+            json.dumps({"id": "skillver_x", "instructions": "ver only"})
+        )
+        (tmp_path / "skill_activations").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "skill_activations" / "act_y.json").write_text(
+            json.dumps(
+                {
+                    "id": "act_y",
+                    "agent_id": "agent_t",
+                    "skill_id": "skill_y",
+                    "skill_version_id": "skillver_x",
+                    "status": "active",
+                }
+            )
+        )
+        skills = _responder(tmp_path)._load_active_skills("ch1")
+        assert skills == [("skill_y", "ver only")]
+
+    async def test_active_skill_injected_into_prompt(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        _seed_skill(tmp_path, name="Changelog Writer", instructions="Write crisp changelogs.")
+        router = _FakeRouter(text="ok")
+        r = _responder(tmp_path, router=router)
+        r.bind(_FakeApp())
+        await r.dispatch(channel_id="ch1", sender_id="u", content="hi", content_type="text/plain")
+        system = router.last_opts.system
+        assert "Active skills" in system
+        assert "Changelog Writer" in system
+        assert "Write crisp changelogs." in system

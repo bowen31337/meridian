@@ -163,6 +163,65 @@ class AgentResponder:
         except Exception as exc:  # noqa: BLE001 - persistence failure is non-fatal
             self._audit_failure(channel_id, "memory", exc)
 
+    def _load_active_skills(self, channel_id: str) -> list[tuple[str, str]]:
+        """Resolve the channel agent's *active* skills to (name, instructions).
+
+        Honors explicit per-agent activation (PRD F-SK-5): only skills whose
+        activation status is "active" for this channel's agent are injected — a
+        pending or revoked activation has no effect on the reply.
+        """
+        if self._storage_root is None:
+            return []
+        try:
+            channel = json.loads(
+                (self._storage_root / "channels" / f"{channel_id}.json").read_text()
+            )
+            agent_id = channel.get("default_agent_id")
+            if not agent_id:
+                return []
+            activations_dir = self._storage_root / "skill_activations"
+            if not activations_dir.exists():
+                return []
+            skills: list[tuple[str, str]] = []
+            for path in sorted(activations_dir.glob("*.json")):
+                try:
+                    act = json.loads(path.read_text())
+                except Exception:  # noqa: BLE001 - skip an unreadable activation record
+                    continue
+                if act.get("agent_id") != agent_id or act.get("status") != "active":
+                    continue
+                resolved = self._resolve_skill_instructions(
+                    act.get("skill_id"), act.get("skill_version_id")
+                )
+                if resolved is not None:
+                    skills.append(resolved)
+            return skills
+        except Exception:  # noqa: BLE001 - no skills -> reply without them
+            return []
+
+    def _resolve_skill_instructions(
+        self, skill_id: str | None, version_id: str | None
+    ) -> tuple[str, str] | None:
+        """Load a skill's (name, instructions), preferring the pinned version."""
+        if self._storage_root is None or not skill_id:
+            return None
+        name = skill_id
+        instructions = ""
+        if version_id:
+            vpath = self._storage_root / "skill_versions" / f"{version_id}.json"
+            if vpath.exists():
+                instructions = json.loads(vpath.read_text()).get("instructions", "") or ""
+        spath = self._storage_root / "skills" / f"{skill_id}.json"
+        if spath.exists():
+            rec = json.loads(spath.read_text())
+            name = rec.get("name") or name
+            if not instructions:
+                instructions = (rec.get("version") or {}).get("instructions", "") or ""
+        instructions = instructions.strip()
+        if not instructions:
+            return None
+        return (name, instructions)
+
     def _load_memory_store_id(self, channel_id: str) -> str | None:
         """Resolve the agent's first attached long-term MemoryStore, if any."""
         if self._storage_root is None:
@@ -411,9 +470,16 @@ class AgentResponder:
             history = self._load_history(channel_id, sender_id)
             history.append({"role": "user", "content": user_content})
 
+            # Active skills: fold each granted skill's instructions into the prompt.
+            persona = self._load_persona(channel_id)
+            skills = self._load_active_skills(channel_id)
+            if skills:
+                persona += "\n\nActive skills — apply these when relevant:"
+                for skill_name, skill_instructions in skills:
+                    persona += f"\n\n## {skill_name}\n{skill_instructions}"
+
             # Long-term memory: retrieve durable facts relevant to this message and
             # fold them into the persona prompt.
-            persona = self._load_persona(channel_id)
             if store_id is not None:
                 memories = await self._retrieve_memories(client, channel_id, store_id, user_content)
                 if memories:
