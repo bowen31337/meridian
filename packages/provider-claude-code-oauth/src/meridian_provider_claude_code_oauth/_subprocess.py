@@ -39,6 +39,16 @@ from ._disallowed_tools import ALL_CLAUDE_CODE_BUILTIN_TOOLS
 
 _MAX_STDERR_CHARS = 2000
 
+# Native Claude Code tools an Agent may be granted by name (read-only network
+# tools — no local code execution). These are allowed directly via
+# ``--allowed-tools`` rather than bridged through the MCP server: Meridian has no
+# tool of its own, and the CLI's web tools are not in the Contract 1 disallow
+# list. The map key is the Meridian tool name in the Agent's tools list.
+_NATIVE_TOOL_MAP: dict[str, str] = {
+    "web_search": "WebSearch",
+    "web_fetch": "WebFetch",
+}
+
 
 # ---------------------------------------------------------------------------
 # Error types
@@ -153,26 +163,35 @@ class CliSubprocessManager:
         meta = getattr(opts, "metadata", None)
         tool_cfg = meta.get("meridian_tools") if isinstance(meta, dict) else None
         if tool_cfg and tool_cfg.get("tools"):
-            mcp_config = json.dumps(
-                {
-                    "mcpServers": {
-                        "meridian": {
-                            "command": sys.executable,
-                            "args": [
-                                "-m",
-                                "meridiand._agent_tool_server",
-                                "--agent-id",
-                                str(tool_cfg["agent_id"]),
-                                "--storage-root",
-                                str(tool_cfg["storage_root"]),
-                            ],
+            granted = list(tool_cfg["tools"])
+            # Native CLI tools (web search/fetch) are allowed by name; the rest are
+            # bridged, cap-gated and workspace-confined, through the MCP server.
+            native = [_NATIVE_TOOL_MAP[t] for t in granted if t in _NATIVE_TOOL_MAP]
+            mcp_tools = [t for t in granted if t not in _NATIVE_TOOL_MAP]
+            allowed = [f"mcp__meridian__{name}" for name in mcp_tools]
+            if mcp_tools:
+                mcp_config = json.dumps(
+                    {
+                        "mcpServers": {
+                            "meridian": {
+                                "command": sys.executable,
+                                "args": [
+                                    "-m",
+                                    "meridiand._agent_tool_server",
+                                    "--agent-id",
+                                    str(tool_cfg["agent_id"]),
+                                    "--storage-root",
+                                    str(tool_cfg["storage_root"]),
+                                ],
+                            }
                         }
                     }
-                }
-            )
-            allowed = [f"mcp__meridian__{name}" for name in tool_cfg["tools"]]
-            args += ["--mcp-config", mcp_config, "--allowed-tools", *allowed]
-            cwd = tool_cfg.get("workspace") or None
+                )
+                args += ["--mcp-config", mcp_config]
+                cwd = tool_cfg.get("workspace") or None
+            allowed += native
+            if allowed:
+                args += ["--allowed-tools", *allowed]
 
         # Contract 1: the CLI's own built-in tools stay disabled regardless.
         args += ["--disallowed-tools", *sorted(ALL_CLAUDE_CODE_BUILTIN_TOOLS)]

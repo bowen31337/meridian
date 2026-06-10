@@ -38,6 +38,12 @@ _FALLBACK_REPLY = "Sorry — I couldn't reach the model just now. Please try aga
 # agent has continuity within a chat. Trimmed to bound token usage.
 _MAX_HISTORY_MESSAGES = 20
 
+# Native (CLI-backed) web tools and the capability that gates them. They reach
+# the network, so they are only forwarded to the provider when the agent holds a
+# matching net.fetch grant.
+_NATIVE_WEB_TOOLS = frozenset({"web_search", "web_fetch"})
+_WEB_TOOL_CAP = "net.fetch"
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
@@ -108,6 +114,11 @@ class AgentResponder:
             agent = json.loads((self._storage_root / "agents" / f"{agent_id}.json").read_text())
             version = agent.get("version") or {}
             tools = [t.get("name") for t in version.get("tools", []) if t.get("name")]
+            # Capability gate (§6): the network-backed web tools are only forwarded
+            # when the agent actually holds the net.fetch grant.
+            caps = version.get("capabilities") or []
+            if not any(str(c).startswith(_WEB_TOOL_CAP) for c in caps):
+                tools = [t for t in tools if t not in _NATIVE_WEB_TOOLS]
             if not tools:
                 return None
             workspace = str(self._storage_root)

@@ -133,6 +133,7 @@ def _seed(
     agent_id: str | None = "agent_t",
     tools: list[str] | None = None,
     memory_store_id: str | None = None,
+    caps: list[str] | None = None,
 ) -> None:
     (root / "channels").mkdir(parents=True, exist_ok=True)
     channel: dict[str, Any] = {"id": "ch1", "kind": "meridian.telegram"}
@@ -153,7 +154,7 @@ def _seed(
                     "version": {
                         "instructions": "Be a terse assistant.",
                         "tools": [{"name": t} for t in (tools if tools is not None else ["read"])],
-                        "capabilities": [f"fs.read[{ws}/**]"],
+                        "capabilities": caps if caps is not None else [f"fs.read[{ws}/**]"],
                         "memory_store_refs": [memory_store_id] if memory_store_id else [],
                     },
                 }
@@ -226,6 +227,31 @@ class TestLoadAgentContext:
         )
         (tmp_path / "agents").mkdir(parents=True, exist_ok=True)
         (tmp_path / "agents" / "agent_bad.json").write_text("{ not valid json")
+        assert _responder(tmp_path)._load_agent_context("ch1") is None
+
+    def test_web_tools_forwarded_with_net_fetch_grant(self, tmp_path: Path) -> None:
+        _seed(
+            tmp_path,
+            tools=["read", "web_search", "web_fetch"],
+            caps=["fs.read[/ws/**]", "net.fetch[*]"],
+        )
+        ctx = _responder(tmp_path)._load_agent_context("ch1")
+        assert ctx is not None
+        assert ctx["tools"] == ["read", "web_search", "web_fetch"]
+
+    def test_web_tools_stripped_without_net_fetch_grant(self, tmp_path: Path) -> None:
+        _seed(
+            tmp_path,
+            tools=["read", "web_search", "web_fetch"],
+            caps=["fs.read[/ws/**]"],  # no net.fetch
+        )
+        ctx = _responder(tmp_path)._load_agent_context("ch1")
+        assert ctx is not None
+        assert ctx["tools"] == ["read"]  # web tools removed
+
+    def test_only_web_tools_without_grant_is_none(self, tmp_path: Path) -> None:
+        # Stripping the ungranted web tools leaves no tools -> no tool context.
+        _seed(tmp_path, tools=["web_search"], caps=["fs.read[/ws/**]"])
         assert _responder(tmp_path)._load_agent_context("ch1") is None
 
 

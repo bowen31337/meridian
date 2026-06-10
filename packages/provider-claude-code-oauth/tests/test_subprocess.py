@@ -191,6 +191,39 @@ class TestBuildArgs:
         assert "--mcp-config" not in args
         assert cwd is None
 
+    def test_native_web_tools_allowed_by_name(self) -> None:
+        # web_search / web_fetch map to the CLI's native tools, not the MCP bridge.
+        meta = {
+            "meridian_tools": {
+                "agent_id": "a",
+                "storage_root": "/r",
+                "tools": ["read", "web_search", "web_fetch"],
+                "workspace": "/ws",
+            }
+        }
+        args, cwd = _mgr()._build_args(_opts(metadata=meta))
+        assert "WebSearch" in args
+        assert "WebFetch" in args
+        assert "mcp__meridian__web_search" not in args  # not bridged
+        assert "mcp__meridian__read" in args  # ordinary tool still bridged
+        assert "--mcp-config" in args  # bridge present for the non-web tool
+        assert cwd == "/ws"
+
+    def test_only_web_tools_needs_no_bridge(self) -> None:
+        meta = {
+            "meridian_tools": {
+                "agent_id": "a",
+                "storage_root": "/r",
+                "tools": ["web_search"],
+            }
+        }
+        args, cwd = _mgr()._build_args(_opts(metadata=meta))
+        assert "--mcp-config" not in args  # nothing to bridge
+        assert "--allowed-tools" in args
+        assert "WebSearch" in args
+        assert cwd is None
+        assert "Bash" in args  # Contract 1 builtins still disabled
+
 
 # ---------------------------------------------------------------------------
 # call()
