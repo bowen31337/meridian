@@ -117,6 +117,13 @@ def _make_router(label: str) -> ModelRouter:
     return ModelRouter(policy=policy, providers={"stub": provider})
 
 
+def _make_fenced_router(label: str) -> ModelRouter:
+    """Classifier that wraps its JSON in a Markdown code fence (real CLI behavior)."""
+    policy = ModelRoutingPolicy(rules=[ModelRoutingRule(model="stub:memory_classifier")])
+    provider = _StubProvider(f"```json\n{_LABEL_RESPONSES[label]}\n```")
+    return ModelRouter(policy=policy, providers={"stub": provider})
+
+
 def _make_failing_router() -> ModelRouter:
     policy = ModelRoutingPolicy(rules=[ModelRoutingRule(model="stub:memory_classifier")])
     provider = _StubProvider("", raise_on_call=RuntimeError("provider down"))
@@ -263,6 +270,15 @@ class TestDialecticDuplicate:
         _seed_existing(client, store_id)
         body = _write(client, store_id, key="k_new", dialectic=True)
         assert body["action"] == "deduplicated"
+
+    def test_fenced_json_classifier_response_parses(self, storage_root: Path) -> None:
+        # The CLI-backed classifier wraps JSON in ```json fences; the parser must cope.
+        client = _make_client(storage_root, _make_fenced_router("duplicate"))
+        store_id = _create_store(client)
+        _seed_existing(client, store_id)
+        resp = _write_resp(client, store_id, key="k_new", dialectic=True)
+        assert resp.status_code == 201
+        assert resp.json()["dialectic_label"] == "duplicate"
 
     def test_key_not_written_to_store(self, storage_root: Path) -> None:
         client = _make_client(storage_root, _make_router("duplicate"))

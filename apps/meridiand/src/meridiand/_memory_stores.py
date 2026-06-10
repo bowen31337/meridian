@@ -280,8 +280,11 @@ async def _classify_memory(
             text_parts.append(event.text)
 
     raw = "".join(text_parts).strip()
+    # Tolerate code fences / surrounding prose: extract the first {...} object.
+    obj_start, obj_end = raw.find("{"), raw.rfind("}")
+    candidate = raw[obj_start : obj_end + 1] if 0 <= obj_start < obj_end else raw
     try:
-        data = json.loads(raw)
+        data = json.loads(candidate)
         label: _DialecticLabel = data["label"]
         if label not in ("duplicate", "refinement", "contradiction", "net-new"):
             raise ValueError(f"Unknown label: {label!r}")
