@@ -382,6 +382,35 @@ async def test_router_fallback_slot_released_on_success() -> None:
     assert fb_slot._drained.is_set()
 
 
+async def test_router_multihop_releases_each_failed_fallback_slot() -> None:
+    # In a cascade, a fallback that fails pre-stream must release its slot before
+    # the next hop is tried; the surviving fallback's call still streams.
+    primary = FakeProvider(name="primary", raise_on_call=ProviderRateLimitError("rl", "primary"))
+    fb1 = FakeProvider(name="fb1", raise_on_call=ProviderRateLimitError("rl", "fb1"))
+    fb2 = FakeProvider(name="fb2")
+    reg = ProviderRegistry(providers={"primary": primary, "fb1": fb1, "fb2": fb2})
+    fb1_slot = reg.get_slot("fb1")
+    fb2_slot = reg.get_slot("fb2")
+    assert fb1_slot is not None and fb2_slot is not None
+
+    router = ModelRouter(
+        policy=ModelRoutingPolicy(
+            rules=[ModelRoutingRule(model="primary:m")],
+            fallbacks=[
+                FallbackRule(on="any", model="fb1:m"),
+                FallbackRule(on="any", model="fb2:m"),
+            ],
+        ),
+        registry=reg,
+    )
+    events = [e async for e in router.call(make_opts())]
+
+    assert len(events) == 3
+    assert fb1.call_count == 1 and fb2.call_count == 1
+    assert fb1_slot._refcount == 0  # released even though fb1 failed pre-stream
+    assert fb2_slot._refcount == 0
+
+
 async def test_router_close_delegates_to_registry() -> None:
     p = FakeProvider(name="p")
     reg = ProviderRegistry(providers={"p": p})

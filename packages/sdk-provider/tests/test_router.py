@@ -13,6 +13,7 @@ from meridian_sdk_provider import (
     NoProviderFoundError,
     ProviderCapabilities,
     ProviderRateLimitError,
+    ProviderServerError,
     RoutingCondition,
     RoutingError,
     TokenRange,
@@ -317,6 +318,174 @@ async def test_fallback_failure_raises_and_logs(audit_log: CollectingAuditLog) -
     failure_entry = next(e for e in audit_log.entries if e.event == "provider.call.failed")
     assert failover_entry.provider_name == "primary"
     assert failure_entry.provider_name == "fallback"
+
+
+# ─── Multi-hop fallback cascade ────────────────────────────────────────────────
+
+
+async def test_multihop_cascades_to_second_fallback() -> None:
+    # primary fails, fb1 fails pre-stream, fb2 streams: the call still succeeds.
+    primary = FakeProvider(name="primary", raise_on_call=ProviderRateLimitError("rl", "primary"))
+    fb1 = FakeProvider(name="fb1", raise_on_call=ProviderRateLimitError("rl", "fb1"))
+    fb2 = FakeProvider(name="fb2")
+    router = _router(
+        rules=[ModelRoutingRule(model="primary:m")],
+        providers={"primary": primary, "fb1": fb1, "fb2": fb2},
+        fallbacks=[FallbackRule(on="any", model="fb1:m"), FallbackRule(on="any", model="fb2:m")],
+    )
+    events = [e async for e in router.call(make_opts())]
+    assert len(events) == 3
+    assert fb1.call_count == 1
+    assert fb2.call_count == 1
+
+
+async def test_multihop_exhausts_bench_then_raises(audit_log: CollectingAuditLog) -> None:
+    primary = FakeProvider(name="primary", raise_on_call=ProviderRateLimitError("rl", "primary"))
+    fb1 = FakeProvider(name="fb1", raise_on_call=ProviderRateLimitError("rl", "fb1"))
+    fb2 = FakeProvider(name="fb2", raise_on_call=ProviderRateLimitError("rl", "fb2"))
+    router = _router(
+        rules=[ModelRoutingRule(model="primary:m")],
+        providers={"primary": primary, "fb1": fb1, "fb2": fb2},
+        fallbacks=[FallbackRule(on="any", model="fb1:m"), FallbackRule(on="any", model="fb2:m")],
+        audit_log=audit_log,
+    )
+    with pytest.raises(ProviderRateLimitError):
+        async for _ in router.call(make_opts()):
+            pass
+    # Two failover hops logged (primary->fb1, fb1->fb2) + one final failure (fb2).
+    failovers = [e for e in audit_log.entries if e.event == "router.failover"]
+    failures = [e for e in audit_log.entries if e.event == "provider.call.failed"]
+    assert len(failovers) == 2
+    assert len(failures) == 1
+    assert failures[0].provider_name == "fb2"
+    assert fb1.call_count == 1 and fb2.call_count == 1
+
+
+async def test_multihop_reevaluates_error_category_per_hop() -> None:
+    # primary rate_limits -> fb1 (on=rate_limit) raises 5xx -> fb2 (on=5xx) streams.
+    # fb2 is only reachable if eligibility is recomputed against fb1's failure.
+    primary = FakeProvider(name="primary", raise_on_call=ProviderRateLimitError("rl", "primary"))
+    fb1 = FakeProvider(name="fb1", raise_on_call=ProviderServerError("500", "fb1"))
+    fb2 = FakeProvider(name="fb2")
+    router = _router(
+        rules=[ModelRoutingRule(model="primary:m")],
+        providers={"primary": primary, "fb1": fb1, "fb2": fb2},
+        fallbacks=[
+            FallbackRule(on="rate_limit", model="fb1:m"),
+            FallbackRule(on="5xx", model="fb2:m"),
+        ],
+    )
+    events = [e async for e in router.call(make_opts())]
+    assert len(events) == 3
+    assert fb1.call_count == 1
+    assert fb2.call_count == 1
+
+
+async def test_multihop_skips_nonmatching_fallback() -> None:
+    # primary rate_limits; fb1 (on=timeout) is not eligible and must be skipped;
+    # fb2 (on=any) handles it. fb1 is never called.
+    primary = FakeProvider(name="primary", raise_on_call=ProviderRateLimitError("rl", "primary"))
+    fb1 = FakeProvider(name="fb1")
+    fb2 = FakeProvider(name="fb2")
+    router = _router(
+        rules=[ModelRoutingRule(model="primary:m")],
+        providers={"primary": primary, "fb1": fb1, "fb2": fb2},
+        fallbacks=[
+            FallbackRule(on="timeout", model="fb1:m"),
+            FallbackRule(on="any", model="fb2:m"),
+        ],
+    )
+    events = [e async for e in router.call(make_opts())]
+    assert len(events) == 3
+    assert fb1.call_count == 0
+    assert fb2.call_count == 1
+
+
+async def test_multihop_each_fallback_tried_at_most_once() -> None:
+    # Two on=any fallbacks that both fail -> each attempted exactly once, no loop.
+    primary = FakeProvider(name="primary", raise_on_call=ValueError("boom"))
+    fb1 = FakeProvider(name="fb1", raise_on_call=ValueError("boom1"))
+    fb2 = FakeProvider(name="fb2", raise_on_call=ValueError("boom2"))
+    router = _router(
+        rules=[ModelRoutingRule(model="primary:m")],
+        providers={"primary": primary, "fb1": fb1, "fb2": fb2},
+        fallbacks=[FallbackRule(on="any", model="fb1:m"), FallbackRule(on="any", model="fb2:m")],
+    )
+    with pytest.raises(ValueError):
+        async for _ in router.call(make_opts()):
+            pass
+    assert fb1.call_count == 1
+    assert fb2.call_count == 1
+
+
+class _StreamThenFail:
+    """Provider that yields one event, then fails — to exercise a committed hop."""
+
+    def __init__(self, name: str, fail: Exception) -> None:
+        self.name = name
+        self.kind = "fake"
+        self.capabilities = ProviderCapabilities()
+        self._fail = fail
+        self.call_count = 0
+
+    async def call(self, opts):  # type: ignore[no-untyped-def]
+        from meridian_sdk_provider import MessageStartEvent
+
+        self.call_count += 1
+        yield MessageStartEvent(type="message_start", model="m", provider=self.name)
+        raise self._fail
+
+
+async def test_multihop_committed_fallback_midstream_failure_raises(
+    audit_log: CollectingAuditLog,
+) -> None:
+    # Once a fallback streams its first event the router commits to it; a later
+    # mid-stream failure surfaces (no further hop) and is audited.
+    primary = FakeProvider(name="primary", raise_on_call=ProviderRateLimitError("rl", "primary"))
+    fb = _StreamThenFail("fb", ProviderRateLimitError("mid", "fb"))
+    router = _router(
+        rules=[ModelRoutingRule(model="primary:m")],
+        providers={"primary": primary, "fb": fb},
+        fallbacks=[FallbackRule(on="any", model="fb:m")],
+        audit_log=audit_log,
+    )
+    seen = []
+    with pytest.raises(ProviderRateLimitError):
+        async for e in router.call(make_opts()):
+            seen.append(e)
+    assert len(seen) == 1  # the committed first event was delivered
+    assert fb.call_count == 1
+    failure = next(e for e in audit_log.entries if e.event == "provider.call.failed")
+    assert failure.provider_name == "fb"
+
+
+class _EmptyStream:
+    """Provider whose call yields no events at all."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.kind = "fake"
+        self.capabilities = ProviderCapabilities()
+        self.call_count = 0
+
+    async def call(self, opts):  # type: ignore[no-untyped-def]
+        self.call_count += 1
+        return
+        yield  # unreachable; makes call() an async generator
+
+
+async def test_multihop_fallback_yields_no_events_returns() -> None:
+    # A fallback that streams nothing ends the call cleanly (no error, no events).
+    primary = FakeProvider(name="primary", raise_on_call=ProviderRateLimitError("rl", "primary"))
+    empty = _EmptyStream("empty")
+    router = _router(
+        rules=[ModelRoutingRule(model="primary:m")],
+        providers={"primary": primary, "empty": empty},
+        fallbacks=[FallbackRule(on="any", model="empty:m")],
+    )
+    events = [e async for e in router.call(make_opts())]
+    assert events == []
+    assert empty.call_count == 1
 
 
 async def test_failover_decision_logged_on_rate_limit(audit_log: CollectingAuditLog) -> None:

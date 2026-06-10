@@ -393,54 +393,96 @@ class ModelRouter:
                     span, primary_exc, provider_name=provider.name, model=model_id
                 )
 
-                cat = _error_category(primary_exc)
-                fb_rule = next(
-                    (fb for fb in self._policy.fallbacks if fb.on in ("any", cat)),
-                    None,
-                )
+                # Cascade through the fallback bench (openclaw-style multi-hop):
+                # try each eligible fallback in declared order until one streams
+                # or the bench is exhausted. Eligibility is re-evaluated against
+                # the most recent failure's error class at each hop, and every
+                # fallback entry is attempted at most once (so the walk always
+                # terminates). A single fallback collapses to the prior one-hop
+                # behaviour.
+                last_exc: Exception = primary_exc
+                last_name, last_kind, last_model = provider.name, provider.kind, model_id
+                attempted: set[int] = set()
 
-                if fb_rule is None:
-                    self._write_audit_failure(
-                        primary_exc, provider.name, provider.kind, model_id, opts, rule_label
+                while True:
+                    cat = _error_category(last_exc)
+                    fb_entry = next(
+                        (
+                            (i, fb)
+                            for i, fb in enumerate(self._policy.fallbacks)
+                            if i not in attempted and fb.on in ("any", cat)
+                        ),
+                        None,
                     )
-                    raise
+                    if fb_entry is None:
+                        # Bench exhausted — surface the most recent failure.
+                        self._write_audit_failure(
+                            last_exc, last_name, last_kind, last_model, opts, rule_label
+                        )
+                        raise last_exc
+                    idx, fb_rule = fb_entry
+                    attempted.add(idx)
 
-                # Log the failover decision before attempting the fallback.
-                self._write_audit_failover(primary_exc, provider.name, model_id, fb_rule, cat, opts)
+                    # Log the failover decision before attempting this hop.
+                    self._write_audit_failover(last_exc, last_name, last_model, fb_rule, cat, opts)
 
-                # Attempt the fallback provider.
-                fb_provider, fb_model_id, _slot = self._resolve(fb_rule.model)
-                if _slot is not None:
-                    _slot.acquire()
-                fb_opts = _apply_cap_constraints(
-                    opts.model_copy(update={"model": fb_model_id}),
-                    fb_provider.capabilities,
-                )
-                record_invocation_event(
-                    span,
-                    provider_name=fb_provider.name,
-                    provider_kind=fb_provider.kind,
-                    model=fb_model_id,
-                    session_id=opts.session_id,
-                    routing_rule=f"fallback:{fb_rule.model}",
-                )
-                try:
-                    async for event in fb_provider.call(fb_opts):
-                        yield event
-                    return
-                except Exception as fb_exc:
-                    record_provider_failure(
-                        span, fb_exc, provider_name=fb_provider.name, model=fb_model_id
+                    fb_provider, fb_model_id, _slot = self._resolve(fb_rule.model)
+                    if _slot is not None:
+                        _slot.acquire()
+                    fb_opts = _apply_cap_constraints(
+                        opts.model_copy(update={"model": fb_model_id}),
+                        fb_provider.capabilities,
                     )
-                    self._write_audit_failure(
-                        fb_exc,
-                        fb_provider.name,
-                        fb_provider.kind,
-                        fb_model_id,
-                        opts,
-                        rule_label,
+                    record_invocation_event(
+                        span,
+                        provider_name=fb_provider.name,
+                        provider_kind=fb_provider.kind,
+                        model=fb_model_id,
+                        session_id=opts.session_id,
+                        routing_rule=f"fallback:{fb_rule.model}",
                     )
-                    raise fb_exc from primary_exc
+
+                    # Peek this hop's first event too, so a pre-stream failure
+                    # can cascade to the next fallback instead of aborting.
+                    fb_gen = fb_provider.call(fb_opts)
+                    try:
+                        fb_first = await fb_gen.__anext__()
+                    except StopAsyncIteration:
+                        return
+                    except Exception as fb_exc:
+                        if _slot is not None:
+                            _slot.release()
+                            _slot = None
+                        record_provider_failure(
+                            span, fb_exc, provider_name=fb_provider.name, model=fb_model_id
+                        )
+                        last_exc = fb_exc
+                        last_name, last_kind, last_model = (
+                            fb_provider.name,
+                            fb_provider.kind,
+                            fb_model_id,
+                        )
+                        continue
+
+                    # This hop streamed — commit to it for the rest of the call.
+                    yield fb_first
+                    try:
+                        async for event in fb_gen:
+                            yield event
+                        return
+                    except Exception as stream_exc:
+                        record_provider_failure(
+                            span, stream_exc, provider_name=fb_provider.name, model=fb_model_id
+                        )
+                        self._write_audit_failure(
+                            stream_exc,
+                            fb_provider.name,
+                            fb_provider.kind,
+                            fb_model_id,
+                            opts,
+                            rule_label,
+                        )
+                        raise stream_exc from last_exc
 
             # Primary returned its first event — commit to this stream.
             yield first
