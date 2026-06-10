@@ -575,3 +575,194 @@ class TestFactExtraction:
         # reply call used opus; extraction call used haiku
         assert "opus" in router.calls[0].model
         assert "haiku" in router.calls[1].model
+
+
+# ---------------------------------------------------------------------------
+# Slash commands (openclaw-style menu)
+# ---------------------------------------------------------------------------
+
+
+def _outbound(app: _FakeApp) -> list[str]:
+    return [p[1]["content"] for p in app.posts if p[0].endswith("/outbound")]
+
+
+class TestSlashCommands:
+    async def test_help_lists_commands_without_llm(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        router = _FakeRouter(text="should-not-run")
+        app = _FakeApp()
+        r = _responder(tmp_path, router=router)
+        r.bind(app)
+        await r.dispatch(
+            channel_id="ch1", sender_id="u", content="/help", content_type="text/plain"
+        )
+        out = _outbound(app)
+        assert len(out) == 1
+        assert "/help" in out[0] and "/remember" in out[0]
+        assert router.calls == []  # handled locally, no model call
+
+    async def test_start_greets(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        app = _FakeApp()
+        r = _responder(tmp_path, router=_FakeRouter())
+        r.bind(app)
+        await r.dispatch(
+            channel_id="ch1", sender_id="u", content="/start", content_type="text/plain"
+        )
+        assert "personal assistant" in _outbound(app)[0]
+
+    async def test_new_without_storage_is_noop(self) -> None:
+        # /new must not blow up when the responder has no storage root.
+        app = _FakeApp()
+        r = _responder(None, router=_FakeRouter())
+        r.bind(app)
+        await r.dispatch(channel_id="ch1", sender_id="u", content="/new", content_type="text/plain")
+        assert "Fresh start" in _outbound(app)[0]
+
+    async def test_command_with_botname_suffix(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        app = _FakeApp()
+        r = _responder(tmp_path, router=_FakeRouter())
+        r.bind(app)
+        await r.dispatch(
+            channel_id="ch1", sender_id="u", content="/help@mybot", content_type="text/plain"
+        )
+        assert "/remember" in _outbound(app)[0]
+
+    async def test_new_clears_history(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        r = _responder(tmp_path, router=_FakeRouter(text="hi"))
+        r.bind(_FakeApp())
+        # build up some history
+        await r.dispatch(channel_id="ch1", sender_id="u", content="hi", content_type="text/plain")
+        hist_path = tmp_path / "conversations" / "ch1" / "u.json"
+        assert hist_path.exists()
+        # /new wipes it
+        app2 = _FakeApp()
+        r.bind(app2)
+        await r.dispatch(channel_id="ch1", sender_id="u", content="/new", content_type="text/plain")
+        assert not hist_path.exists()
+        assert "Fresh start" in _outbound(app2)[0]
+
+    async def test_whoami_returns_sender(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        app = _FakeApp()
+        r = _responder(tmp_path, router=_FakeRouter())
+        r.bind(app)
+        await r.dispatch(
+            channel_id="ch1", sender_id="2069029798", content="/whoami", content_type="text/plain"
+        )
+        assert "2069029798" in _outbound(app)[0]
+
+    async def test_remember_writes_memory(self, tmp_path: Path) -> None:
+        _seed(tmp_path, memory_store_id="memstore_x")
+        app = _FakeApp()
+        r = _responder(tmp_path, router=_FakeRouter())
+        r.bind(app)
+        await r.dispatch(
+            channel_id="ch1",
+            sender_id="u",
+            content="/remember I live in Sydney",
+            content_type="text/plain",
+        )
+        assert len(app.mem_writes) == 1
+        assert app.mem_writes[0]["content"] == "I live in Sydney"
+        assert app.mem_writes[0]["dialectic"] is True
+        assert "I live in Sydney" in _outbound(app)[0]
+
+    async def test_remember_without_args_prompts(self, tmp_path: Path) -> None:
+        _seed(tmp_path, memory_store_id="memstore_x")
+        app = _FakeApp()
+        r = _responder(tmp_path, router=_FakeRouter())
+        r.bind(app)
+        await r.dispatch(
+            channel_id="ch1", sender_id="u", content="/remember", content_type="text/plain"
+        )
+        assert app.mem_writes == []
+        assert "Tell me what to remember" in _outbound(app)[0]
+
+    async def test_remember_without_store(self, tmp_path: Path) -> None:
+        _seed(tmp_path)  # no memory_store_id
+        app = _FakeApp()
+        r = _responder(tmp_path, router=_FakeRouter())
+        r.bind(app)
+        await r.dispatch(
+            channel_id="ch1", sender_id="u", content="/remember x", content_type="text/plain"
+        )
+        assert app.mem_writes == []
+        assert "memory store" in _outbound(app)[0]
+
+    async def test_unknown_bare_command_nudges(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        router = _FakeRouter(text="should-not-run")
+        app = _FakeApp()
+        r = _responder(tmp_path, router=router)
+        r.bind(app)
+        await r.dispatch(
+            channel_id="ch1", sender_id="u", content="/bogus", content_type="text/plain"
+        )
+        assert "Unknown command" in _outbound(app)[0]
+        assert router.calls == []
+
+    async def test_slash_with_prose_goes_to_llm(self, tmp_path: Path) -> None:
+        # A message that merely starts with "/" but has prose is a real question.
+        _seed(tmp_path)
+        router = _FakeRouter(text="that path is fine")
+        app = _FakeApp()
+        r = _responder(tmp_path, router=router)
+        r.bind(app)
+        await r.dispatch(
+            channel_id="ch1",
+            sender_id="u",
+            content="/etc/hosts is broken, why?",
+            content_type="text/plain",
+        )
+        assert len(router.calls) == 1  # routed to the model
+        assert _outbound(app)[0] == "that path is fine"
+
+
+# ---------------------------------------------------------------------------
+# Quoted/replied text as nearest context
+# ---------------------------------------------------------------------------
+
+
+class TestQuoteContext:
+    async def test_quote_folded_into_user_message(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        router = _FakeRouter(text="ok")
+        r = _responder(tmp_path, router=router)
+        r.bind(_FakeApp())
+        await r.dispatch(
+            channel_id="ch1",
+            sender_id="u",
+            content="what does this mean?",
+            content_type="text/plain",
+            quote="the deploy failed at step 3",
+        )
+        msg = router.last_opts.messages[-1]
+        assert "the deploy failed at step 3" in msg.content
+        assert "what does this mean?" in msg.content
+
+    async def test_no_quote_leaves_message_plain(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        router = _FakeRouter(text="ok")
+        r = _responder(tmp_path, router=router)
+        r.bind(_FakeApp())
+        await r.dispatch(
+            channel_id="ch1", sender_id="u", content="hello", content_type="text/plain"
+        )
+        assert router.last_opts.messages[-1].content == "hello"
+
+    async def test_quoted_context_persisted_in_history(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        r = _responder(tmp_path, router=_FakeRouter(text="ok"))
+        r.bind(_FakeApp())
+        await r.dispatch(
+            channel_id="ch1",
+            sender_id="u",
+            content="explain",
+            content_type="text/plain",
+            quote="some earlier note",
+        )
+        hist = json.loads((tmp_path / "conversations" / "ch1" / "u.json").read_text())
+        assert "some earlier note" in hist[0]["content"]

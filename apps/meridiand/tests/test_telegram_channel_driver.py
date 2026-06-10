@@ -32,6 +32,7 @@ from meridiand._telegram_channel_driver import (
     TelegramChannelDriver,
     TelegramLongPollClient,
     UpdateSink,
+    _extract_quote,
     _RetryAfter,
 )
 from opentelemetry.trace import StatusCode
@@ -750,7 +751,13 @@ class RecordingSink:
         self.dispatched: list[dict[str, Any]] = []
 
     async def dispatch(
-        self, *, channel_id: str, sender_id: str, content: str, content_type: str
+        self,
+        *,
+        channel_id: str,
+        sender_id: str,
+        content: str,
+        content_type: str,
+        quote: str | None = None,
     ) -> None:
         self.dispatched.append(
             {
@@ -758,6 +765,7 @@ class RecordingSink:
                 "sender_id": sender_id,
                 "content": content,
                 "content_type": content_type,
+                "quote": quote,
             }
         )
 
@@ -825,6 +833,7 @@ class TestLongPollClientPolling:
                 "sender_id": "7",
                 "content": "hello",
                 "content_type": "text/plain",
+                "quote": None,
             }
         ]
 
@@ -887,7 +896,10 @@ class TestLongPollClientPolling:
 
         await client.poll(_BOT_TOKEN, timeout=5)
 
-        assert ("update", {"update_id": 5, "sender_id": "9", "text": "yo"}) in events
+        assert (
+            "update",
+            {"update_id": 5, "sender_id": "9", "text": "yo", "quote": None},
+        ) in events
 
 
 class TestLongPollClientErrorHandling:
@@ -1128,3 +1140,107 @@ class TestLongPollDriverIntegration:
             StopRequest(channel_id="ch_tg_1", channel_kind=_TELEGRAM_KIND, session_id="s")
         )
         assert "ch_tg_1" not in driver._poll_tasks
+
+
+# ---------------------------------------------------------------------------
+# Quoted/replied context extraction
+# ---------------------------------------------------------------------------
+
+
+class TestExtractQuote:
+    def test_none_for_plain_message(self) -> None:
+        assert _extract_quote({"chat": {"id": 1}, "text": "hi"}) is None
+
+    def test_prefers_explicit_quote_span(self) -> None:
+        msg = {
+            "text": "what about this?",
+            "quote": {"text": "the selected part"},
+            "reply_to_message": {"text": "the whole replied message"},
+        }
+        assert _extract_quote(msg) == "the selected part"
+
+    def test_falls_back_to_reply_text(self) -> None:
+        msg = {"text": "huh", "reply_to_message": {"text": "earlier message"}}
+        assert _extract_quote(msg) == "earlier message"
+
+    def test_falls_back_to_reply_caption(self) -> None:
+        msg = {"text": "huh", "reply_to_message": {"caption": "photo caption"}}
+        assert _extract_quote(msg) == "photo caption"
+
+    def test_blank_quote_ignored(self) -> None:
+        msg = {"text": "huh", "quote": {"text": "   "}, "reply_to_message": {"text": "real"}}
+        assert _extract_quote(msg) == "real"
+
+    def test_reply_without_text_is_none(self) -> None:
+        assert _extract_quote({"text": "huh", "reply_to_message": {"photo": []}}) is None
+
+
+class TestQuoteDispatch:
+    async def test_handle_update_passes_quote_to_sink(self) -> None:
+        sink = RecordingSink()
+        client = TelegramLongPollClient(channel_id="ch_x", sink=sink)
+        update = {
+            "update_id": 1,
+            "message": {
+                "chat": {"id": 7},
+                "text": "what is this?",
+                "reply_to_message": {"text": "prior context"},
+            },
+        }
+        await client._handle_update(update)
+        assert sink.dispatched[0]["quote"] == "prior context"
+        assert sink.dispatched[0]["content"] == "what is this?"
+
+
+# ---------------------------------------------------------------------------
+# Slash-command menu registration (setMyCommands)
+# ---------------------------------------------------------------------------
+
+
+class _CapturingHttp:
+    """Captures Telegram Bot API calls, returning ok for each."""
+
+    def __init__(self) -> None:
+        self.methods: list[str] = []
+
+    async def post(self, url: str, *, content: bytes, headers: dict[str, str]) -> httpx.Response:
+        self.methods.append(url.rsplit("/", 1)[-1])
+        return httpx.Response(200, json={"ok": True, "result": True})
+
+
+class TestRegisterBotCommands:
+    async def test_start_registers_command_menu(self, storage_root: Path) -> None:
+        from meridiand._telegram_commands import BOT_COMMANDS
+
+        http = _CapturingHttp()
+        _make_channel_file(storage_root, mode="webhook")
+        driver = _make_driver(storage_root, secret=_BOT_TOKEN, http_client=http)  # type: ignore[arg-type]
+        await driver.start(
+            StartRequest(channel_id="ch_tg_1", channel_kind=_TELEGRAM_KIND, session_id="s")
+        )
+        assert "setMyCommands" in http.methods
+        # the registered set matches the shared menu definition
+        assert {name for name, _ in BOT_COMMANDS}  # non-empty source of truth
+
+    async def test_set_commands_failure_is_audited_not_fatal(self, storage_root: Path) -> None:
+        class _BoomHttp:
+            async def post(self, url: str, *, content: bytes, headers: dict[str, str]) -> Any:
+                raise RuntimeError("network down")
+
+        class _Audit:
+            def __init__(self) -> None:
+                self.entries: list[Any] = []
+
+            def write(self, entry: Any) -> None:
+                self.entries.append(entry)
+
+        audit = _Audit()
+        _make_channel_file(storage_root, mode="webhook")
+        driver = _make_driver(
+            storage_root, secret=_BOT_TOKEN, http_client=_BoomHttp(), audit_log=audit
+        )  # type: ignore[arg-type]
+        # start must not raise even though setMyCommands fails
+        await driver.start(
+            StartRequest(channel_id="ch_tg_1", channel_kind=_TELEGRAM_KIND, session_id="s")
+        )
+        assert any(e.code == "CHAN_SET_COMMANDS_FAILED" for e in audit.entries)

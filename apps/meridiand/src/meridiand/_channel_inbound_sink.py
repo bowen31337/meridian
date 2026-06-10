@@ -30,8 +30,17 @@ class AsgiInboundSink:
         self._app = app
 
     async def dispatch(
-        self, *, channel_id: str, sender_id: str, content: str, content_type: str
+        self,
+        *,
+        channel_id: str,
+        sender_id: str,
+        content: str,
+        content_type: str,
+        quote: str | None = None,
     ) -> None:
+        # quote is the nearest reply context; the plain inbound route (no LLM)
+        # stores the raw message, so it is accepted for protocol parity and
+        # intentionally unused here.
         if self._app is None:
             return
         transport = httpx.ASGITransport(app=self._app)

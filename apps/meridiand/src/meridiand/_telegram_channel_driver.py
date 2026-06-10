@@ -55,6 +55,8 @@ from sdk_channel import (
     StopRequest,
 )
 
+from ._telegram_commands import set_my_commands_payload
+
 _TELEGRAM_API_BASE = "https://api.telegram.org"
 
 TELEGRAM_MARKDOWN_CONTENT_TYPE = "application/vnd.telegram.markdownv2"
@@ -66,6 +68,26 @@ _MODE_WEBHOOK = "webhook"
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _extract_quote(message: dict[str, Any]) -> str | None:
+    """Pull the nearest quoted context from a Telegram message, if any.
+
+    Prefers ``message.quote.text`` (the span the user explicitly selected when
+    replying) over the full ``reply_to_message`` text/caption. Returns None when
+    the message is not a reply, so a normal message is unaffected.
+    """
+    quote = message.get("quote")
+    if isinstance(quote, dict):
+        text = quote.get("text")
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+    replied = message.get("reply_to_message")
+    if isinstance(replied, dict):
+        text = replied.get("text") or replied.get("caption")
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+    return None
 
 
 @runtime_checkable
@@ -142,6 +164,7 @@ class UpdateSink(Protocol):
         sender_id: str,
         content: str,
         content_type: str,
+        quote: str | None = None,
     ) -> None: ...
 
 
@@ -256,15 +279,22 @@ class TelegramLongPollClient:
             return
         chat = message.get("chat", {})
         sender_id = str(chat.get("id", ""))
+        quote = _extract_quote(message)
         self._emit(
             "update",
-            {"update_id": update.get("update_id"), "sender_id": sender_id, "text": text},
+            {
+                "update_id": update.get("update_id"),
+                "sender_id": sender_id,
+                "text": text,
+                "quote": quote,
+            },
         )
         await self._sink.dispatch(
             channel_id=self._channel_id,
             sender_id=sender_id,
             content=text,
             content_type="text/plain",
+            quote=quote,
         )
 
     def _backoff(self, attempt: int) -> float:
@@ -402,6 +432,21 @@ class TelegramChannelDriver(ChannelDriver):
     # ChannelDriver interface
     # ------------------------------------------------------------------
 
+    async def _register_bot_commands(self, token: str) -> None:
+        """Best-effort registration of the slash-command menu (setMyCommands)."""
+        try:
+            await self._telegram_post("setMyCommands", token, set_my_commands_payload())
+        except Exception as exc:  # noqa: BLE001 - menu registration is non-fatal
+            self._audit_log.write(
+                AuditLogEntry(
+                    level="warn",
+                    event="telegram.channel.set_commands.failed",
+                    code="CHAN_SET_COMMANDS_FAILED",
+                    timestamp=_now(),
+                    detail={"message": str(exc)},
+                )
+            )
+
     async def start(self, request: StartRequest) -> None:
         """
         Resolve bot token and, in long-poll mode, start the polling task.
@@ -418,6 +463,10 @@ class TelegramChannelDriver(ChannelDriver):
         token = self._resolve_bot_token(
             driver_config, request.channel_id, request.channel_kind, request.session_id
         )
+
+        # Publish the slash-command menu so Telegram shows the command button and
+        # / autocomplete. Best-effort: a failure here must not block startup.
+        await self._register_bot_commands(token)
 
         mode: str = driver_config.get("mode", _MODE_LONG_POLL)
         if mode == _MODE_WEBHOOK:

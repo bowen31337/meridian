@@ -14,6 +14,7 @@ construction to break the app <-> runtime <-> sink construction cycle.
 
 from __future__ import annotations
 
+import contextlib
 from datetime import UTC, datetime
 import hashlib
 import json
@@ -24,6 +25,8 @@ from core_errors import AuditLog, AuditLogEntry, NoopAuditLog
 import httpx
 from meridian_sdk_provider import ModelCallOpts, ModelRouter
 from starlette.types import ASGIApp
+
+from ._telegram_commands import help_text, start_text
 
 _DEFAULT_SYSTEM_PROMPT = (
     "You are Meridian, a helpful personal assistant replying over Telegram. "
@@ -268,8 +271,82 @@ class AgentResponder:
                 parts.append(event.text)
         return "".join(parts).strip()
 
+    def _clear_history(self, channel_id: str, sender_id: str) -> None:
+        """Drop this sender's short-term conversation context (for /new)."""
+        if self._storage_root is None:
+            return
+        with contextlib.suppress(Exception):
+            path = self._history_path(channel_id, sender_id)
+            path.unlink(missing_ok=True)
+
+    async def _handle_command(
+        self,
+        client: httpx.AsyncClient,
+        channel_id: str,
+        sender_id: str,
+        content: str,
+        store_id: str | None,
+    ) -> str | None:
+        """Handle an openclaw-style slash command locally.
+
+        Returns the reply text for a recognized command, or None to let the
+        message flow to the LLM. A bare unknown ``/command`` (no arguments) gets
+        a help nudge; a slash followed by prose (e.g. "/etc is missing") is
+        treated as a normal message so real questions are never swallowed.
+        """
+        stripped = content.strip()
+        if not stripped.startswith("/"):
+            return None
+        head, _, rest = stripped.partition(" ")
+        # Strip the leading slash and any @botname suffix Telegram appends in groups.
+        cmd = head[1:].split("@", 1)[0].lower()
+        args = rest.strip()
+
+        if cmd == "start":
+            return start_text()
+        if cmd == "help":
+            return "Commands:\n" + help_text()
+        if cmd in ("new", "reset", "clear"):
+            self._clear_history(channel_id, sender_id)
+            return "Fresh start — I've cleared our short-term conversation context."
+        if cmd == "whoami":
+            return f"You're paired with me as sender {sender_id} on this channel."
+        if cmd == "remember":
+            if not args:
+                return "Tell me what to remember, e.g. /remember I prefer concise answers."
+            if store_id is None:
+                return "I don't have a memory store configured, so I can't save that."
+            await self._write_memory(client, channel_id, store_id, args, dialectic=True)
+            return f"Got it — I'll remember that: {args}"
+        # Unknown bare command -> nudge; slash-with-prose -> fall through to the LLM.
+        if not args:
+            return f"Unknown command /{cmd}. Send /help to see what I can do."
+        return None
+
+    async def _send_outbound(
+        self,
+        client: httpx.AsyncClient,
+        channel_id: str,
+        session_id: str,
+        sender_id: str,
+        reply: str,
+    ) -> None:
+        try:
+            await client.post(
+                f"/v1/channels/{channel_id}/outbound",
+                json={"session_id": session_id, "recipient": sender_id, "content": reply},
+            )
+        except Exception as exc:  # noqa: BLE001 - outbound failure is audited, not fatal
+            self._audit_failure(channel_id, "outbound", exc)
+
     async def dispatch(
-        self, *, channel_id: str, sender_id: str, content: str, content_type: str
+        self,
+        *,
+        channel_id: str,
+        sender_id: str,
+        content: str,
+        content_type: str,
+        quote: str | None = None,
     ) -> None:
         if self._app is None:
             return
@@ -304,16 +381,30 @@ class AgentResponder:
                 )
                 return
             session_id = inbound_data.get("session_id", "")
+            store_id = self._load_memory_store_id(channel_id)
+
+            # Slash commands (openclaw-style) are handled locally — no LLM, no
+            # history pollution — and replied to directly.
+            command_reply = await self._handle_command(
+                client, channel_id, sender_id, content, store_id
+            )
+            if command_reply is not None:
+                await self._send_outbound(client, channel_id, session_id, sender_id, command_reply)
+                return
+
+            # Fold any quoted/replied text in as the nearest context for this turn.
+            user_content = content
+            if quote:
+                user_content = f"[Replying to: {quote}]\n\n{content}"
 
             history = self._load_history(channel_id, sender_id)
-            history.append({"role": "user", "content": content})
+            history.append({"role": "user", "content": user_content})
 
             # Long-term memory: retrieve durable facts relevant to this message and
             # fold them into the persona prompt.
             persona = self._load_persona(channel_id)
-            store_id = self._load_memory_store_id(channel_id)
             if store_id is not None:
-                memories = await self._retrieve_memories(client, channel_id, store_id, content)
+                memories = await self._retrieve_memories(client, channel_id, store_id, user_content)
                 if memories:
                     persona += "\n\nThings you remember about the user (use when relevant):\n- "
                     persona += "\n- ".join(memories)
@@ -333,10 +424,10 @@ class AgentResponder:
 
             if store_id is not None and model_ok:
                 if self._extract_enabled:
-                    for fact in await self._extract_facts(channel_id, content, reply):
+                    for fact in await self._extract_facts(channel_id, user_content, reply):
                         await self._write_memory(client, channel_id, store_id, fact, dialectic=True)
                 else:
-                    await self._write_memory(client, channel_id, store_id, content)
+                    await self._write_memory(client, channel_id, store_id, user_content)
 
             # Persist the user turn always; the assistant turn only on a real reply,
             # so a transient failure can be retried next turn with context intact.
@@ -344,13 +435,7 @@ class AgentResponder:
                 history.append({"role": "assistant", "content": reply})
             self._save_history(channel_id, sender_id, history)
 
-            try:
-                await client.post(
-                    f"/v1/channels/{channel_id}/outbound",
-                    json={"session_id": session_id, "recipient": sender_id, "content": reply},
-                )
-            except Exception as exc:  # noqa: BLE001 - outbound failure is audited, not fatal
-                self._audit_failure(channel_id, "outbound", exc)
+            await self._send_outbound(client, channel_id, session_id, sender_id, reply)
 
     def _audit_failure(self, channel_id: str, stage: str, exc: Exception) -> None:
         detail: dict[str, Any] = {"channel_id": channel_id, "stage": stage, "message": str(exc)}
