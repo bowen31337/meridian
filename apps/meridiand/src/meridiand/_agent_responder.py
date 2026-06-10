@@ -15,6 +15,7 @@ construction to break the app <-> runtime <-> sink construction cycle.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -50,6 +51,7 @@ class AgentResponder:
         storage_root: Path | None = None,
         system_prompt: str = _DEFAULT_SYSTEM_PROMPT,
         max_tokens: int = 1024,
+        memory_top_k: int = 5,
         audit_log: AuditLog | None = None,
         base_url: str = "http://meridian.internal",
     ) -> None:
@@ -58,6 +60,7 @@ class AgentResponder:
         self._storage_root = storage_root
         self._system_prompt = system_prompt
         self._max_tokens = max_tokens
+        self._memory_top_k = memory_top_k
         self._audit = audit_log or NoopAuditLog()
         self._base_url = base_url
         self._app: ASGIApp | None = None
@@ -140,6 +143,53 @@ class AgentResponder:
         except Exception as exc:  # noqa: BLE001 - persistence failure is non-fatal
             self._audit_failure(channel_id, "memory", exc)
 
+    def _load_memory_store_id(self, channel_id: str) -> str | None:
+        """Resolve the agent's first attached long-term MemoryStore, if any."""
+        if self._storage_root is None:
+            return None
+        try:
+            channel = json.loads(
+                (self._storage_root / "channels" / f"{channel_id}.json").read_text()
+            )
+            agent_id = channel.get("default_agent_id")
+            if not agent_id:
+                return None
+            agent = json.loads((self._storage_root / "agents" / f"{agent_id}.json").read_text())
+            refs = (agent.get("version") or {}).get("memory_store_refs") or []
+            return refs[0] if refs else None
+        except Exception:  # noqa: BLE001 - no memory store -> skip long-term recall
+            return None
+
+    async def _retrieve_memories(
+        self, client: httpx.AsyncClient, channel_id: str, store_id: str, query: str
+    ) -> list[str]:
+        """Hybrid-retrieve durable memories relevant to the current message."""
+        try:
+            resp = await client.post(
+                f"/v1/memory_stores/{store_id}/query_runs",
+                json={"query": query, "limit": self._memory_top_k},
+            )
+            if resp.is_success:
+                return [
+                    r.get("content", "") for r in resp.json().get("results", []) if r.get("content")
+                ]
+        except Exception as exc:  # noqa: BLE001 - retrieval failure -> reply without recall
+            self._audit_failure(channel_id, "memory_retrieve", exc)
+        return []
+
+    async def _write_memory(
+        self, client: httpx.AsyncClient, channel_id: str, store_id: str, content: str
+    ) -> None:
+        """Persist the user's message as a durable memory (content-keyed for dedup)."""
+        try:
+            key = "tg-" + hashlib.sha1(content.encode("utf-8")).hexdigest()[:16]
+            await client.post(
+                f"/v1/memory_stores/{store_id}/write",
+                json={"key": key, "content": content, "dialectic": False},
+            )
+        except Exception as exc:  # noqa: BLE001 - write failure is audited, not fatal
+            self._audit_failure(channel_id, "memory_write", exc)
+
     async def _generate_reply(
         self,
         messages: list[dict[str, str]],
@@ -185,12 +235,21 @@ class AgentResponder:
 
             history = self._load_history(channel_id, sender_id)
             history.append({"role": "user", "content": content})
+
+            # Long-term memory: retrieve durable facts relevant to this message and
+            # fold them into the persona prompt.
+            persona = self._load_persona(channel_id)
+            store_id = self._load_memory_store_id(channel_id)
+            if store_id is not None:
+                memories = await self._retrieve_memories(client, channel_id, store_id, content)
+                if memories:
+                    persona += "\n\nThings you remember about the user (use when relevant):\n- "
+                    persona += "\n- ".join(memories)
+
             model_ok = True
             try:
                 reply = await self._generate_reply(
-                    history,
-                    self._load_persona(channel_id),
-                    self._load_agent_context(channel_id),
+                    history, persona, self._load_agent_context(channel_id)
                 )
             except Exception as exc:  # noqa: BLE001 - model failure -> fallback reply
                 self._audit_failure(channel_id, "model", exc)
@@ -199,6 +258,9 @@ class AgentResponder:
             if not reply:
                 reply = _FALLBACK_REPLY
                 model_ok = False
+
+            if store_id is not None and model_ok:
+                await self._write_memory(client, channel_id, store_id, content)
 
             # Persist the user turn always; the assistant turn only on a real reply,
             # so a transient failure can be retried next turn with context intact.

@@ -55,12 +55,19 @@ class _FakeApp:
         *,
         inbound_raise: bool = False,
         outbound_raise: bool = False,
+        memory_raise: bool = False,
+        write_raise: bool = False,
+        memories: list[str] | None = None,
         session_id: str = "sess_1",
     ) -> None:
         self.inbound_raise = inbound_raise
         self.outbound_raise = outbound_raise
+        self.memory_raise = memory_raise
+        self.write_raise = write_raise
+        self.memories = memories or []
         self.session_id = session_id
         self.posts: list[tuple[str, dict[str, Any]]] = []
+        self.mem_writes: list[dict[str, Any]] = []
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         body = b""
@@ -70,11 +77,21 @@ class _FakeApp:
             if not msg.get("more_body"):
                 break
         path = scope["path"]
-        self.posts.append((path, json.loads(body or b"{}")))
+        parsed = json.loads(body or b"{}")
+        self.posts.append((path, parsed))
         if path.endswith("/inbound"):
             if self.inbound_raise:
                 raise RuntimeError("inbound boom")
             payload = json.dumps({"session_id": self.session_id}).encode()
+        elif path.endswith("/query_runs"):
+            if self.memory_raise:
+                raise RuntimeError("memory boom")
+            payload = json.dumps({"results": [{"content": m} for m in self.memories]}).encode()
+        elif path.endswith("/write"):
+            if self.write_raise:
+                raise RuntimeError("write boom")
+            self.mem_writes.append(parsed)
+            payload = b'{"id": "mem_1"}'
         else:
             if self.outbound_raise:
                 raise RuntimeError("outbound boom")
@@ -89,7 +106,13 @@ class _FakeApp:
         await send({"type": "http.response.body", "body": payload})
 
 
-def _seed(root: Path, *, agent_id: str | None = "agent_t", tools: list[str] | None = None) -> None:
+def _seed(
+    root: Path,
+    *,
+    agent_id: str | None = "agent_t",
+    tools: list[str] | None = None,
+    memory_store_id: str | None = None,
+) -> None:
     (root / "channels").mkdir(parents=True, exist_ok=True)
     channel: dict[str, Any] = {"id": "ch1", "kind": "meridian.telegram"}
     if agent_id is not None:
@@ -110,6 +133,7 @@ def _seed(root: Path, *, agent_id: str | None = "agent_t", tools: list[str] | No
                         "instructions": "Be a terse assistant.",
                         "tools": [{"name": t} for t in (tools if tools is not None else ["read"])],
                         "capabilities": [f"fs.read[{ws}/**]"],
+                        "memory_store_refs": [memory_store_id] if memory_store_id else [],
                     },
                 }
             )
@@ -328,3 +352,91 @@ class TestConversationMemory:
         r.bind(_FakeApp())
         await r.dispatch(channel_id="ch1", sender_id="u", content="hi", content_type="text/plain")
         assert any(e.detail.get("stage") == "memory" for e in audit.entries)
+
+
+# ---------------------------------------------------------------------------
+# Long-term MemoryStore
+# ---------------------------------------------------------------------------
+
+
+class TestLongTermMemory:
+    def test_store_id_none_without_storage(self) -> None:
+        assert _responder(None)._load_memory_store_id("ch1") is None
+
+    def test_store_id_none_without_agent(self, tmp_path: Path) -> None:
+        _seed(tmp_path, agent_id=None)
+        assert _responder(tmp_path)._load_memory_store_id("ch1") is None
+
+    def test_store_id_none_when_no_refs(self, tmp_path: Path) -> None:
+        _seed(tmp_path)  # no memory_store_id
+        assert _responder(tmp_path)._load_memory_store_id("ch1") is None
+
+    def test_store_id_resolved_from_refs(self, tmp_path: Path) -> None:
+        _seed(tmp_path, memory_store_id="memstore_x")
+        assert _responder(tmp_path)._load_memory_store_id("ch1") == "memstore_x"
+
+    async def test_retrieved_memories_injected_into_persona(self, tmp_path: Path) -> None:
+        _seed(tmp_path, memory_store_id="memstore_x")
+        router = _FakeRouter(text="ok")
+        app = _FakeApp(memories=["Bowen prefers Rust", "Bowen is in Australia"])
+        r = _responder(tmp_path, router=router)
+        r.bind(app)
+        await r.dispatch(channel_id="ch1", sender_id="u", content="hi", content_type="text/plain")
+        sys_prompt = router.last_opts.system
+        assert "Bowen prefers Rust" in sys_prompt
+        assert "Things you remember" in sys_prompt
+
+    async def test_writes_memory_after_reply(self, tmp_path: Path) -> None:
+        _seed(tmp_path, memory_store_id="memstore_x")
+        app = _FakeApp(memories=[])
+        r = _responder(tmp_path, router=_FakeRouter(text="ok"))
+        r.bind(app)
+        await r.dispatch(
+            channel_id="ch1", sender_id="u", content="I love Substrate", content_type="text/plain"
+        )
+        assert len(app.mem_writes) == 1
+        assert app.mem_writes[0]["content"] == "I love Substrate"
+        assert app.mem_writes[0]["key"].startswith("tg-")
+
+    async def test_no_write_on_model_failure(self, tmp_path: Path) -> None:
+        _seed(tmp_path, memory_store_id="memstore_x")
+        app = _FakeApp(memories=[])
+        r = _responder(tmp_path, router=_FakeRouter(raise_exc=RuntimeError("down")))
+        r.bind(app)
+        await r.dispatch(channel_id="ch1", sender_id="u", content="x", content_type="text/plain")
+        assert app.mem_writes == []
+
+    async def test_no_memory_calls_without_store(self, tmp_path: Path) -> None:
+        _seed(tmp_path)  # agent has no memory_store_refs
+        app = _FakeApp()
+        r = _responder(tmp_path, router=_FakeRouter(text="ok"))
+        r.bind(app)
+        await r.dispatch(channel_id="ch1", sender_id="u", content="hi", content_type="text/plain")
+        assert not any("/query_runs" in p[0] or "/write" in p[0] for p in app.posts)
+
+    async def test_retrieval_failure_is_audited(self, tmp_path: Path) -> None:
+        _seed(tmp_path, memory_store_id="memstore_x")
+        audit = _RecordingAudit()
+        app = _FakeApp(memory_raise=True)
+        r = _responder(tmp_path, router=_FakeRouter(text="ok"), audit=audit)
+        r.bind(app)
+        await r.dispatch(channel_id="ch1", sender_id="u", content="hi", content_type="text/plain")
+        assert any(e.detail.get("stage") == "memory_retrieve" for e in audit.entries)
+
+    async def test_write_failure_is_audited(self, tmp_path: Path) -> None:
+        _seed(tmp_path, memory_store_id="memstore_x")
+        audit = _RecordingAudit()
+        app = _FakeApp(write_raise=True)
+        r = _responder(tmp_path, router=_FakeRouter(text="ok"), audit=audit)
+        r.bind(app)
+        await r.dispatch(channel_id="ch1", sender_id="u", content="hi", content_type="text/plain")
+        assert any(e.detail.get("stage") == "memory_write" for e in audit.entries)
+
+    def test_store_id_none_on_malformed_agent(self, tmp_path: Path) -> None:
+        (tmp_path / "channels").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "channels" / "ch1.json").write_text(
+            json.dumps({"id": "ch1", "default_agent_id": "agent_bad"})
+        )
+        (tmp_path / "agents").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "agents" / "agent_bad.json").write_text("{ broken")
+        assert _responder(tmp_path)._load_memory_store_id("ch1") is None
