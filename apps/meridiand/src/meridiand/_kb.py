@@ -190,6 +190,20 @@ def _get_fastembed() -> Any:
     return _fastembed_model
 
 
+def active_embedder_id() -> str:
+    """Canonical id of the embedder that will vectorize writes/queries.
+
+    Recorded with each memory so a later embedder/model change (and the implied
+    vector-dimension change) is identifiable. Resolved from config — for hash it
+    encodes the fixed dimension; for fastembed it encodes the model name (which
+    determines the dimension), without forcing the model to load here.
+    """
+    if _embedder_kind() == "fastembed":
+        model = os.environ.get("MERIDIAN_EMBEDDER_MODEL", _DEFAULT_FASTEMBED_MODEL)
+        return f"fastembed:{model}"
+    return f"hash-{_EMBED_DIM}"
+
+
 def _embed_document(text: str) -> bytes:
     """Embed a stored document/memory."""
     if _embedder_kind() == "fastembed":

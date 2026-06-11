@@ -27,7 +27,7 @@ from meridian_sdk_provider import (
 from pydantic import BaseModel
 from storage_event_log import EventLogRuntime
 
-from ._kb import KbStore
+from ._kb import KbStore, active_embedder_id
 
 
 def _now() -> str:
@@ -494,7 +494,7 @@ def make_memory_stores_router(
     async def write_memory(store_id: str, body: MemoryStoreWriteRequest) -> JSONResponse:
         now = _now()
         tracer = get_tracer()
-        embedder_id = body.embedder_id or "hash-128"
+        embedder_id = body.embedder_id or active_embedder_id()
         scope = body.scope or "global"
 
         # Initialise to safe defaults; mutated inside the try block.

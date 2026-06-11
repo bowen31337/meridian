@@ -60,6 +60,30 @@ class TestEmbedderSelection:
         assert _kb._embedder_kind() == "fastembed"
 
 
+class TestActiveEmbedderId:
+    def test_hash_id_encodes_dimension(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _use(monkeypatch, None)
+        assert _kb.active_embedder_id() == "hash-128"
+
+    def test_fastembed_id_uses_configured_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _use(monkeypatch, "fastembed", model=_FakeFastembed())
+        monkeypatch.setenv("MERIDIAN_EMBEDDER_MODEL", "mixedbread-ai/mxbai-embed-large-v1")
+        assert _kb.active_embedder_id() == "fastembed:mixedbread-ai/mxbai-embed-large-v1"
+
+    def test_fastembed_id_falls_back_to_default_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _use(monkeypatch, "fastembed", model=_FakeFastembed())
+        monkeypatch.delenv("MERIDIAN_EMBEDDER_MODEL", raising=False)
+        assert _kb.active_embedder_id() == f"fastembed:{_kb._DEFAULT_FASTEMBED_MODEL}"
+
+    def test_id_does_not_load_the_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Resolving the id must not force the heavy ONNX model to load.
+        _use(monkeypatch, "fastembed", model=None)  # no model injected
+        monkeypatch.setenv("MERIDIAN_EMBEDDER_MODEL", "some/model")
+        assert _kb.active_embedder_id() == "fastembed:some/model"  # no probe, no load
+
+
 class TestEmbedDispatch:
     def test_hash_document_and_query_are_128(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _use(monkeypatch, None)
