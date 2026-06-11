@@ -26,6 +26,7 @@ import httpx
 from meridian_sdk_provider import ModelCallOpts, ModelRouter
 from starlette.types import ASGIApp
 
+from ._intelligent_router import classify_tier
 from ._telegram_commands import help_text, start_text
 
 _DEFAULT_SYSTEM_PROMPT = (
@@ -44,14 +45,10 @@ _MAX_HISTORY_MESSAGES = 20
 _NATIVE_WEB_TOOLS = frozenset({"web_search", "web_fetch"})
 _WEB_TOOL_CAP = "net.fetch"
 
-# Intelligent routing: a cheap classifier sorts each message into a capability
-# tier so the reply is sized to the task (don't burn a frontier model on "hi",
-# don't hand a hard reasoning task to a small one). The tier is attached as
-# metadata; config routing rules map each tier to a model. A message of at most
-# this many words is trivially "light" and skips the classifier call entirely.
-_ROUTE_TIERS = ("light", "standard", "heavy")
-_DEFAULT_ROUTE_TIER = "standard"
-_TRIVIAL_MESSAGE_WORDS = 3
+# Intelligent routing: each message is sorted into a capability tier (see
+# _intelligent_router.classify_tier — a deterministic 15-dimension scorer ported
+# from openclaw) and the tier is attached as reply metadata so config routing
+# rules size the model to the task instead of over-/under-skilling it.
 
 
 def _now() -> str:
@@ -74,7 +71,6 @@ class AgentResponder:
         extract_model: str = "claude:claude-haiku-4-5",
         max_facts: int = 3,
         intelligent_routing: bool = False,
-        classify_model: str = "claude:claude-haiku-4-5",
         audit_log: AuditLog | None = None,
         base_url: str = "http://meridian.internal",
     ) -> None:
@@ -88,7 +84,6 @@ class AgentResponder:
         self._extract_model = extract_model
         self._max_facts = max_facts
         self._intelligent_routing = intelligent_routing
-        self._classify_model = classify_model
         self._audit = audit_log or NoopAuditLog()
         self._base_url = base_url
         self._app: ASGIApp | None = None
@@ -329,54 +324,6 @@ class AgentResponder:
         facts = [str(f).strip() for f in data if isinstance(f, str) and str(f).strip()]
         return facts[: self._max_facts]
 
-    async def _classify_tier(self, channel_id: str, content: str) -> str:
-        """Classify a message's required capability tier to right-size the model.
-
-        Returns one of _ROUTE_TIERS. A trivially short message is light by
-        construction (no classifier call). Any failure defaults to 'standard' so
-        a classifier hiccup never blocks or downgrades the reply unsafely.
-        """
-        if len(content.split()) <= _TRIVIAL_MESSAGE_WORDS:
-            return "light"
-        system = (
-            "You are a routing classifier. Output the capability tier the user's "
-            "message needs as exactly one lowercase word:\n"
-            "light — greetings, small talk, acknowledgements, trivial lookups.\n"
-            "standard — ordinary questions and moderate tasks.\n"
-            "heavy — complex reasoning, coding, math, multi-step analysis, "
-            "system design, or debugging.\n"
-            "Output ONLY one word: light, standard, or heavy."
-        )
-        opts = ModelCallOpts(
-            model=self._classify_model,
-            messages=[{"role": "user", "content": content}],
-            max_tokens=4,
-            system=system,
-            temperature=None,
-            tools=[],
-            # Tag so a routing rule sends the classifier itself to a cheap model.
-            metadata={"route_op": "classify"},
-            stream=False,
-        )
-        parts: list[str] = []
-        try:
-            async for event in self._router.call(opts):
-                if getattr(event, "type", None) == "text_delta":
-                    parts.append(event.text)
-        except Exception as exc:  # noqa: BLE001 - classifier failure -> safe default
-            self._audit_failure(channel_id, "route_classify", exc)
-            return _DEFAULT_ROUTE_TIER
-        return self._parse_tier("".join(parts))
-
-    @staticmethod
-    def _parse_tier(text: str) -> str:
-        lowered = text.strip().lower()
-        # Check heavy/light before standard so a stray substring can't shadow them.
-        for tier in ("heavy", "light", "standard"):
-            if tier in lowered:
-                return tier
-        return _DEFAULT_ROUTE_TIER
-
     async def _generate_reply(
         self,
         messages: list[dict[str, str]],
@@ -550,11 +497,11 @@ class AgentResponder:
                     persona += "\n\nThings you remember about the user (use when relevant):\n- "
                     persona += "\n- ".join(memories)
 
-            # Intelligent routing: classify the task tier so config rules can
-            # size the reply model to the work (avoid over-/under-skilling).
+            # Intelligent routing: deterministically score the task tier so config
+            # rules size the reply model to the work (avoid over-/under-skilling).
             route_tier: str | None = None
             if self._intelligent_routing:
-                route_tier = await self._classify_tier(channel_id, user_content)
+                route_tier = classify_tier(user_content)
 
             model_ok = True
             try:
