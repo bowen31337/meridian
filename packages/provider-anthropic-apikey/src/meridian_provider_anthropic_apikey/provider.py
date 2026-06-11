@@ -132,10 +132,15 @@ def _api_status_to_provider_error(
     exc: anthropic.APIStatusError, provider_name: str
 ) -> ProviderCallError:
     status = exc.status_code
-    msg = f"Anthropic HTTP {status}: {str(exc)[:200]}"
-    if status == 429:
+    text = str(exc)
+    msg = f"Anthropic HTTP {status}: {text[:200]}"
+    lowered = text.lower()
+    if status == 429 or "rate_limit" in lowered:
         return ProviderRateLimitError(msg, provider_name=provider_name, status_code=status)
-    if status >= 500:
+    # Transient server-side conditions are retryable. Some Anthropic-compatible
+    # gateways (e.g. Z.ai) report overload as an error envelope inside an HTTP
+    # 200, so match the body too — not just the status code.
+    if status >= 500 or "overloaded" in lowered or "api_error" in lowered:
         return ProviderServerError(msg, provider_name=provider_name, status_code=status)
     return ProviderCallError(msg, provider_name=provider_name, status_code=status)
 
@@ -276,6 +281,12 @@ class AnthropicApiKeyProvider:
             stop_reason: str | None = None
             cache_creation_input_tokens: int = 0
             cache_read_input_tokens: int = 0
+            # Defer message_start until the first real content. An error frame
+            # before any content (e.g. an upstream `overloaded_error` returned as
+            # HTTP 200, which surfaces mid-stream) then raises *before* this is
+            # yielded, so the router treats it as a pre-stream failure and the
+            # fallback bench can cascade instead of committing to a dead stream.
+            pending_start: MessageStartEvent | None = None
 
             async for raw in stream:
                 etype = raw.type
@@ -287,7 +298,7 @@ class AnthropicApiKeyProvider:
                         getattr(usage, "cache_creation_input_tokens", 0) or 0
                     )
                     cache_read_input_tokens = getattr(usage, "cache_read_input_tokens", 0) or 0
-                    yield MessageStartEvent(
+                    pending_start = MessageStartEvent(
                         type="message_start",
                         model=raw.message.model,
                         provider=self.name,
@@ -295,6 +306,9 @@ class AnthropicApiKeyProvider:
                     )
 
                 elif etype == "content_block_start":
+                    if pending_start is not None:
+                        yield pending_start
+                        pending_start = None
                     block = raw.content_block
                     if block.type == "tool_use":
                         tool_id_by_index[raw.index] = block.id
@@ -305,6 +319,9 @@ class AnthropicApiKeyProvider:
                         )
 
                 elif etype == "content_block_delta":
+                    if pending_start is not None:
+                        yield pending_start
+                        pending_start = None
                     delta = raw.delta
                     dtype = delta.type
                     if dtype == "text_delta":
@@ -326,6 +343,11 @@ class AnthropicApiKeyProvider:
                 elif etype == "message_delta":
                     stop_reason = raw.delta.stop_reason
                     output_tokens = raw.usage.output_tokens
+
+            # Stream completed cleanly but produced no content (empty reply):
+            # still emit the deferred start so the caller sees a start/stop pair.
+            if pending_start is not None:
+                yield pending_start
 
             yield MessageStopEvent(
                 type="message_stop",

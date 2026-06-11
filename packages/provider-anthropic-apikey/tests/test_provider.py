@@ -30,6 +30,7 @@ from opentelemetry.trace import StatusCode
 
 from meridian_provider_anthropic_apikey.provider import (
     AnthropicApiKeyProvider,
+    _api_status_to_provider_error,
     _convert_message,
 )
 
@@ -1248,3 +1249,84 @@ class TestCountTokensErrors:
         provider = _make_count_provider(_rate_limit_error())
         with pytest.raises(ProviderRateLimitError):
             await provider.count_tokens(ModelCountReq(model="claude-sonnet-4-6", messages=[]))
+
+
+# ---------------------------------------------------------------------------
+# Mid-stream failover hardening (deferred message_start)
+# ---------------------------------------------------------------------------
+
+
+def _make_provider_then_raise(events: list[Any], error: Exception) -> AnthropicApiKeyProvider:
+    """Provider whose stream yields *events* then raises *error* mid-stream."""
+
+    async def _create(**kwargs: Any) -> Any:
+        async def _gen() -> Any:
+            for e in events:
+                yield e
+            raise error
+
+        return _gen()
+
+    mock_messages: Any = MagicMock()
+    mock_messages.create = _create
+    mock_client: Any = MagicMock()
+    mock_client.messages = mock_messages
+    mock_client.close = AsyncMock(return_value=None)
+    return AnthropicApiKeyProvider(_API_KEY, name="test-anthropic", _client=mock_client)
+
+
+class TestDeferredMessageStart:
+    async def test_error_before_content_is_pre_stream(self, mock_span: MockSpan) -> None:
+        # message_start arrives, then the stream errors before any content (the
+        # Z.ai overloaded_error case). message_start must be deferred so the very
+        # first event the router sees is the error -> it can fail over.
+        provider = _make_provider_then_raise([_msg_start()], RuntimeError("overloaded"))
+        agen = provider.call(_make_opts())
+        with pytest.raises(ProviderCallError):
+            await agen.__anext__()  # first __anext__ raises; no message_start leaked
+
+    async def test_normal_stream_still_emits_start_before_text(self, mock_span: MockSpan) -> None:
+        # Deferral preserves ordering: message_start is flushed just before the
+        # first content delta (even with no content_block_start frame).
+        raw = [_msg_start(), _text_delta("hi"), _msg_delta(), _msg_stop()]
+        provider = _make_provider(events=raw)
+        events = [e async for e in provider.call(_make_opts())]
+        assert isinstance(events[0], MessageStartEvent)
+        assert isinstance(events[1], TextDeltaEvent)
+
+    async def test_empty_stream_still_emits_start_then_stop(self, mock_span: MockSpan) -> None:
+        # A stream that produces no content still yields a well-formed start/stop.
+        provider = _make_provider(events=[_msg_start(), _msg_delta(), _msg_stop()])
+        events = [e async for e in provider.call(_make_opts())]
+        assert isinstance(events[0], MessageStartEvent)
+        assert isinstance(events[-1], MessageStopEvent)
+        assert not any(isinstance(e, TextDeltaEvent) for e in events)
+
+
+class TestOverloadEnvelopeCategorization:
+    def test_overloaded_200_maps_to_server_error(self) -> None:
+        class _Err(Exception):
+            def __init__(self) -> None:
+                super().__init__("{'type': 'error', 'error': {'type': 'overloaded_error'}}")
+                self.status_code = 200
+
+        err = _api_status_to_provider_error(_Err(), "zai")  # type: ignore[arg-type]
+        assert isinstance(err, ProviderServerError)
+
+    def test_rate_limit_body_maps_to_rate_limit_error(self) -> None:
+        class _Err(Exception):
+            def __init__(self) -> None:
+                super().__init__("{'error': {'type': 'rate_limit_error'}}")
+                self.status_code = 200
+
+        err = _api_status_to_provider_error(_Err(), "zai")  # type: ignore[arg-type]
+        assert isinstance(err, ProviderRateLimitError)
+
+    def test_plain_4xx_stays_uncategorized_call_error(self) -> None:
+        class _Err(Exception):
+            def __init__(self) -> None:
+                super().__init__("bad request")
+                self.status_code = 400
+
+        err = _api_status_to_provider_error(_Err(), "zai")  # type: ignore[arg-type]
+        assert type(err) is ProviderCallError
