@@ -33,18 +33,31 @@ class _FakeRouter:
         facts_json: str | None = None,
         raise_exc: Exception | None = None,
         extract_raise: bool = False,
+        tier: str = "standard",
+        classify_raise: bool = False,
     ) -> None:
         self._text = text
         self._facts = facts_json
         self._raise = raise_exc
         self._extract_raise = extract_raise
+        self._tier = tier
+        self._classify_raise = classify_raise
         self.last_opts: Any = None
+        self.last_reply_opts: Any = None
         self.calls: list[Any] = []
 
     async def call(self, opts: Any) -> Any:
         self.last_opts = opts
         self.calls.append(opts)
+        meta = opts.metadata or {}
+        if meta.get("route_op") == "classify":
+            if self._classify_raise:
+                raise RuntimeError("classify boom")
+            yield _Event(self._tier)
+            return
         is_extract = "haiku" in (opts.model or "")
+        if not is_extract:
+            self.last_reply_opts = opts
         if self._raise is not None or (is_extract and self._extract_raise):
             raise self._raise or RuntimeError("extract boom")
         text = self._facts if (is_extract and self._facts is not None) else self._text
@@ -207,7 +220,11 @@ def _seed_skill(
 
 
 def _responder(
-    root: Path | None, router: Any = None, audit: Any = None, extract_facts: bool = False
+    root: Path | None,
+    router: Any = None,
+    audit: Any = None,
+    extract_facts: bool = False,
+    intelligent_routing: bool = False,
 ) -> AgentResponder:
     return AgentResponder(
         model_router=router or _FakeRouter(),
@@ -215,6 +232,7 @@ def _responder(
         storage_root=root,
         audit_log=audit,
         extract_facts=extract_facts,
+        intelligent_routing=intelligent_routing,
     )
 
 
@@ -951,3 +969,84 @@ class TestActiveSkills:
         assert "Active skills" in system
         assert "Changelog Writer" in system
         assert "Write crisp changelogs." in system
+
+
+# ---------------------------------------------------------------------------
+# Intelligent routing (capability-tier classification)
+# ---------------------------------------------------------------------------
+
+
+class TestParseTier:
+    def test_parses_each_tier(self) -> None:
+        assert AgentResponder._parse_tier("heavy") == "heavy"
+        assert AgentResponder._parse_tier(" Light ") == "light"
+        assert AgentResponder._parse_tier("standard") == "standard"
+
+    def test_extracts_tier_from_noise(self) -> None:
+        assert AgentResponder._parse_tier("The tier is: heavy.") == "heavy"
+
+    def test_garbage_defaults_to_standard(self) -> None:
+        assert AgentResponder._parse_tier("banana") == "standard"
+
+
+class TestClassifyTier:
+    async def test_trivial_message_is_light_without_a_call(self, tmp_path: Path) -> None:
+        router = _FakeRouter(tier="heavy")  # would say heavy, but short-circuit wins
+        r = _responder(tmp_path, router=router, intelligent_routing=True)
+        tier = await r._classify_tier("ch1", "hi there")
+        assert tier == "light"
+        assert router.calls == []  # no classifier call for a trivial message
+
+    async def test_classifier_call_is_tagged_and_returns_tier(self, tmp_path: Path) -> None:
+        router = _FakeRouter(tier="heavy")
+        r = _responder(tmp_path, router=router, intelligent_routing=True)
+        tier = await r._classify_tier("ch1", "design a fault-tolerant trading backtest engine")
+        assert tier == "heavy"
+        assert router.calls[0].metadata.get("route_op") == "classify"
+
+    async def test_classifier_failure_defaults_to_standard(self, tmp_path: Path) -> None:
+        audit = _RecordingAudit()
+        router = _FakeRouter(classify_raise=True)
+        r = _responder(tmp_path, router=router, audit=audit, intelligent_routing=True)
+        tier = await r._classify_tier("ch1", "some moderately long question about things")
+        assert tier == "standard"
+        assert any(e.detail.get("stage") == "route_classify" for e in audit.entries)
+
+
+class TestIntelligentRoutingDispatch:
+    async def test_disabled_sets_no_route_tier_and_no_classify(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        router = _FakeRouter(text="ok", tier="heavy")
+        r = _responder(tmp_path, router=router, intelligent_routing=False)
+        r.bind(_FakeApp())
+        await r.dispatch(
+            channel_id="ch1",
+            sender_id="u",
+            content="please analyze this complex distributed systems problem in detail",
+            content_type="text/plain",
+        )
+        assert not any((c.metadata or {}).get("route_op") == "classify" for c in router.calls)
+        assert "route_tier" not in (router.last_reply_opts.metadata or {})
+
+    async def test_enabled_tags_reply_with_classified_tier(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        router = _FakeRouter(text="ok", tier="heavy")
+        r = _responder(tmp_path, router=router, intelligent_routing=True)
+        r.bind(_FakeApp())
+        await r.dispatch(
+            channel_id="ch1",
+            sender_id="u",
+            content="please analyze this complex distributed systems problem in detail",
+            content_type="text/plain",
+        )
+        # a classify call happened, and the reply carries the resulting tier
+        assert any((c.metadata or {}).get("route_op") == "classify" for c in router.calls)
+        assert router.last_reply_opts.metadata.get("route_tier") == "heavy"
+
+    async def test_trivial_message_routes_light(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        router = _FakeRouter(text="hello", tier="heavy")
+        r = _responder(tmp_path, router=router, intelligent_routing=True)
+        r.bind(_FakeApp())
+        await r.dispatch(channel_id="ch1", sender_id="u", content="hi", content_type="text/plain")
+        assert router.last_reply_opts.metadata.get("route_tier") == "light"

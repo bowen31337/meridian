@@ -309,6 +309,10 @@ class MeridianConfig(BaseModel):
     # the fastembed model (e.g. "mixedbread-ai/mxbai-embed-large-v1").
     embedder: str = "hash"
     embedder_model: str | None = None
+    # Intelligent routing: when true, the agent responder classifies each inbound
+    # message into a capability tier (light/standard/heavy) and tags the reply so
+    # routing rules can size the model to the task. Off by default.
+    intelligent_routing: bool = False
 
     @field_validator("storage_root", mode="before")
     @classmethod

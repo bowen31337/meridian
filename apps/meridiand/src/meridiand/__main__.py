@@ -181,6 +181,7 @@ def main(argv: list[str] | None = None) -> int:
             model_router=model_router,
             model=default_model,
             storage_root=config.storage_root,
+            intelligent_routing=config.intelligent_routing,
             audit_log=services.audit_log,
         )
     else:
