@@ -17,6 +17,7 @@ run inside the Agent's Environment workspace.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from core_errors import AuditLog, AuditLogEntry, NoopAuditLog
@@ -26,9 +27,32 @@ from sdk_capabilities import parse as parse_capability
 
 _BUILTIN = {t.definition.name: t for t in ALL_TOOLS}
 
+_GLOB_CHARS = "*?["
+
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _root_from_param(param: str) -> str | None:
+    """Derive an absolute directory root from a capability path pattern.
+
+    ``/Users/bob/dev/**`` -> ``/Users/bob/dev``. Returns None for relative or
+    empty params (the workspace already covers the relative case).
+    """
+    if not param or not param.startswith("/"):
+        return None
+    cut = len(param)
+    for i, ch in enumerate(param):
+        if ch in _GLOB_CHARS:
+            cut = i
+            break
+    prefix = param[:cut]
+    if not prefix.endswith("/"):
+        # pattern cut mid-segment (e.g. /a/b*) -> the segment's parent dir
+        prefix = str(Path(prefix).parent)
+    root = prefix.rstrip("/")
+    return root or "/"
 
 
 def _families(caps: list[str]) -> set[tuple[str, str]]:
@@ -56,6 +80,7 @@ class AgentToolExecutor:
         audit_log: AuditLog | None = None,
     ) -> None:
         self._workspace = workspace
+        self._granted_caps = list(granted_capabilities)
         self._granted = _families(granted_capabilities)
         self._session_id = session_id
         self._audit = audit_log or NoopAuditLog()
@@ -66,6 +91,25 @@ class AgentToolExecutor:
 
     def _required_families(self, tool: Any) -> set[tuple[str, str]]:
         return _families(list(tool.definition.capabilities))
+
+    def _allowed_roots(self, required: set[tuple[str, str]]) -> list[str]:
+        """Absolute roots from granted caps whose family the tool requires.
+
+        Lets a tool reach paths the agent was explicitly granted (e.g.
+        ``fs.read[/Users/bob/dev/**]``) beyond its workspace, while the path
+        confinement in the tools still rejects anything outside these roots.
+        """
+        roots: list[str] = []
+        for cap in self._granted_caps:
+            try:
+                parsed = parse_capability(cap)
+            except Exception:  # noqa: BLE001 - skip unparseable grants
+                continue
+            if (parsed.namespace, parsed.name) in required and parsed.param:
+                root = _root_from_param(parsed.param)
+                if root and root not in roots:
+                    roots.append(root)
+        return roots
 
     async def execute(self, name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
         """Run a granted tool; returns {"is_error": bool, "content": <payload>}."""
@@ -90,7 +134,11 @@ class AgentToolExecutor:
                 "content": f"capability denied for {name!r}: missing {missing}",
             }
 
-        ctx = ToolContext(workspace=self._workspace, session_id=self._session_id)
+        ctx = ToolContext(
+            workspace=self._workspace,
+            allowed_roots=self._allowed_roots(required),
+            session_id=self._session_id,
+        )
         result = await tool.execute(tool_input, ctx)
         is_error = bool(getattr(result, "is_error", False))
         if is_error:

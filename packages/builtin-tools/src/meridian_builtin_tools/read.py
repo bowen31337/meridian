@@ -96,12 +96,24 @@ _OUTPUT_SCHEMA: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 
 
-def _resolve_safe(workspace: str, rel_path: str) -> Path:
-    """Return the resolved absolute path for *rel_path* inside *workspace*.
+def _resolve_safe(workspace: str, rel_path: str, allowed_roots: list[str] | None = None) -> Path:
+    """Return the resolved absolute path for *rel_path*.
 
-    Raises :class:`ValueError` if the path resolves outside the workspace
-    root, or if any existing symlink component points outside the jail.
+    A relative path is jailed to *workspace* (with symlink-escape protection).
+    An absolute path is accepted only when its fully-resolved target lies inside
+    *workspace* or one of *allowed_roots* (the agent's granted fs.* roots).
+
+    Raises :class:`ValueError` if the path resolves outside every allowed root,
+    or if any existing symlink component points outside the workspace jail.
     """
+    if Path(rel_path).is_absolute():
+        target = Path(rel_path).resolve()  # follows symlinks + '..'
+        roots = [Path(workspace).resolve(), *[Path(r).resolve() for r in (allowed_roots or [])]]
+        for root in roots:
+            if target == root or root in target.parents:
+                return target
+        raise ValueError(f"Path {rel_path!r} resolves outside the allowed roots")
+
     ws = Path(workspace).resolve()
 
     # Explicit symlink check first: walk each component of the *unresolved*
@@ -174,7 +186,7 @@ async def read_tool(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     rel_path: str = args["path"]
     encoding: str = args.get("encoding", "utf-8")
 
-    target = _resolve_safe(ctx.workspace, rel_path)
+    target = _resolve_safe(ctx.workspace, rel_path, ctx.allowed_roots)
 
     if not target.exists():
         raise FileNotFoundError(f"File not found: {rel_path!r}")

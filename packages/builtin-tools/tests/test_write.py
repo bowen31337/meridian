@@ -70,6 +70,24 @@ def test_resolve_safe_rejects_absolute_path_escape(tmp_path: Path) -> None:
         _resolve_safe(str(ws), "/etc/passwd")
 
 
+def test_resolve_safe_allows_absolute_path_in_allowed_root(tmp_path: Path) -> None:
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    dev = tmp_path / "dev"
+    dev.mkdir()
+    target = dev / "out.txt"
+    assert _resolve_safe(str(ws), str(target), allowed_roots=[str(dev)]) == target.resolve()
+
+
+def test_resolve_safe_rejects_absolute_path_outside_allowed_roots(tmp_path: Path) -> None:
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    dev = tmp_path / "dev"
+    dev.mkdir()
+    with pytest.raises(ValueError, match="outside the allowed roots"):
+        _resolve_safe(str(ws), "/etc/evil", allowed_roots=[str(dev)])
+
+
 def test_resolve_safe_rejects_symlink_outside_jail(tmp_path: Path) -> None:
     ws = tmp_path / "ws"
     ws.mkdir()

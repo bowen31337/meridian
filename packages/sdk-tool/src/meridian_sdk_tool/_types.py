@@ -13,6 +13,10 @@ class ToolContext(BaseModel):
     """Runtime context passed into every tool invocation."""
 
     workspace: str
+    # Additional absolute directory roots the caller may reach beyond
+    # ``workspace`` — derived from the agent's granted fs.* capability paths.
+    # File tools accept absolute paths that resolve inside any of these roots.
+    allowed_roots: list[str] = Field(default_factory=list)
     session_id: str
     thread_id: str | None = None
     scratch_dir: str | None = None
