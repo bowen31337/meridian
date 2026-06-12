@@ -16,10 +16,12 @@ Capability
 -----------
 Requires ``fs.read[glob]``.
 
-Workspace confinement
-----------------------
-The search root is always ``ctx.workspace``; callers cannot escape the session
-workspace by supplying absolute paths.
+Search roots
+------------
+Searches ``ctx.workspace`` plus any ``ctx.allowed_roots`` (the agent's granted
+fs.read roots). Workspace matches are reported workspace-relative; matches under
+an additional granted root are reported as absolute paths. Callers cannot search
+anywhere that was not explicitly granted.
 
 Error handling
 --------------
@@ -34,6 +36,7 @@ import asyncio
 import base64
 import json
 import shutil
+from pathlib import Path
 from typing import Any
 
 from meridian_sdk_tool import ToolContext, meridian_tool
@@ -122,7 +125,10 @@ _OUTPUT_SCHEMA: dict[str, Any] = {
                 "properties": {
                     "file_path": {
                         "type": "string",
-                        "description": "File path relative to the workspace root.",
+                        "description": (
+                            "File path relative to the workspace root, or an absolute "
+                            "path for matches under another granted read root."
+                        ),
                     },
                     "line_number": {
                         "type": "integer",
@@ -278,14 +284,17 @@ def _parse_rg_json(
 
 async def _run_rg(
     pattern: str,
-    workspace: str,
+    roots: list[str],
     glob: str | None,
     context_lines: int,
     fixed_strings: bool,
     case_insensitive: bool,
     max_results: int,
 ) -> tuple[list[dict[str, Any]], bool]:
-    """Invoke ripgrep and return ``(matches, truncated)``.
+    """Invoke ripgrep over one or more *roots* and return ``(matches, truncated)``.
+
+    ``roots[0]`` is the workspace (its matches are reported workspace-relative);
+    matches under any additional granted root are reported as absolute paths.
 
     Raises :class:`RuntimeError` on timeout, missing binary, or rg exit code 2.
     """
@@ -302,7 +311,7 @@ async def _run_rg(
         cmd.append("-F")
     if case_insensitive:
         cmd.append("-i")
-    cmd.extend(["--", pattern, workspace])
+    cmd.extend(["--", pattern, *roots])
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -321,7 +330,7 @@ async def _run_rg(
         stderr_text = stderr.decode("utf-8", errors="replace").strip()
         raise RuntimeError(f"ripgrep error (exit {proc.returncode}): {stderr_text}")
 
-    return _parse_rg_json(stdout, workspace, max_results)
+    return _parse_rg_json(stdout, roots[0], max_results)
 
 
 def _record_invocation(pattern: str, glob: str | None, match_count: int) -> None:
@@ -372,9 +381,19 @@ async def grep_tool(args: dict[str, Any], ctx: ToolContext) -> dict[str, Any]:
     fixed_strings: bool = bool(args.get("fixed_strings", False))
     case_insensitive: bool = bool(args.get("case_insensitive", False))
 
+    # Search the workspace plus any granted read roots, deduped by resolved path
+    # (the workspace's own fs.read grant would otherwise list it twice).
+    roots: list[str] = []
+    seen: set[str] = set()
+    for root in (ctx.workspace, *ctx.allowed_roots):
+        resolved = str(Path(root).resolve())
+        if resolved not in seen:
+            seen.add(resolved)
+            roots.append(root)
+
     matches, truncated = await _run_rg(
         pattern=pattern,
-        workspace=ctx.workspace,
+        roots=roots,
         glob=glob,
         context_lines=context_lines,
         fixed_strings=fixed_strings,

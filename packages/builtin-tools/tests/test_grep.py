@@ -570,7 +570,7 @@ async def test_rg_not_found_writes_audit_log(
 
         matches, truncated = await _run_rg(
             pattern=args["pattern"],
-            workspace=ctx.workspace,
+            roots=[ctx.workspace],
             glob=args.get("glob"),
             context_lines=int(args.get("context_lines", 2)),
             fixed_strings=bool(args.get("fixed_strings", False)),
@@ -680,7 +680,7 @@ async def test_run_rg_timeout_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("asyncio.wait_for", _fake_wait_for)
 
     with pytest.raises(RuntimeError, match="timed out"):
-        await _run_rg("p", "/ws", None, 0, False, False, 50)
+        await _run_rg("p", ["/ws"], None, 0, False, False, 50)
     assert proc.killed is True
 
 
@@ -699,7 +699,7 @@ async def test_run_rg_error_exit_code_raises(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr("asyncio.wait_for", _fake_wait_for)
 
     with pytest.raises(RuntimeError, match="ripgrep error"):
-        await _run_rg("p", "/ws", None, 0, False, False, 50)
+        await _run_rg("p", ["/ws"], None, 0, False, False, 50)
 
 
 # ---------------------------------------------------------------------------
@@ -715,3 +715,48 @@ def test_record_invocation_swallows_telemetry_errors(
 
     monkeypatch.setattr("opentelemetry.trace.get_current_span", _boom)
     _record_invocation("pattern", None, 0)
+
+
+# ---------------------------------------------------------------------------
+# Multi-root search (workspace + granted allowed_roots)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not _RG_AVAILABLE, reason="ripgrep not installed")
+@pytest.mark.anyio
+async def test_searches_granted_allowed_root(workspace: Path, tmp_path: Path) -> None:
+    dev = tmp_path / "dev"
+    dev.mkdir()
+    (dev / "extra.py").write_text("def authenticate_external():\n    pass\n", encoding="utf-8")
+    ctx = ToolContext(workspace=str(workspace), allowed_roots=[str(dev)], session_id="sess_mr")
+    result = await grep_tool.execute({"pattern": "authenticate"}, ctx)
+    assert not result.is_error
+    paths = [m["file_path"] for m in result.result["matches"]]
+    # workspace match is relative; the granted-root match is absolute
+    assert any(p == "src/auth.py" for p in paths)
+    assert any(p == str((dev / "extra.py").resolve()) for p in paths)
+
+
+@pytest.mark.skipif(not _RG_AVAILABLE, reason="ripgrep not installed")
+@pytest.mark.anyio
+async def test_allowed_root_not_searched_without_grant(workspace: Path, tmp_path: Path) -> None:
+    dev = tmp_path / "dev"
+    dev.mkdir()
+    (dev / "extra.py").write_text("def authenticate_external():\n    pass\n", encoding="utf-8")
+    ctx = ToolContext(workspace=str(workspace), session_id="sess_mr2")  # no allowed_roots
+    result = await grep_tool.execute({"pattern": "authenticate_external"}, ctx)
+    assert not result.is_error
+    assert result.result["matches"] == []  # the external dir is not searched
+
+
+@pytest.mark.skipif(not _RG_AVAILABLE, reason="ripgrep not installed")
+@pytest.mark.anyio
+async def test_workspace_not_searched_twice_when_also_a_root(workspace: Path) -> None:
+    # The workspace appears in allowed_roots too (its own fs.read grant); dedup
+    # must prevent ripgrep from searching it twice and double-counting matches.
+    ctx = ToolContext(
+        workspace=str(workspace), allowed_roots=[str(workspace)], session_id="sess_mr3"
+    )
+    result = await grep_tool.execute({"pattern": "def authenticate", "fixed_strings": True}, ctx)
+    assert not result.is_error
+    assert result.result["total"] == 1  # not 2
