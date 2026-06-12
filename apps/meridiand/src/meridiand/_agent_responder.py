@@ -450,6 +450,55 @@ class AgentResponder:
         except Exception as exc:  # noqa: BLE001 - outbound failure is audited, not fatal
             self._audit_failure(channel_id, "outbound", exc)
 
+    async def run_prompt(
+        self,
+        channel_id: str,
+        prompt: str,
+        *,
+        session_id: str = "",
+        recipient: str = "cron",
+    ) -> str | None:
+        """Run a system-triggered agent turn (e.g. a cron fire) and deliver it.
+
+        Unlike dispatch(), there is no inbound/pairing step — the trigger is
+        system-authorized, not an external sender. Reuses the persona, skills,
+        long-term memory, intelligent routing and channel delivery of a normal
+        reply. Returns the reply text, or None if the responder is unbound.
+        """
+        if self._app is None:
+            return None
+        transport = httpx.ASGITransport(app=self._app)
+        async with httpx.AsyncClient(transport=transport, base_url=self._base_url) as client:
+            persona = self._load_persona(channel_id)
+            skills = self._load_active_skills(channel_id)
+            if skills:
+                persona += "\n\nActive skills — apply these when relevant:"
+                for skill_name, skill_instructions in skills:
+                    persona += f"\n\n## {skill_name}\n{skill_instructions}"
+            store_id = self._load_memory_store_id(channel_id)
+            if store_id is not None:
+                memories = await self._retrieve_memories(client, channel_id, store_id, prompt)
+                if memories:
+                    persona += "\n\nThings you remember about the user (use when relevant):\n- "
+                    persona += "\n- ".join(memories)
+
+            route_tier = classify_tier(prompt) if self._intelligent_routing else None
+            try:
+                reply = await self._generate_reply(
+                    [{"role": "user", "content": prompt}],
+                    persona,
+                    self._load_agent_context(channel_id),
+                    route_tier,
+                )
+            except Exception as exc:  # noqa: BLE001 - model failure -> fallback reply
+                self._audit_failure(channel_id, "cron_model", exc)
+                reply = _FALLBACK_REPLY
+            if not reply:
+                reply = _FALLBACK_REPLY
+
+            await self._send_outbound(client, channel_id, session_id, recipient, reply)
+            return reply
+
     async def dispatch(
         self,
         *,

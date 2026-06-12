@@ -20,6 +20,7 @@ never escalates beyond those declared capabilities.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 import contextlib
 from datetime import UTC, datetime
 import json
@@ -38,6 +39,11 @@ from core_errors import (
 )
 
 from ._cron import _parse_duration
+
+# A cron fire executor runs the fired cron as an agent turn and returns an
+# outcome dict ({"status": "completed"|"error"|"skipped", ...}) the scheduler
+# stamps onto the fire record. None -> the legacy record-only behaviour.
+CronFireExecutor = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
 
 
 def _now() -> str:
@@ -73,6 +79,7 @@ async def fire_cron_trigger(
     *,
     fires_dir: Path,
     audit_log: AuditLog,
+    executor: CronFireExecutor | None = None,
 ) -> str:
     """Fire a cron trigger: write a fire record, emit an OTel span, and log to audit.
 
@@ -141,6 +148,36 @@ async def fire_cron_trigger(
                 )
             )
 
+            # Execute the fire as an agent turn, recording the outcome on the
+            # fire record (pending -> completed / skipped / error). Without an
+            # executor the fire stays a pending record (legacy behaviour).
+            if executor is not None:
+                outcome = await executor(resource)
+                fire_record["status"] = outcome.get("status", "completed")
+                for key in ("output", "error", "reason"):
+                    if key in outcome:
+                        fire_record[key] = outcome[key]
+                completed_at = _now()
+                fire_record["completed_at"] = completed_at
+                (cron_fire_dir / f"{fire_id}.json").write_text(json.dumps(fire_record))
+                audit_log.write(
+                    AuditLogEntry(
+                        level="error" if fire_record["status"] == "error" else "info",
+                        event="cron.scheduler.executed",
+                        code="cron_scheduler_executed",
+                        timestamp=completed_at,
+                        detail={
+                            "cron_id": cron_id,
+                            "session_id": session_id,
+                            "fire_id": fire_id,
+                            "status": fire_record["status"],
+                            "detail": str(outcome.get("error") or outcome.get("reason") or "")[
+                                :200
+                            ],
+                        },
+                    )
+                )
+
         except Exception as exc:
             err = CronFireError(
                 message=f"Failed to fire cron {cron_id!r}: {exc}",
@@ -185,6 +222,7 @@ async def run_cron_scheduler_loop(
     *,
     missed_fires_policy: str = "skip",
     check_interval_seconds: float = 5.0,
+    executor: CronFireExecutor | None = None,
 ) -> None:
     """Background scheduler loop for time-based cron triggers.
 
@@ -238,7 +276,9 @@ async def run_cron_scheduler_loop(
                     # One-shot trigger: always fire when the time arrives.
                     # CronFireError is already logged inside fire_cron_trigger.
                     with contextlib.suppress(CronFireError):
-                        await fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log)
+                        await fire_cron_trigger(
+                            resource, fires_dir=fires_dir, audit_log=audit_log, executor=executor
+                        )
                     resource["status"] = "fired"
                     resource["fired_at"] = now_dt.isoformat()
                     resource["next_fire_at"] = None
@@ -255,7 +295,9 @@ async def run_cron_scheduler_loop(
                     # Always fire for the current due slot.
                     # CronFireError is already logged inside fire_cron_trigger.
                     with contextlib.suppress(CronFireError):
-                        await fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log)
+                        await fire_cron_trigger(
+                            resource, fires_dir=fires_dir, audit_log=audit_log, executor=executor
+                        )
 
                     new_next = next_fire_dt + delta
 
@@ -264,7 +306,10 @@ async def run_cron_scheduler_loop(
                         while new_next <= now_dt:
                             with contextlib.suppress(CronFireError):
                                 await fire_cron_trigger(
-                                    resource, fires_dir=fires_dir, audit_log=audit_log
+                                    resource,
+                                    fires_dir=fires_dir,
+                                    audit_log=audit_log,
+                                    executor=executor,
                                 )
                             new_next += delta
                     else:

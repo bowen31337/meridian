@@ -301,6 +301,17 @@ def make_cron_router(*, audit_log: AuditLog, storage_root: Path) -> APIRouter:
 
         return JSONResponse(content=resource, status_code=201)
 
+    @router.get("/v1/x/cron")
+    async def list_crons() -> JSONResponse:
+        items: list[dict[str, Any]] = []
+        if cron_dir.exists():
+            for cron_file in sorted(cron_dir.glob("cron_*.json")):
+                try:
+                    items.append(json.loads(cron_file.read_text()))
+                except (json.JSONDecodeError, OSError):
+                    continue
+        return JSONResponse(content={"items": items, "total": len(items)}, status_code=200)
+
     @router.delete("/v1/x/cron/{cron_id}", status_code=204)
     async def delete_cron(cron_id: str) -> Response:
         now = _now()

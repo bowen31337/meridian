@@ -18,6 +18,7 @@ from ._app import create_app
 from ._channel_factory import build_channel_runtime
 from ._channel_inbound_sink import AsgiInboundSink
 from ._config import load_config, resolve_config_location, validate_config
+from ._cron_executor import CronExecutor
 from ._logging import LoggingConfigError, configure_json_logging, emit_early_error
 from ._provider_factory import ProviderFactoryError, build_model_router, build_provider_registry
 from ._secret_ref import SecretRefResolver
@@ -196,6 +197,13 @@ def main(argv: list[str] | None = None) -> int:
     serve_ui = config.daemon.serve_ui if config.daemon is not None else False
     ui_dist_path = Path(__file__).parent / "ui" if serve_ui else None
 
+    # Cron execution: when a cron fires, run it as an agent turn via the
+    # responder (deliver to the cron's channel). Only available when the
+    # inbound sink is a model-backed AgentResponder.
+    cron_executor = (
+        CronExecutor(responder=inbound_sink) if isinstance(inbound_sink, AgentResponder) else None
+    )
+
     app = create_app(
         services.audit_log,
         plugin_loader=services.plugin_loader,
@@ -208,6 +216,7 @@ def main(argv: list[str] | None = None) -> int:
         secret_resolver=secret_resolver,
         channel_runtime=channel_bundle.runtime,
         channel_secret_resolver=channel_bundle.secret_resolver,
+        cron_executor=cron_executor,
         serve_ui=serve_ui,
         ui_dist_path=ui_dist_path,
     )

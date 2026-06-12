@@ -613,3 +613,86 @@ class TestSchedulerDaemonRestartRecovery:
         asyncio.run(_run_one_tick(storage_root, audit_log))
         total = sum(len(_fire_records(storage_root, f"cron_multi_{i}")) for i in range(3))
         assert total == 3
+
+
+# ---------------------------------------------------------------------------
+# fire_cron_trigger / loop with an executor (cron execution)
+# ---------------------------------------------------------------------------
+
+
+class TestFireCronTriggerWithExecutor:
+    def setup_method(self) -> None:
+        _otel_exporter.clear()
+
+    def test_executor_marks_record_completed_and_audits(self, storage_root: Path) -> None:
+        resource = _make_resource()
+        fires_dir = storage_root / "cron" / "fires"
+        audit_log = FileAuditLog(storage_root)
+
+        async def _exec(res: dict[str, Any]) -> dict[str, Any]:
+            return {"status": "completed", "output": "ran " + res["id"]}
+
+        asyncio.run(
+            fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log, executor=_exec)
+        )
+        rec = _fire_records(storage_root, "cron_test")[0]
+        assert rec["status"] == "completed"
+        assert rec["output"] == "ran cron_test"
+        assert "completed_at" in rec
+        events = [e.get("event") for e in _audit_records(storage_root)]
+        assert "cron.scheduler.executed" in events
+
+    def test_executor_error_recorded(self, storage_root: Path) -> None:
+        resource = _make_resource()
+        fires_dir = storage_root / "cron" / "fires"
+        audit_log = FileAuditLog(storage_root)
+
+        async def _exec(_res: dict[str, Any]) -> dict[str, Any]:
+            return {"status": "error", "error": "boom"}
+
+        asyncio.run(
+            fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log, executor=_exec)
+        )
+        rec = _fire_records(storage_root, "cron_test")[0]
+        assert rec["status"] == "error"
+        assert rec["error"] == "boom"
+        executed = [
+            e for e in _audit_records(storage_root) if e.get("event") == "cron.scheduler.executed"
+        ]
+        assert executed and executed[0]["level"] == "error"
+
+    def test_no_executor_leaves_pending(self, storage_root: Path) -> None:
+        resource = _make_resource()
+        fires_dir = storage_root / "cron" / "fires"
+        audit_log = FileAuditLog(storage_root)
+        asyncio.run(fire_cron_trigger(resource, fires_dir=fires_dir, audit_log=audit_log))
+        rec = _fire_records(storage_root, "cron_test")[0]
+        assert rec["status"] == "pending"  # legacy record-only behaviour
+
+    def test_loop_fires_and_executes(self, storage_root: Path) -> None:
+        resource = _make_resource(
+            cron_id="cron_exec",
+            trigger_type="timestamp",
+            next_fire_at=(datetime.now(UTC) - timedelta(seconds=1)).isoformat(),
+        )
+        _write_cron(storage_root, resource)
+        audit_log = FileAuditLog(storage_root)
+
+        async def _exec(_res: dict[str, Any]) -> dict[str, Any]:
+            return {"status": "completed", "output": "done"}
+
+        async def _tick() -> None:
+            task = asyncio.create_task(
+                run_cron_scheduler_loop(
+                    storage_root, audit_log, check_interval_seconds=9999.0, executor=_exec
+                )
+            )
+            await asyncio.sleep(0)
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+        asyncio.run(_tick())
+        rec = _fire_records(storage_root, "cron_exec")[0]
+        assert rec["status"] == "completed"
+        assert rec["output"] == "done"

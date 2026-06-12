@@ -839,3 +839,32 @@ class TestCronCapabilities:
         cron_id = client.post("/v1/x/cron", json=_body(capabilities=caps)).json()["id"]
         resource = _cron_resource(storage_root, cron_id)
         assert resource["capabilities"] == caps
+
+
+class TestListCron:
+    def test_list_empty_returns_200(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        resp = client.get("/v1/x/cron")
+        assert resp.status_code == 200
+        assert resp.json() == {"items": [], "total": 0}
+
+    def test_list_returns_created_crons(self, storage_root: Path) -> None:
+        client = _make_client(storage_root)
+        client.post("/v1/x/cron", json=_body("interval"))
+        client.post("/v1/x/cron", json=_body("interval"))
+        resp = client.get("/v1/x/cron")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 2
+        assert len(body["items"]) == 2
+        assert all(item["id"].startswith("cron_") for item in body["items"])
+
+
+def test_list_skips_malformed_cron_file(storage_root: Path) -> None:
+    cron_dir = storage_root / "cron"
+    cron_dir.mkdir(parents=True, exist_ok=True)
+    (cron_dir / "cron_bad.json").write_text("{ not valid json")
+    client = _make_client(storage_root)
+    resp = client.get("/v1/x/cron")
+    assert resp.status_code == 200
+    assert resp.json()["total"] == 0

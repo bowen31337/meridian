@@ -43,7 +43,7 @@ from ._config import (
 from ._crash_recovery_soak import make_crash_recovery_soak_router
 from ._credential_proxy import CredentialProxyProviderConfig, make_credential_proxy_router
 from ._cron import make_cron_router
-from ._cron_scheduler import run_cron_scheduler_loop
+from ._cron_scheduler import CronFireExecutor, run_cron_scheduler_loop
 from ._cursor_middleware import CursorPaginationMiddleware
 from ._diagnosis import make_diagnosis_router
 from ._e8_hardening_soak import make_e8_hardening_soak_router
@@ -119,6 +119,7 @@ def create_app(
     secret_resolver: SecretRefResolver | None = None,
     compaction: CompactionConfig | None = None,
     cron_scheduler: CronSchedulerConfig | None = None,
+    cron_executor: CronFireExecutor | None = None,
     webhook_sender: WebhookSenderConfig | None = None,
     skill_forge: SkillForgeConfig | None = None,
     auth_config: AuthConfig | None = None,
@@ -193,6 +194,7 @@ def create_app(
                             audit_log,
                             missed_fires_policy=_cron_cfg.missed_fires_policy,
                             check_interval_seconds=_cron_cfg.check_interval_seconds,
+                            executor=cron_executor,
                         )
                     )
 

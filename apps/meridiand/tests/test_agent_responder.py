@@ -1032,3 +1032,68 @@ class TestIntelligentRoutingDispatch:
             channel_id="ch1", sender_id="u", content="show me the status", content_type="text/plain"
         )
         assert router.last_reply_opts.metadata.get("route_tier") == "simple"
+
+
+# ---------------------------------------------------------------------------
+# run_prompt (system-triggered turn, e.g. cron)
+# ---------------------------------------------------------------------------
+
+
+class TestRunPrompt:
+    async def test_returns_none_when_unbound(self, tmp_path: Path) -> None:
+        r = _responder(tmp_path)  # never bound to an app
+        assert await r.run_prompt("ch1", "do the thing") is None
+
+    async def test_runs_turn_and_delivers_to_channel(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        router = _FakeRouter(text="cron reply")
+        app = _FakeApp()
+        r = _responder(tmp_path, router=router)
+        r.bind(app)
+        reply = await r.run_prompt("ch1", "summarize my day", session_id="sess_x")
+        assert reply == "cron reply"
+        # delivered via outbound with the supplied session id; no /inbound (no pairing)
+        outs = [p for p in app.posts if p[0].endswith("/outbound")]
+        assert outs and outs[0][1]["content"] == "cron reply"
+        assert outs[0][1]["session_id"] == "sess_x"
+        assert not any(p[0].endswith("/inbound") for p in app.posts)
+
+    async def test_model_failure_delivers_fallback(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        router = _FakeRouter(raise_exc=RuntimeError("down"))
+        r = _responder(tmp_path, router=router)
+        r.bind(_FakeApp())
+        assert await r.run_prompt("ch1", "do it") == _FALLBACK_REPLY
+
+    async def test_uses_intelligent_routing_tier(self, tmp_path: Path) -> None:
+        from meridiand._intelligent_router import classify_tier
+
+        _seed(tmp_path)
+        router = _FakeRouter(text="ok")
+        r = _responder(tmp_path, router=router, intelligent_routing=True)
+        r.bind(_FakeApp())
+        content = "prove the theorem rigorously and derive each lemma step by step"
+        await r.run_prompt("ch1", content)
+        assert router.last_reply_opts.metadata.get("route_tier") == classify_tier(content)
+
+
+class TestRunPromptCoverage:
+    async def test_injects_skills_and_memory(self, tmp_path: Path) -> None:
+        _seed(tmp_path, memory_store_id="memstore_x")
+        _seed_skill(tmp_path, name="Changelog Writer", instructions="Write crisp changelogs.")
+        router = _FakeRouter(text="ok")
+        app = _FakeApp(memories=["likes brevity"])
+        r = _responder(tmp_path, router=router)
+        r.bind(app)
+        await r.run_prompt("ch1", "go")
+        system = router.last_reply_opts.system
+        assert "Active skills" in system
+        assert "Changelog Writer" in system
+        assert "likes brevity" in system
+
+    async def test_empty_reply_becomes_fallback(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        router = _FakeRouter(text="")  # yields nothing -> empty reply
+        r = _responder(tmp_path, router=router)
+        r.bind(_FakeApp())
+        assert await r.run_prompt("ch1", "go") == _FALLBACK_REPLY
