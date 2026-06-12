@@ -348,6 +348,17 @@ class TestDispatch:
         # persona + tool context propagated to the model call
         assert router.last_opts.system == "Be a terse assistant."
         assert router.last_opts.metadata["meridian_tools"]["agent_id"] == "agent_t"
+        # tool-bearing reply is flagged so routing keeps it on a tool-capable model
+        assert router.last_opts.metadata["agent_has_tools"] is True
+
+    async def test_untooled_reply_not_flagged(self, tmp_path: Path) -> None:
+        # An agent with no tools -> no tool context -> no agent_has_tools flag.
+        _seed(tmp_path, tools=[])
+        router = _FakeRouter(text="hi")
+        r = _responder(tmp_path, router=router)
+        r.bind(_FakeApp())
+        await r.dispatch(channel_id="ch1", sender_id="u", content="hi", content_type="text/plain")
+        assert "agent_has_tools" not in (router.last_reply_opts.metadata or {})
 
     async def test_model_failure_sends_fallback(self, tmp_path: Path) -> None:
         _seed(tmp_path)

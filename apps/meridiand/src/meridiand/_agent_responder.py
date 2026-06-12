@@ -359,6 +359,11 @@ class AgentResponder:
         metadata: dict[str, Any] = {}
         if tool_context is not None:
             metadata["meridian_tools"] = tool_context
+            # Flag so routing rules can keep tool-bearing replies on a
+            # tool-capable provider: only the claude_code_oauth provider builds
+            # the MCP tool bridge, so the GLM/llama tiers would silently drop
+            # tool access.
+            metadata["agent_has_tools"] = True
         if route_tier is not None:
             metadata["route_tier"] = route_tier
         opts = ModelCallOpts(
