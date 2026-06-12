@@ -14,3 +14,4 @@ src/sdk_channel/_types.py
 src/sdk_channel/_version.py
 src/sdk_channel/py.typed
 tests/test_conformance.py
+tests/test_coverage_gaps.py

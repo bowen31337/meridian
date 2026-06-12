@@ -14,12 +14,18 @@ meridian-sdk-capabilities>=0.1.0
 meridian-storage-blob>=0.1.0
 meridian-storage-event-log>=0.1.0
 meridian-storage-reposit>=0.1.0
+meridian-storage-repository>=0.1.0
 meridian-sdk-channel>=0.1.0
 meridian-sdk-provider>=0.1.0
+meridian-sdk-budget>=0.1.0
+meridian-sdk-tool>=0.1.0
+meridian-builtin-tools>=0.1.0
 meridian-provider-anthropic-apikey>=0.1.0
+meridian-provider-claude-code-oauth>=0.1.0
 meridian-api-models>=0.1.0
 sqlite-vec>=0.1.6
 sqlean-py>=3.50.4
+aiosqlite>=0.19
 jsonschema>=4.0
 pyrage>=1.0
 keyring>=24.0
@@ -30,3 +36,6 @@ pytest>=8
 pytest-asyncio>=0.23
 httpx>=0.27
 opentelemetry-sdk>=1.24
+
+[embeddings]
+fastembed>=0.3

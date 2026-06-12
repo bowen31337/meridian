@@ -14,5 +14,7 @@ src/storage_event_log/_telemetry.py
 src/storage_event_log/_types.py
 src/storage_event_log/_version.py
 src/storage_event_log/py.typed
+tests/test_audit_noop.py
 tests/test_conformance.py
 tests/test_subscriber_bus.py
+tests/test_telemetry_gaps.py

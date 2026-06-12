@@ -32,3 +32,7 @@ src/storage_repository/db/migrations/0015_skill_versions.sql
 src/storage_repository/db/migrations/0016_memory_stores.sql
 src/storage_repository/db/migrations/0017_audit_log_entries.sql
 tests/test_conformance.py
+tests/test_postgres_backend.py
+tests/test_runtime_coverage.py
+tests/test_sqlite_coverage.py
+tests/test_telemetry_coverage.py

@@ -3,6 +3,9 @@ src/meridiand/__init__.py
 src/meridiand/__main__.py
 src/meridiand/_acp.py
 src/meridiand/_acp_compliance.py
+src/meridiand/_agent_responder.py
+src/meridiand/_agent_tool_server.py
+src/meridiand/_agent_tools.py
 src/meridiand/_agents.py
 src/meridiand/_app.py
 src/meridiand/_audit.py
@@ -12,6 +15,8 @@ src/meridiand/_budget_overrun_discipline.py
 src/meridiand/_budgets_reports.py
 src/meridiand/_cancel.py
 src/meridiand/_canvas_interactions.py
+src/meridiand/_channel_factory.py
+src/meridiand/_channel_inbound_sink.py
 src/meridiand/_channels.py
 src/meridiand/_checkpoint.py
 src/meridiand/_ci_regression.py
@@ -41,6 +46,7 @@ src/meridiand/_hooks.py
 src/meridiand/_idempotency_middleware.py
 src/meridiand/_import_audit.py
 src/meridiand/_imports.py
+src/meridiand/_intelligent_router.py
 src/meridiand/_kb.py
 src/meridiand/_logging.py
 src/meridiand/_memory_anniversary.py
@@ -82,6 +88,7 @@ src/meridiand/_system_channel.py
 src/meridiand/_system_config.py
 src/meridiand/_system_prompt_template.py
 src/meridiand/_telegram_channel_driver.py
+src/meridiand/_telegram_commands.py
 src/meridiand/_telemetry.py
 src/meridiand/_ui.py
 src/meridiand/_user_can_continue.py
@@ -106,6 +113,9 @@ src/meridiand/config/upgrades/__init__.py
 src/meridiand/config/upgrades/v1_to_v2.py
 tests/test_acp.py
 tests/test_acp_compliance.py
+tests/test_agent_responder.py
+tests/test_agent_tool_server.py
+tests/test_agent_tools.py
 tests/test_agents.py
 tests/test_app_factory.py
 tests/test_audit_signing.py
@@ -114,6 +124,8 @@ tests/test_budget_aggregation.py
 tests/test_budget_exceeded.py
 tests/test_budgets_reports.py
 tests/test_cancel.py
+tests/test_channel_factory.py
+tests/test_channel_inbound_sink.py
 tests/test_channel_pair.py
 tests/test_channels.py
 tests/test_checkpoint.py
@@ -123,6 +135,7 @@ tests/test_cluster_extraction.py
 tests/test_compaction.py
 tests/test_config.py
 tests/test_conformance.py
+tests/test_coverage_sweep.py
 tests/test_crash_recovery_soak.py
 tests/test_credential_proxy.py
 tests/test_cron.py
@@ -151,7 +164,9 @@ tests/test_hook_stdin_redaction.py
 tests/test_hooks.py
 tests/test_idempotency_middleware.py
 tests/test_imports.py
+tests/test_intelligent_router.py
 tests/test_kb.py
+tests/test_kb_embedder.py
 tests/test_logging.py
 tests/test_memory_anniversary.py
 tests/test_memory_store_dialectic_writes.py
@@ -166,6 +181,7 @@ tests/test_parallel_runs.py
 tests/test_phase.py
 tests/test_post_sessions_id_messages.py
 tests/test_post_sessions_id_threads.py
+tests/test_provider_factory_audit_bridge.py
 tests/test_readyz.py
 tests/test_replay.py
 tests/test_resume.py
@@ -195,6 +211,7 @@ tests/test_system_channel.py
 tests/test_system_integration.py
 tests/test_system_prompt_template.py
 tests/test_telegram_channel_driver.py
+tests/test_tiny_gaps.py
 tests/test_ui.py
 tests/test_user_can_continue.py
 tests/test_user_profiles.py

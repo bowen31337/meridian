@@ -17,8 +17,10 @@ src/sdk_sandbox/_types.py
 src/sdk_sandbox/_version.py
 src/sdk_sandbox/fake.py
 tests/test_conformance.py
+tests/test_coverage_gaps.py
 tests/test_dispatch_overhead.py
 tests/test_dispatchers.py
 tests/test_fake_dispatcher.py
 tests/test_mcp_server_integration.py
 tests/test_secret_refs.py
+tests/test_telemetry_gaps.py

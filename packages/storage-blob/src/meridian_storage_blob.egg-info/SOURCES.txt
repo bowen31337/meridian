@@ -14,3 +14,4 @@ src/storage_blob/_types.py
 src/storage_blob/_version.py
 src/storage_blob/py.typed
 tests/test_conformance.py
+tests/test_coverage_gaps.py

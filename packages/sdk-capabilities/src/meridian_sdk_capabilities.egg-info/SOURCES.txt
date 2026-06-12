@@ -18,3 +18,4 @@ tests/test_authorize.py
 tests/test_conformance.py
 tests/test_enforcement.py
 tests/test_grammar.py
+tests/test_telemetry_unit.py
