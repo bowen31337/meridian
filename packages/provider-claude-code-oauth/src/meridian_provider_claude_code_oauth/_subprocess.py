@@ -192,6 +192,11 @@ class CliSubprocessManager:
             allowed += native
             if allowed:
                 args += ["--allowed-tools", *allowed]
+            # Grant the CLI access to directories the agent was granted beyond its
+            # workspace (e.g. fs.read[/path/**]) so file tools can reach them
+            # without an interactive permission prompt headless mode cannot answer.
+            for extra_dir in tool_cfg.get("extra_dirs") or []:
+                args += ["--add-dir", str(extra_dir)]
 
         # Contract 1: the CLI's own built-in tools stay disabled regardless.
         args += ["--disallowed-tools", *sorted(ALL_CLAUDE_CODE_BUILTIN_TOOLS)]

@@ -24,8 +24,10 @@ from typing import Any
 from core_errors import AuditLog, AuditLogEntry, NoopAuditLog
 import httpx
 from meridian_sdk_provider import ModelCallOpts, ModelRouter
+from sdk_capabilities import parse as parse_capability
 from starlette.types import ASGIApp
 
+from ._agent_tools import _root_from_param
 from ._intelligent_router import classify_tier
 from ._telegram_commands import help_text, start_text
 
@@ -53,6 +55,26 @@ _WEB_TOOL_CAP = "net.fetch"
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _granted_fs_dirs(caps: list[str], workspace: str) -> list[str]:
+    """Absolute fs.read/fs.write roots the agent was granted, excluding *workspace*.
+
+    These become ``--add-dir`` args so the Claude Code CLI permits its tools to
+    reach folders outside the working directory without an interactive prompt.
+    """
+    ws = str(Path(workspace).resolve())
+    dirs: list[str] = []
+    for cap in caps:
+        try:
+            parsed = parse_capability(cap)
+        except Exception:  # noqa: BLE001 - skip unparseable grants
+            continue
+        if parsed.namespace == "fs" and parsed.name in ("read", "write") and parsed.param:
+            root = _root_from_param(parsed.param)
+            if root and str(Path(root).resolve()) != ws and root not in dirs:
+                dirs.append(root)
+    return dirs
 
 
 class AgentResponder:
@@ -140,6 +162,9 @@ class AgentResponder:
                 "storage_root": str(self._storage_root),
                 "tools": tools,
                 "workspace": workspace,
+                # Granted fs roots beyond the workspace, so the provider can pass
+                # them to the CLI as --add-dir (else access prompts in headless).
+                "extra_dirs": _granted_fs_dirs(caps, workspace),
             }
         except Exception:  # noqa: BLE001 - no tool context -> plain text reply
             return None

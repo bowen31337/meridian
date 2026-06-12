@@ -271,6 +271,24 @@ class TestLoadAgentContext:
         assert ctx["tools"] == ["read", "write"]
         assert ctx["workspace"].endswith("/ws")
 
+    def test_extra_dirs_excludes_workspace_includes_granted(self, tmp_path: Path) -> None:
+        ws = tmp_path / "ws"
+        _seed(
+            tmp_path,
+            tools=["read"],
+            caps=[
+                f"fs.read[{ws}/**]",  # workspace -> not an extra dir
+                "exec.shell",  # non-fs -> skipped
+                "net.fetch[*]",  # non-fs -> skipped
+                "garbage!!",  # unparseable -> skipped
+                "fs.read[/opt/data/**]",  # granted root -> included (once)
+                "fs.write[/opt/data/**]",  # same root -> deduped
+            ],
+        )
+        ctx = _responder(tmp_path)._load_agent_context("ch1")
+        assert ctx is not None
+        assert ctx["extra_dirs"] == ["/opt/data"]
+
     def test_none_on_malformed_agent_record(self, tmp_path: Path) -> None:
         (tmp_path / "channels").mkdir(parents=True, exist_ok=True)
         (tmp_path / "channels" / "ch1.json").write_text(

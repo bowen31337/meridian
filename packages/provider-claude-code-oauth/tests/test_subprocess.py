@@ -191,6 +191,34 @@ class TestBuildArgs:
         assert "--mcp-config" not in args
         assert cwd is None
 
+    def test_extra_dirs_become_add_dir_flags(self) -> None:
+        meta = {
+            "meridian_tools": {
+                "agent_id": "a",
+                "storage_root": "/r",
+                "tools": ["read"],
+                "workspace": "/ws",
+                "extra_dirs": ["/Users/bob/dev", "/data"],
+            }
+        }
+        args, _ = _mgr()._build_args(_opts(metadata=meta))
+        # each granted dir is passed to the CLI as --add-dir <dir>
+        pairs = [(args[i], args[i + 1]) for i, a in enumerate(args[:-1]) if a == "--add-dir"]
+        assert ("--add-dir", "/Users/bob/dev") in pairs
+        assert ("--add-dir", "/data") in pairs
+
+    def test_no_add_dir_without_extra_dirs(self) -> None:
+        meta = {
+            "meridian_tools": {
+                "agent_id": "a",
+                "storage_root": "/r",
+                "tools": ["read"],
+                "workspace": "/ws",
+            }
+        }
+        args, _ = _mgr()._build_args(_opts(metadata=meta))
+        assert "--add-dir" not in args
+
     def test_native_web_tools_allowed_by_name(self) -> None:
         # web_search / web_fetch map to the CLI's native tools, not the MCP bridge.
         meta = {
