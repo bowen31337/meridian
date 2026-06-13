@@ -27,6 +27,7 @@ src/meridiand/_config.py
 src/meridiand/_crash_recovery_soak.py
 src/meridiand/_credential_proxy.py
 src/meridiand/_cron.py
+src/meridiand/_cron_executor.py
 src/meridiand/_cron_scheduler.py
 src/meridiand/_cursor_middleware.py
 src/meridiand/_diagnosis.py
@@ -49,6 +50,7 @@ src/meridiand/_imports.py
 src/meridiand/_intelligent_router.py
 src/meridiand/_kb.py
 src/meridiand/_logging.py
+src/meridiand/_maintenance.py
 src/meridiand/_memory_anniversary.py
 src/meridiand/_memory_stores.py
 src/meridiand/_messages.py
@@ -139,6 +141,7 @@ tests/test_coverage_sweep.py
 tests/test_crash_recovery_soak.py
 tests/test_credential_proxy.py
 tests/test_cron.py
+tests/test_cron_executor.py
 tests/test_cron_scheduler.py
 tests/test_cursor_pagination.py
 tests/test_daemon.py
@@ -168,6 +171,7 @@ tests/test_intelligent_router.py
 tests/test_kb.py
 tests/test_kb_embedder.py
 tests/test_logging.py
+tests/test_maintenance.py
 tests/test_memory_anniversary.py
 tests/test_memory_store_dialectic_writes.py
 tests/test_memory_store_query_runs.py
