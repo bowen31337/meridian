@@ -16,6 +16,7 @@ missing either is reported ``skipped`` rather than executed.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any, Protocol
 
 
@@ -25,18 +26,39 @@ class _PromptRunner(Protocol):
     ) -> str | None: ...
 
 
+# A specialised handler for a cron whose ``metadata.kind`` matches its key.
+_KindHandler = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
+
 _MAX_RECORDED_OUTPUT = 1000
 
 
 class CronExecutor:
-    """Runs a fired cron as an agent turn via the responder, reporting the outcome."""
+    """Runs a fired cron as an agent turn via the responder, reporting the outcome.
 
-    def __init__(self, *, responder: _PromptRunner) -> None:
+    Crons whose ``metadata.kind`` matches a registered handler (e.g. the
+    deterministic ``maintenance`` harness) are delegated to that handler instead
+    of running a free-form prompt turn.
+    """
+
+    def __init__(
+        self,
+        *,
+        responder: _PromptRunner,
+        kind_handlers: dict[str, _KindHandler] | None = None,
+    ) -> None:
         self._responder = responder
+        self._kinds = kind_handlers or {}
 
     async def __call__(self, resource: dict[str, Any]) -> dict[str, Any]:
         """Execute *resource*; returns ``{"status": ...}`` (+ output/error/reason)."""
         meta = resource.get("metadata") or {}
+        kind = meta.get("kind")
+        handler = self._kinds.get(kind) if isinstance(kind, str) else None
+        if handler is not None:
+            try:
+                return await handler(resource)
+            except Exception as exc:  # noqa: BLE001 - any failure is reported, never raised
+                return {"status": "error", "error": str(exc)}
         prompt = str(meta.get("prompt") or "").strip()
         channel_id = resource.get("channel_id") or meta.get("channel_id")
         if not prompt:

@@ -1065,6 +1065,30 @@ class TestRunPrompt:
         r.bind(_FakeApp())
         assert await r.run_prompt("ch1", "do it") == _FALLBACK_REPLY
 
+    async def test_deliver_false_generates_without_sending(self, tmp_path: Path) -> None:
+        _seed(tmp_path)
+        router = _FakeRouter(text="edited files")
+        app = _FakeApp()
+        r = _responder(tmp_path, router=router)
+        r.bind(app)
+        reply = await r.run_prompt("ch1", "do the edit", deliver=False)
+        assert reply == "edited files"
+        assert not any(p[0].endswith("/outbound") for p in app.posts)
+
+    async def test_deliver_text_sends_plain_without_model(self, tmp_path: Path) -> None:
+        router = _FakeRouter(raise_exc=RuntimeError("model must not be called"))
+        app = _FakeApp()
+        r = _responder(tmp_path, router=router)
+        r.bind(app)
+        await r.deliver_text("ch1", "status: PR opened", session_id="s1")
+        outs = [p for p in app.posts if p[0].endswith("/outbound")]
+        assert outs and outs[0][1]["content"] == "status: PR opened"
+        assert outs[0][1]["session_id"] == "s1"
+
+    async def test_deliver_text_noop_when_unbound(self, tmp_path: Path) -> None:
+        r = _responder(tmp_path)  # never bound
+        await r.deliver_text("ch1", "anything")  # must not raise
+
     async def test_uses_intelligent_routing_tier(self, tmp_path: Path) -> None:
         from meridiand._intelligent_router import classify_tier
 

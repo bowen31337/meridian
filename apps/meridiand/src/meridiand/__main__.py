@@ -20,6 +20,7 @@ from ._channel_inbound_sink import AsgiInboundSink
 from ._config import load_config, resolve_config_location, validate_config
 from ._cron_executor import CronExecutor
 from ._logging import LoggingConfigError, configure_json_logging, emit_early_error
+from ._maintenance import MaintenanceExecutor
 from ._provider_factory import ProviderFactoryError, build_model_router, build_provider_registry
 from ._secret_ref import SecretRefResolver
 from ._services import init_services
@@ -199,10 +200,20 @@ def main(argv: list[str] | None = None) -> int:
 
     # Cron execution: when a cron fires, run it as an agent turn via the
     # responder (deliver to the cron's channel). Only available when the
-    # inbound sink is a model-backed AgentResponder.
-    cron_executor = (
-        CronExecutor(responder=inbound_sink) if isinstance(inbound_sink, AgentResponder) else None
-    )
+    # inbound sink is a model-backed AgentResponder. Crons tagged
+    # metadata.kind=="maintenance" are delegated to the deterministic
+    # MaintenanceExecutor (git/PR plumbing in-process; the agent only edits
+    # files), keeping shell access out of the agent entirely.
+    cron_executor = None
+    if isinstance(inbound_sink, AgentResponder):
+        maintenance = MaintenanceExecutor(
+            responder=inbound_sink,
+            storage_root=config.storage_root,
+        )
+        cron_executor = CronExecutor(
+            responder=inbound_sink,
+            kind_handlers={"maintenance": maintenance},
+        )
 
     app = create_app(
         services.audit_log,

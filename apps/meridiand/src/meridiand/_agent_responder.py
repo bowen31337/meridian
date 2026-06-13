@@ -450,6 +450,26 @@ class AgentResponder:
         except Exception as exc:  # noqa: BLE001 - outbound failure is audited, not fatal
             self._audit_failure(channel_id, "outbound", exc)
 
+    async def deliver_text(
+        self,
+        channel_id: str,
+        text: str,
+        *,
+        session_id: str = "",
+        recipient: str = "cron",
+    ) -> None:
+        """Send a plain message to a channel without running the model.
+
+        Used by system harnesses (e.g. the maintenance executor) that compose
+        their own status text and need to deliver it through the channel's
+        outbound route. No-op when the responder is unbound.
+        """
+        if self._app is None:
+            return
+        transport = httpx.ASGITransport(app=self._app)
+        async with httpx.AsyncClient(transport=transport, base_url=self._base_url) as client:
+            await self._send_outbound(client, channel_id, session_id, recipient, text)
+
     async def run_prompt(
         self,
         channel_id: str,
@@ -457,6 +477,7 @@ class AgentResponder:
         *,
         session_id: str = "",
         recipient: str = "cron",
+        deliver: bool = True,
     ) -> str | None:
         """Run a system-triggered agent turn (e.g. a cron fire) and deliver it.
 
@@ -464,6 +485,11 @@ class AgentResponder:
         system-authorized, not an external sender. Reuses the persona, skills,
         long-term memory, intelligent routing and channel delivery of a normal
         reply. Returns the reply text, or None if the responder is unbound.
+
+        When ``deliver`` is False the reply is generated (and any file-editing
+        tools run) but not sent to the channel — the caller takes responsibility
+        for delivery. Used by the maintenance harness, which runs an edit-only
+        turn and composes its own status message.
         """
         if self._app is None:
             return None
@@ -496,7 +522,8 @@ class AgentResponder:
             if not reply:
                 reply = _FALLBACK_REPLY
 
-            await self._send_outbound(client, channel_id, session_id, recipient, reply)
+            if deliver:
+                await self._send_outbound(client, channel_id, session_id, recipient, reply)
             return reply
 
     async def dispatch(

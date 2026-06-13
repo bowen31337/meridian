@@ -70,3 +70,44 @@ async def test_none_reply_yields_empty_output() -> None:
     out = await CronExecutor(responder=resp)(_resource(prompt="go", channel_id="ch1"))
     assert out["status"] == "completed"
     assert out["output"] == ""
+
+
+async def test_kind_handler_is_delegated_to() -> None:
+    resp = _FakeResponder()
+    seen: list[dict[str, Any]] = []
+
+    async def handler(resource: dict[str, Any]) -> dict[str, Any]:
+        seen.append(resource)
+        return {"status": "completed", "output": "maintained repo X"}
+
+    out = await CronExecutor(responder=resp, kind_handlers={"maintenance": handler})(
+        _resource(kind="maintenance")
+    )
+    assert out == {"status": "completed", "output": "maintained repo X"}
+    assert seen and seen[0]["metadata"]["kind"] == "maintenance"
+    assert resp.calls == []  # the prompt path was not taken
+
+
+async def test_kind_handler_error_is_reported_not_raised() -> None:
+    async def handler(resource: dict[str, Any]) -> dict[str, Any]:
+        raise RuntimeError("git exploded")
+
+    out = await CronExecutor(responder=_FakeResponder(), kind_handlers={"maintenance": handler})(
+        _resource(kind="maintenance")
+    )
+    assert out["status"] == "error"
+    assert "git exploded" in out["error"]
+
+
+async def test_unmatched_kind_falls_through_to_prompt() -> None:
+    resp = _FakeResponder(reply="normal reply")
+    out = await CronExecutor(responder=resp, kind_handlers={"maintenance": _unused_handler})(
+        _resource(kind="other", prompt="hello", channel_id="ch1")
+    )
+    assert out["status"] == "completed"
+    assert out["output"] == "normal reply"
+    assert resp.calls == [("ch1", "hello", "sess_1")]
+
+
+async def _unused_handler(resource: dict[str, Any]) -> dict[str, Any]:  # pragma: no cover
+    raise AssertionError("handler should not be called for a non-matching kind")
